@@ -115,6 +115,19 @@ db.version(73).stores({
     phone_recents: '++id, accountId, charId, time, type', // 电话记录：accountId账号隔离，charId角色ID，time时间，type类型(missed/incoming/outgoing)
     sms_messages: '++id, accountId, charId, time, read'   // 短信记录：accountId账号隔离，charId角色ID，time时间，read是否已读
 });
+// 版本74：添加聊天总结表（用于AI自动总结功能）
+db.version(74).stores({
+    dexiData: 'key, value',
+    lorebooks: '++id, name',
+    characters: '++id, name, type',
+    sticker_categories: '++id, name',
+    moments: '++id, userId, time, ownerUserId',
+    friend_requests: '++id, fromCharId, toAccountId, status, time',
+    group_chats: '++id, name, ownerAccountId, created_at',
+    phone_recents: '++id, accountId, charId, time, type',
+    sms_messages: '++id, accountId, charId, time, read',
+    chat_summaries: '++id, accountId, chatType, chatId, time' // 聊天总结表：accountId账号隔离，chatType(private/group)，chatId角色/群聊ID，time总结时间
+});
 
 // 📦 数据迁移：将 localStorage 中的电话和短信记录迁移到 IndexedDB
 async function migratePhoneAndSmsToIndexedDB() {
@@ -5455,7 +5468,7 @@ async function showWechatRegisterPage() {
                     </div>
                 </div>
                 <div class="wechat-cell-group">
-                    <div class="wechat-cell">
+                    <div class="wechat-cell" onclick="showFavoritesPage()">
                         <div class="wechat-cell-icon icon-collect">
                             <svg class="svg-icon" style="stroke:currentColor;" viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
                         </div>
@@ -5479,7 +5492,24 @@ async function showWechatRegisterPage() {
                         <div class="wechat-cell-arrow">›</div>
                     </div>
                 </div>
+                <div class="wechat-cell-group" id="online-feature-section">
+                    <div style="padding:12px 16px; font-size:13px; color:#888; display:flex; align-items:center; gap:6px;">
+                        <svg class="svg-icon" viewBox="0 0 24 24" style="width:16px; height:16px; stroke:currentColor;"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                        联机功能
+                    </div>
+                    <div class="wechat-cell" onclick="showOnlineStatusPage()">
+                        <div class="wechat-cell-icon" style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                            <svg class="svg-icon" style="stroke:#fff;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                        </div>
+                        <div class="wechat-cell-text">联机状态</div>
+                        <div id="online-char-count-badge" style="font-size:12px; color:#999; margin-right:4px;">未连接</div>
+                        <div class="wechat-cell-arrow">›</div>
+                    </div>
+                </div>
             `;
+            
+            // 更新联机状态显示
+            updateOnlineFeatureSection();
             
             container.innerHTML = `<div class="wechat-me-container">${profileHtml}${cellsHtml}</div>`;
             
@@ -7762,6 +7792,16 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             document.getElementById('group-detail-mute').checked = group.is_muted || false;
             document.getElementById('group-detail-pin').checked = group.is_pinned || false;
             
+            // 设置自动总结设置
+            document.getElementById('group-detail-auto-summary-switch').checked = group.auto_summary_enabled || false;
+            document.getElementById('group-detail-summary-interval').value = group.summary_interval || '';
+            
+            // 更新总结计数
+            const accountId = getCurrentAccountId();
+            if (accountId && group.id) {
+                await updateSummaryCount('group', group.id, accountId);
+            }
+            
             // 渲染群成员列表
             await renderGroupMemberList(group);
         }
@@ -8192,6 +8232,12 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             group.myNickname = document.getElementById('group-detail-nickname').value.trim();
             group.is_muted = document.getElementById('group-detail-mute').checked;
             group.is_pinned = document.getElementById('group-detail-pin').checked;
+            
+            // 自动总结设置
+            group.auto_summary_enabled = document.getElementById('group-detail-auto-summary-switch').checked;
+            const summaryInterval = parseInt(document.getElementById('group-detail-summary-interval').value);
+            group.summary_interval = summaryInterval > 0 ? summaryInterval : 50;
+            
             group.updated_at = Date.now();
             
             await db.group_chats.put(group);
@@ -8379,14 +8425,116 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 if (char) memberMap[memberId] = char;
             }
             
+            // 辅助函数：渲染群聊消息内容（支持特殊格式）
+            function renderGroupMessageContent(content, isSelf, msgType) {
+                if (!content) return '';
+                
+                // 处理红包消息 - INS风格纯白卡片
+                if (msgType === 'redpacket') {
+                    try {
+                        const data = JSON.parse(content);
+                        const isAllClaimed = (data.claimed?.length || 0) >= data.count;
+                        return `<div onclick="showRedPacketDetail('${data.id}')" style="width:220px; background:#fff; border-radius:12px; overflow:hidden; cursor:pointer; box-shadow:0 1px 3px rgba(0,0,0,0.08); border:1px solid #eee;">
+                            <div style="padding:14px 16px; display:flex; align-items:center; gap:12px;">
+                                <div style="width:40px; height:40px; background:#fff; border-radius:10px; display:flex; align-items:center; justify-content:center; border:1px solid #eee;">
+                                    <svg viewBox="0 0 24 24" style="width:20px; height:20px; stroke:#666; fill:none; stroke-width:1.5;"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><circle cx="12" cy="15" r="2"/></svg>
+                                </div>
+                                <div style="flex:1;">
+                                    <div style="font-size:14px; color:#333; margin-bottom:2px;">${escapeHtml(data.wish || '恭喜发财')}</div>
+                                    <div style="font-size:11px; color:#999;">${data.redpacketType === 'lucky' ? '拼手气红包' : '普通红包'}</div>
+                                </div>
+                            </div>
+                            <div style="padding:8px 16px; display:flex; justify-content:space-between; align-items:center; border-top:1px solid #eee;">
+                                <span style="font-size:11px; color:#999;">红包</span>
+                                <span style="font-size:11px; color:#999;">${isAllClaimed ? '已领完' : `${data.claimed?.length || 0}/${data.count}已领`}</span>
+                            </div>
+                        </div>`;
+                    } catch(e) {
+                        return content;
+                    }
+                }
+                
+                // 处理转账消息 - INS风格纯白卡片
+                if (msgType === 'transfer') {
+                    try {
+                        const data = JSON.parse(content);
+                        const targetHint = data.targetName ? `转给 ${data.targetName}` : '转账';
+                        const msgId = m.id || ('trans_' + m.time);
+                        return `<div onclick="receiveGroupTransfer('${msgId}')" style="width:220px; background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.08); border:1px solid #eee; cursor:pointer;">
+                            <div style="padding:14px 16px; display:flex; align-items:center; gap:12px;">
+                                <div style="width:40px; height:40px; background:#fff; border-radius:10px; display:flex; align-items:center; justify-content:center; border:1px solid #eee;">
+                                    <svg viewBox="0 0 24 24" style="width:20px; height:20px; stroke:#666; fill:none; stroke-width:1.5;"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                                </div>
+                                <div style="flex:1;">
+                                    <div style="font-size:18px; font-weight:600; color:#333; margin-bottom:2px;">¥${data.amount}</div>
+                                    <div style="font-size:12px; color:#999;">${escapeHtml(data.desc || '转账')}</div>
+                                </div>
+                            </div>
+                            <div style="padding:8px 16px; display:flex; justify-content:space-between; align-items:center; border-top:1px solid #eee;">
+                                <span style="font-size:11px; color:#999;">${targetHint}</span>
+                                <span style="font-size:11px; color:#999;">${data.status === 'received' ? '已收款' : '待收款'}</span>
+                            </div>
+                        </div>`;
+                    } catch(e) {
+                        return content;
+                    }
+                }
+                
+                // 处理图片卡片消息 [imgcard:文字内容] - 使用与私聊相同的样式
+                if (content.startsWith('[imgcard:')) {
+                    const cardText = content.substring(9, content.length - 1).trim();
+                    return `<div class="img-card-bubble" data-text="${escapeHtml(cardText)}" data-expanded="false" onclick="showImageCardContent(this)">
+                        <div class="img-card-placeholder">
+                            <svg class="img-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                                <polyline points="21 15 16 10 5 21"></polyline>
+                            </svg>
+                            <div class="img-card-hint">点击查看文字</div>
+                        </div>
+                    </div>`;
+                }
+                
+                // 处理图片消息 [img:url]
+                if (content.startsWith('[img:')) {
+                    const imgUrl = content.substring(5, content.length - 1).trim();
+                    return `<img src="${imgUrl}" class="chat-image" style="max-width:200px; max-height:200px; border-radius:8px; cursor:pointer;" onclick="showFullImage(this.src)" onerror="this.style.display='none';" />`;
+                }
+                
+                // 处理语音消息 [voice:文字内容]
+                if (content.startsWith('[voice:')) {
+                    const voiceText = content.substring(7, content.length - 1).trim();
+                    const bgColor = isSelf ? '#ffe4e8' : '#f2f2f7';
+                    const barCount = Math.min(Math.max(Math.ceil(voiceText.length / 3), 3), 10);
+                    let bars = '';
+                    for (let i = 0; i < barCount; i++) {
+                        const height = 8 + Math.random() * 12;
+                        bars += `<div style="width:3px; height:${height}px; background:#999; border-radius:2px;"></div>`;
+                    }
+                    return `<div class="voice-bubble" data-text="${escapeHtml(voiceText)}" style="background:${bgColor}; padding:10px 14px; border-radius:18px; cursor:pointer; display:flex; align-items:center; gap:8px; min-width:80px;" onclick="playVoiceBubble(this)">
+                        <svg viewBox="0 0 24 24" style="width:16px; height:16px; fill:#666;"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+                        <div style="display:flex; align-items:center; gap:2px;">${bars}</div>
+                        <span style="font-size:12px; color:#666;">${Math.ceil(voiceText.length / 5)}"</span>
+                    </div>`;
+                }
+                
+                // 普通文本消息，使用 renderMessageContent 处理（支持链接和图片URL）
+                return renderMessageContent(content);
+            }
+            
+            let msgIndex = 0;
             for (const msg of history) {
+                const currentIndex = msgIndex;
                 const msgDiv = document.createElement('div');
                 msgDiv.style.marginBottom = '12px';
+                msgDiv.className = 'group-message-row';
+                msgDiv.dataset.msgIndex = currentIndex;
                 
                 if (msg.role === 'system') {
-                    // 系统消息
+                    // 系统消息（不支持长按）
                     msgDiv.style.textAlign = 'center';
                     msgDiv.innerHTML = `<span style="background:#fff; color:#999; font-size:12px; padding:4px 12px; border-radius:4px; border:1px solid #ddd;">${msg.content}</span>`;
+                    msgIndex++;
                 } else if (msg.role === 'user') {
                     // 我发的消息
                     msgDiv.style.display = 'flex';
@@ -8397,16 +8545,38 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                     const myAvatar = myChar?.avatar || '';
                     const avatarStyle = myAvatar ? `background-image:url(${myAvatar})` : 'background:#ccc';
                     
-                    msgDiv.innerHTML = `
-                        <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
-                        <div style="display:flex; flex-direction:column; align-items:flex-end; max-width:70%;">
-                            <div style="font-size:12px; color:#999; margin-bottom:2px;">${myNickname}</div>
-                            <div style="display:flex; align-items:flex-end; gap:6px;">
-                                <div style="font-size:10px; color:#999;">${formatChatTime(msg.time)}</div>
-                                <div style="background:#ffe4e8; color:#000; padding:6px 10px; border-radius:18px 18px 4px 18px; font-size:15px; line-height:1.5; word-break:break-word;">${msg.content}</div>
+                    // 判断是否是特殊消息类型（不需要气泡包裹）
+                    const isSpecialMsg = msg.content.startsWith('[imgcard:') || msg.content.startsWith('[img:') || msg.content.startsWith('[voice:') || msg.type === 'redpacket' || msg.type === 'transfer';
+                    const renderedContent = renderGroupMessageContent(msg.content, true, msg.type);
+                    
+                    msgDiv.classList.add('self');
+                    if (isSpecialMsg) {
+                        msgDiv.innerHTML = `
+                            <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
+                            <div style="display:flex; flex-direction:column; align-items:flex-end; max-width:70%;">
+                                <div style="font-size:12px; color:#999; margin-bottom:2px;">${myNickname}</div>
+                                <div style="display:flex; align-items:flex-end; gap:6px;">
+                                    <div style="font-size:10px; color:#999;">${formatChatTime(msg.time)}</div>
+                                    <div class="group-msg-content" data-index="${currentIndex}">${renderedContent}</div>
+                                </div>
                             </div>
-                        </div>
-                    `;
+                        `;
+                    } else {
+                        // 检查是否有引用
+                        const quoteHtml = msg.quote ? `<div class="quoted-message" style="margin-bottom:6px;"><div class="quoted-message-name">${escapeHtml(msg.quote.name)}</div><div class="quoted-message-text">${escapeHtml(msg.quote.content)}</div></div>` : '';
+                        
+                        msgDiv.innerHTML = `
+                            <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
+                            <div style="display:flex; flex-direction:column; align-items:flex-end; max-width:70%;">
+                                <div style="font-size:12px; color:#999; margin-bottom:2px;">${myNickname}</div>
+                                <div style="display:flex; align-items:flex-end; gap:6px;">
+                                    <div style="font-size:10px; color:#999;">${formatChatTime(msg.time)}</div>
+                                    <div class="group-msg-content" data-index="${currentIndex}" style="background:#ffe4e8; color:#000; padding:6px 10px; border-radius:18px 18px 4px 18px; font-size:15px; line-height:1.5; word-break:break-word;">${quoteHtml}${renderedContent}</div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    msgIndex++;
                 } else {
                     // 群成员发的消息
                     const senderChar = msg.senderId ? memberMap[msg.senderId] : null;
@@ -8420,24 +8590,137 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                     msgDiv.style.alignItems = 'flex-end';
                     msgDiv.style.gap = '8px';
                     
-                    msgDiv.innerHTML = `
-                        <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
-                        <div style="display:flex; flex-direction:column; max-width:70%;">
-                            <div style="font-size:12px; color:#999; margin-bottom:2px;">${senderName}</div>
-                            <div style="display:flex; align-items:flex-end; gap:6px;">
-                                <div style="background:#f2f2f7; color:#000; padding:6px 10px; border-radius:18px 18px 18px 4px; font-size:15px; line-height:1.5; word-break:break-word;">${msg.content}</div>
-                                <div style="font-size:10px; color:#999;">${formatChatTime(msg.time)}</div>
+                    // 判断是否是特殊消息类型
+                    const isSpecialMsg = msg.content.startsWith('[imgcard:') || msg.content.startsWith('[img:') || msg.content.startsWith('[voice:') || msg.type === 'redpacket' || msg.type === 'transfer';
+                    const renderedContent = renderGroupMessageContent(msg.content, false, msg.type);
+                    
+                    // 检查是否有引用
+                    const quoteHtml = msg.quote ? `<div class="quoted-message" style="margin-bottom:6px;"><div class="quoted-message-name">${escapeHtml(msg.quote.name)}</div><div class="quoted-message-text">${escapeHtml(msg.quote.content)}</div></div>` : '';
+                    
+                    if (isSpecialMsg) {
+                        msgDiv.innerHTML = `
+                            <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
+                            <div style="display:flex; flex-direction:column; max-width:70%;">
+                                <div style="font-size:12px; color:#999; margin-bottom:2px;">${senderName}</div>
+                                <div style="display:flex; align-items:flex-end; gap:6px;">
+                                    <div class="group-msg-content" data-index="${currentIndex}">${renderedContent}</div>
+                                    <div style="font-size:10px; color:#999;">${formatChatTime(msg.time)}</div>
+                                </div>
                             </div>
-                        </div>
-                    `;
+                        `;
+                    } else {
+                        msgDiv.innerHTML = `
+                            <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
+                            <div style="display:flex; flex-direction:column; max-width:70%;">
+                                <div style="font-size:12px; color:#999; margin-bottom:2px;">${senderName}</div>
+                                <div style="display:flex; align-items:flex-end; gap:6px;">
+                                    <div class="group-msg-content" data-index="${currentIndex}" style="background:#f2f2f7; color:#000; padding:6px 10px; border-radius:18px 18px 18px 4px; font-size:15px; line-height:1.5; word-break:break-word;">${quoteHtml}${renderedContent}</div>
+                                    <div style="font-size:10px; color:#999;">${formatChatTime(msg.time)}</div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    msgIndex++;
                 }
                 
                 body.appendChild(msgDiv);
+                
+                // 绑定长按事件（非系统消息）
+                if (msg.role !== 'system') {
+                    const contentEl = msgDiv.querySelector('.group-msg-content');
+                    if (contentEl) {
+                        bindGroupMessageEvents(contentEl, currentIndex);
+                    }
+                }
             }
             
             // 滚动到底部
             body.scrollTop = body.scrollHeight;
         }
+        
+        // 群聊消息长按事件绑定
+        function bindGroupMessageEvents(element, index) {
+            const startHandler = (e) => {
+                if (isSelectionMode) return;
+                isLongPress = false;
+                longPressTimer = setTimeout(() => {
+                    isLongPress = true;
+                    showGroupContextMenu(e, index, element);
+                }, 500);
+            };
+
+            const cancelHandler = () => {
+                if (longPressTimer) {
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
+                }
+            };
+            
+            const endHandler = (e) => {
+                cancelHandler();
+                if (isLongPress) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            };
+
+            element.addEventListener('touchstart', startHandler, {passive: true});
+            element.addEventListener('touchmove', cancelHandler, {passive: true});
+            element.addEventListener('touchend', endHandler);
+            element.addEventListener('mousedown', startHandler);
+            element.addEventListener('mousemove', cancelHandler);
+            element.addEventListener('mouseup', endHandler);
+            element.addEventListener('contextmenu', (e) => e.preventDefault());
+        }
+        
+        // 群聊消息右键菜单
+        function showGroupContextMenu(event, index, element) {
+            if (navigator.vibrate) navigator.vibrate(50);
+            
+            activeMsgIndex = index;
+            activeGroupMsgIndex = index;
+            element.classList.add('active');
+
+            const menu = document.getElementById('msg-context-menu');
+            const overlay = document.getElementById('menu-overlay');
+            
+            let clientX, clientY;
+            if (event.touches && event.touches.length > 0) {
+                clientX = event.touches[0].clientX;
+                clientY = event.touches[0].clientY;
+            } else {
+                clientX = event.clientX;
+                clientY = event.clientY;
+            }
+
+            const winWidth = window.innerWidth;
+            const winHeight = window.innerHeight;
+            let menuX = clientX;
+            let menuY = clientY - 60;
+
+            menu.style.display = 'flex';
+            
+            if (menuX + menu.offsetWidth > winWidth) {
+                menuX = winWidth - menu.offsetWidth - 10;
+            }
+            if (menuX < 10) {
+                menuX = 10;
+            }
+            if (menuY < 10) {
+                menuY = clientY + 10;
+            }
+            if (menuY + menu.offsetHeight > winHeight) {
+                menuY = winHeight - menu.offsetHeight - 10;
+            }
+
+            menu.style.left = menuX + 'px';
+            menu.style.top = menuY + 'px';
+            
+            overlay.style.display = 'block';
+        }
+        
+        // 群聊消息索引
+        let activeGroupMsgIndex = -1;
         
         // 获取群聊列表
         async function getGroupChats(accountId) {
@@ -8485,10 +8768,12 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             
             const container = document.getElementById('new-friends-content');
             
-            // 获取所有相关的好友申请：发给我的 + 我发送的
+            // 获取所有相关的好友申请：发给我的 + 我发送的 + 联机好友申请
             const allRequests = await db.friend_requests.toArray();
             const myRequests = allRequests.filter(req => 
-                req.toCharId === parseInt(accountId) || req.fromCharId === parseInt(accountId)
+                req.toAccountId === accountId || // 联机好友申请
+                req.toCharId === parseInt(accountId) || 
+                req.fromCharId === parseInt(accountId)
             ).sort((a, b) => b.time - a.time);
             
             if (myRequests.length === 0) {
@@ -8512,6 +8797,54 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             listDiv.style.background = '#fff';
             
             for (const req of myRequests) {
+                // 处理联机好友申请
+                if (req.isOnline && req.onlineData) {
+                    const onlineReq = req.onlineData;
+                    const item = document.createElement('div');
+                    item.style.display = 'flex';
+                    item.style.padding = '12px 16px';
+                    item.style.borderBottom = '0.5px solid #f0f0f0';
+                    item.style.alignItems = 'center';
+                    item.style.gap = '12px';
+                    
+                    const avatarStyle = onlineReq.from_avatar ? `background-image:url(${onlineReq.from_avatar})` : 'background-color:#eee';
+                    
+                    let buttons = '';
+                    let statusLabel = '';
+                    
+                    if (req.status === 'pending') {
+                        buttons = `
+                            <button onclick="acceptFriendRequest(${req.id})" style="background:var(--ins-pink); color:#fff; border:none; padding:6px 16px; border-radius:4px; font-size:14px; margin-right:8px;">接受</button>
+                            <button onclick="rejectFriendRequest(${req.id})" style="background:#f0f0f0; color:#666; border:none; padding:6px 16px; border-radius:4px; font-size:14px;">拒绝</button>
+                        `;
+                    } else if (req.status === 'accepted') {
+                        statusLabel = '<div style="color:#999; font-size:12px;">已添加</div>';
+                    } else {
+                        statusLabel = '<div style="color:#999; font-size:12px;">已拒绝</div>';
+                    }
+                    
+                    item.innerHTML = `
+                        <div style="width:48px; height:48px; border-radius:4px; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; position:relative;">
+                            <div style="position:absolute; bottom:-2px; right:-2px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius:50%; width:16px; height:16px; display:flex; align-items:center; justify-content:center;">
+                                <svg style="width:10px; height:10px; stroke:#fff; fill:none;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle></svg>
+                            </div>
+                        </div>
+                        <div style="flex:1; min-width:0;">
+                            <div style="font-size:16px; font-weight:500; color:#333; margin-bottom:4px;">
+                                ${onlineReq.from_nickname || onlineReq.from_wx_account}
+                                <span style="font-size:11px; color:#667eea; margin-left:6px;">联机</span>
+                            </div>
+                            <div style="font-size:12px; color:#666; line-height:1.5; white-space:pre-line; word-break:break-word;">${onlineReq.message || '请求添加你为好友'}</div>
+                        </div>
+                        <div style="display:flex; align-items:center; flex-shrink:0;">
+                            ${buttons}${statusLabel}
+                        </div>
+                    `;
+                    listDiv.appendChild(item);
+                    continue;
+                }
+                
+                // 处理本地好友申请
                 const isReceived = req.toCharId === parseInt(accountId);
                 const relatedCharId = isReceived ? req.fromCharId : req.toCharId;
                 const relatedChar = await db.characters.get(relatedCharId);
@@ -8574,6 +8907,40 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             const request = await db.friend_requests.get(requestId);
             if (!request) return;
             
+            // 检查是否是联机好友申请
+            if (request.isOnline && request.onlineData) {
+                // 联机好友申请 - 发送到服务器
+                if (!onlineConnected || !onlineUserData) {
+                    alert('请先连接服务器并登录');
+                    return;
+                }
+                
+                const onlineReq = request.onlineData;
+                // 找到要接受申请的角色（被申请方）
+                const myChars = await db.characters.where('type').equals('user').toArray();
+                const myChar = myChars.find(c => c.identity?.account === onlineReq.to_wx_account) ||
+                               myChars.find(c => onlineCharacters.some(oc => oc.wx_account === c.identity?.account));
+                
+                if (!myChar || !myChar.identity?.account) {
+                    alert('请先上线一个角色');
+                    return;
+                }
+                
+                onlineSocket.send(JSON.stringify({
+                    type: 'accept_friend_request',
+                    request_id: onlineReq.id,
+                    my_wx_account: myChar.identity.account
+                }));
+                
+                // 更新本地状态
+                request.status = 'accepted';
+                await db.friend_requests.put(request);
+                
+                await renderNewFriendsPage();
+                return;
+            }
+            
+            // 本地好友申请
             const char = await db.characters.get(request.fromCharId);
             if (!char) return;
             
@@ -8616,6 +8983,25 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
         async function rejectFriendRequest(requestId) {
             const request = await db.friend_requests.get(requestId);
             if (!request) return;
+            
+            // 检查是否是联机好友申请
+            if (request.isOnline && request.onlineData) {
+                // 联机好友申请 - 发送到服务器
+                if (onlineConnected && onlineUserData) {
+                    const onlineReq = request.onlineData;
+                    const myChars = await db.characters.where('type').equals('user').toArray();
+                    const myChar = myChars.find(c => c.identity?.account === onlineReq.to_wx_account) ||
+                                   myChars.find(c => onlineCharacters.some(oc => oc.wx_account === c.identity?.account));
+                    
+                    if (myChar?.identity?.account) {
+                        onlineSocket.send(JSON.stringify({
+                            type: 'reject_friend_request',
+                            request_id: onlineReq.id,
+                            my_wx_account: myChar.identity.account
+                        }));
+                    }
+                }
+            }
             
             // 更新申请状态
             request.status = 'rejected';
@@ -9620,6 +10006,16 @@ ${chatContext || '（没有聊天记录）'}
                     el.classList.add('selected');
                 }
             });
+            
+            // 10. 加载自动总结设置
+            document.getElementById('detail-auto-summary-switch').checked = !!char.auto_summary_enabled;
+            document.getElementById('detail-summary-interval').value = char.summary_interval || '';
+            
+            // 更新总结计数
+            const accountId = getCurrentAccountId();
+            if (accountId) {
+                await updateSummaryCount('private', currentChatCharId, accountId);
+            }
         }
         
         // 选择气泡样式
@@ -9674,6 +10070,10 @@ async function saveChatDetail() {
     
     // AI查岗设置
     const allowCheckEnabled = document.getElementById('detail-allow-check-switch').checked;
+    
+    // 自动总结设置
+    const autoSummaryEnabled = document.getElementById('detail-auto-summary-switch').checked;
+    const summaryInterval = parseInt(document.getElementById('detail-summary-interval').value);
 
     char.remark = remark;
     char.lorebookIds = lorebookIds.length > 0 ? lorebookIds : null;
@@ -9687,6 +10087,8 @@ async function saveChatDetail() {
     char.auto_reply_interval = autoInterval > 0 ? autoInterval : null;
     char.context_message_count = contextCount > 0 ? contextCount : 20; // 默认20条
     char.allow_ai_check_account = allowCheckEnabled; // 保存查岗开关状态
+    char.auto_summary_enabled = autoSummaryEnabled; // 自动总结开关
+    char.summary_interval = summaryInterval > 0 ? summaryInterval : 50; // 总结间隔，默认50条
     
     // 保存自定义样式（严格过滤JS）
     const bubbleCSS = document.getElementById('detail-bubble-css').value;
@@ -11056,13 +11458,23 @@ ${loreContext}
 
             let history = getChatHistory(char, accountId);
 
-            // 2. 追加并显示用户消息
+            // 2. 追加并显示用户消息（支持引用）
             const userMsg = { role: 'user', content: text, time: Date.now() };
+            
+            // 如果有引用
+            if (currentQuote) {
+                userMsg.quote = {
+                    name: currentQuote.name,
+                    content: currentQuote.content
+                };
+                cancelQuote(); // 清除引用
+            }
+            
             history.push(userMsg);
             await setChatHistory(char, accountId, history); 
             
-            // ✅ 优化：只追加新消息到 DOM，不重新渲染整个聊天记录
-            await appendMessageToUI('user', text, char.avatar);
+            // 重新渲染以显示引用（因为 appendMessageToUI 不支持引用显示）
+            renderChatBody(char);
             
             // ✅ 不再自动触发 AI 回复，需要用户点击"接受回复"按钮
             // triggerAiReply(); 
@@ -11080,13 +11492,24 @@ ${loreContext}
             handleChatInputChange(input);
             closeChatPanel();
             
-            // 添加消息到群聊历史
+            // 添加消息到群聊历史（支持引用）
             if (!group.chat_history) group.chat_history = [];
-            group.chat_history.push({
+            const msg = {
                 role: 'user',
                 content: text,
                 time: Date.now()
-            });
+            };
+            
+            // 如果有引用
+            if (currentQuote) {
+                msg.quote = {
+                    name: currentQuote.name,
+                    content: currentQuote.content
+                };
+                cancelQuote(); // 清除引用
+            }
+            
+            group.chat_history.push(msg);
             group.updated_at = Date.now();
             
             await db.group_chats.put(group);
@@ -11166,8 +11589,37 @@ ${loreContext}
                 const groupHistory = group.chat_history || [];
                 const recentGroupHistory = groupHistory.slice(-25);
                 
+                // 收集未领完的红包信息
+                let pendingRedPackets = [];
+                for (const m of groupHistory) {
+                    if (m.type === 'redpacket') {
+                        try {
+                            const rpData = JSON.parse(m.content);
+                            const claimedCount = rpData.claimed?.length || 0;
+                            if (claimedCount < rpData.count) {
+                                pendingRedPackets.push({
+                                    id: rpData.id,
+                                    wish: rpData.wish || '恭喜发财',
+                                    remaining: rpData.count - claimedCount,
+                                    claimed: rpData.claimed || []
+                                });
+                            }
+                        } catch(e) {}
+                    }
+                }
+                
                 let groupContextStr = recentGroupHistory.map(m => {
                     if (m.role === 'system') return `[系统消息] ${m.content}`;
+                    if (m.type === 'redpacket') {
+                        try {
+                            const rpData = JSON.parse(m.content);
+                            const claimedCount = rpData.claimed?.length || 0;
+                            const isAllClaimed = claimedCount >= rpData.count;
+                            return `${myNickname}: [发送了红包] "${rpData.wish || '恭喜发财'}" (红包ID: ${rpData.id}, ${isAllClaimed ? '已领完' : `还剩${rpData.count - claimedCount}个可领`})`;
+                        } catch(e) {
+                            return `${myNickname}: [发送了红包]`;
+                        }
+                    }
                     if (m.role === 'user') return `${myNickname}: ${m.content}`;
                     const sender = m.senderId ? memberMap[m.senderId] : null;
                     const senderName = sender ? (sender.remark || sender.name) : '未知成员';
@@ -11198,7 +11650,12 @@ ${virtualTimeStr}
 # 群聊信息
 - 群名称: ${group.name}
 - 用户昵称: ${myNickname}
-${loreContext}
+${pendingRedPackets.length > 0 ? `
+# 🧧 群里有未领完的红包！
+${pendingRedPackets.map(rp => `- 红包ID: ${rp.id}, 祝福语: "${rp.wish}", 还剩 ${rp.remaining} 个可领 (已领取的成员ID: ${rp.claimed.join(',') || '无'})`).join('\n')}
+提示：角色们看到红包会积极去抢！用 {"type": "claim_redpacket", "name": "角色名", "redpacketId": "红包ID"} 来抢红包
+注意：每个角色只能领取一次，已领取的成员不能再领！
+` : ''}${loreContext}
 
 # 群成员列表及人设 (你扮演的角色)
 ${membersList}
@@ -11219,12 +11676,14 @@ ${groupContextStr}
 # 可用指令类型
 - **普通发言**: {"type": "text", "name": "角色名", "content": "发言内容"}
 - **修改群昵称**: {"type": "change_nickname", "name": "角色名", "nickname": "新群昵称"} ← 角色可以随时修改自己的群昵称！
+- **领取红包**: {"type": "claim_redpacket", "name": "角色名", "redpacketId": "红包ID"} ← 看到红包时角色可以抢红包！
 - **踢出成员** (仅管理员): {"type": "kick_member", "name": "操作者角色名", "target": "被踢者角色名"}
 - **禁言成员** (仅管理员): {"type": "mute_member", "name": "操作者角色名", "target": "被禁言者角色名", "mute": true}
 - **解除禁言** (仅管理员): {"type": "mute_member", "name": "操作者角色名", "target": "被解禁者角色名", "mute": false}
 
 注意：普通发言可以省略 type 字段，直接用 {"name": "角色名", "content": "内容"}
 提示：角色们可以根据聊天内容、心情、玩梗等原因修改自己的群昵称，这是很自然的行为
+提示：如果聊天记录中有未领完的红包，角色们会积极抢红包！
 
 # 示例输出格式（注意消息数量要多！）
 [
@@ -11456,6 +11915,87 @@ ${groupContextStr}
                             continue;
                         }
                         
+                        // 处理领取红包指令
+                        if (reply.type === 'claim_redpacket' && reply.redpacketId) {
+                            if (!senderId) continue;
+                            
+                            // 找到红包消息
+                            const rpMsgIndex = updatedGroup.chat_history.findIndex(m => {
+                                if (m.type !== 'redpacket') return false;
+                                try {
+                                    const data = JSON.parse(m.content);
+                                    return data.id === reply.redpacketId;
+                                } catch(e) {
+                                    return false;
+                                }
+                            });
+                            
+                            if (rpMsgIndex === -1) continue;
+                            
+                            const rpMsg = updatedGroup.chat_history[rpMsgIndex];
+                            const rpData = JSON.parse(rpMsg.content);
+                            
+                            // 检查是否已领取完
+                            if ((rpData.claimed?.length || 0) >= rpData.count) continue;
+                            
+                            // 检查是否已领取过
+                            if (rpData.claimed?.includes(senderId)) continue;
+                            
+                            // 领取红包
+                            if (!rpData.claimed) rpData.claimed = [];
+                            if (!rpData.claimedAmounts) rpData.claimedAmounts = {};
+                            
+                            let claimAmount = 0;
+                            const totalAmount = parseFloat(rpData.totalAmount);
+                            const remaining = rpData.count - rpData.claimed.length;
+                            const alreadyClaimed = Object.values(rpData.claimedAmounts).reduce((a, b) => a + parseFloat(b), 0);
+                            const remainingAmount = totalAmount - alreadyClaimed;
+                            
+                            if (rpData.redpacketType === 'lucky') {
+                                // 拼手气红包：随机金额
+                                if (remaining === 1) {
+                                    claimAmount = remainingAmount;
+                                } else {
+                                    const maxAmount = remainingAmount - (remaining - 1) * 0.01;
+                                    claimAmount = Math.random() * maxAmount * 0.8 + 0.01;
+                                    claimAmount = Math.min(claimAmount, maxAmount);
+                                }
+                            } else {
+                                // 普通红包：平均分配
+                                claimAmount = totalAmount / rpData.count;
+                            }
+                            
+                            claimAmount = parseFloat(claimAmount.toFixed(2));
+                            
+                            // 记录领取
+                            rpData.claimed.push(senderId);
+                            rpData.claimedAmounts[senderId] = claimAmount.toFixed(2);
+                            
+                            // 更新红包消息
+                            updatedGroup.chat_history[rpMsgIndex].content = JSON.stringify(rpData);
+                            
+                            // 增加角色余额
+                            const claimer = await db.characters.get(senderId);
+                            if (claimer) {
+                                if (!claimer.identity) claimer.identity = {};
+                                let balance = parseFloat(claimer.identity.balance || 0);
+                                balance += claimAmount;
+                                claimer.identity.balance = balance.toFixed(2);
+                                await db.characters.put(claimer);
+                            }
+                            
+                            const claimerName = memberMap[senderId]?.remark || memberMap[senderId]?.name || reply.name;
+                            
+                            // 添加系统消息
+                            updatedGroup.chat_history.push({
+                                role: 'system',
+                                content: `${claimerName} 领取了红包，获得 ¥${claimAmount.toFixed(2)}`,
+                                time: Date.now() + msgIndex * 50
+                            });
+                            msgIndex++;
+                            continue;
+                        }
+                        
                         // 普通发言
                         if (!reply.name || !reply.content) continue;
                         
@@ -11498,6 +12038,14 @@ ${groupContextStr}
                     
                     // 重新渲染群聊
                     await renderGroupChatBody(updatedGroup);
+                    
+                    // ✅ 群聊回复完成后，检查是否需要自动总结
+                    try {
+                        const accountId = getCurrentAccountId();
+                        await checkAutoSummary('group', window.currentGroupChatId, accountId);
+                    } catch (summaryError) {
+                        console.error('[AutoSummary] 检查群聊自动总结失败:', summaryError);
+                    }
                 }
                 
             } catch (error) {
@@ -11669,6 +12217,67 @@ ${groupContextStr}
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        // 群聊图片卡片点击展开 - 使用与私聊相同的样式
+        function showImageCardContent(el) {
+            const text = el.dataset.text;
+            if (!text) return;
+            
+            const isExpanded = el.dataset.expanded === 'true';
+            
+            if (isExpanded) {
+                // 收起：显示卡片
+                el.innerHTML = `
+                    <div class="img-card-placeholder">
+                        <svg class="img-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                            <polyline points="21 15 16 10 5 21"></polyline>
+                        </svg>
+                        <div class="img-card-hint">点击查看文字</div>
+                    </div>
+                `;
+                el.dataset.expanded = 'false';
+            } else {
+                // 展开：显示文字
+                el.innerHTML = `<div class="img-card-text">${escapeHtml(text)}</div>`;
+                el.dataset.expanded = 'true';
+            }
+        }
+
+        // 群聊语音气泡点击播放
+        function playVoiceBubble(el) {
+            const text = el.dataset.text;
+            if (!text) return;
+            
+            // 显示语音内容弹窗
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:10000;';
+            modal.onclick = () => modal.remove();
+            
+            modal.innerHTML = `
+                <div style="background:#fff; padding:20px 24px; border-radius:12px; max-width:85%; max-height:70%; overflow-y:auto;" onclick="event.stopPropagation()">
+                    <div style="font-size:14px; color:#666; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+                        <svg viewBox="0 0 24 24" style="width:18px; height:18px; fill:#999;"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+                        语音消息内容
+                    </div>
+                    <div style="font-size:16px; line-height:1.8; color:#333; white-space:pre-wrap;">${escapeHtml(text)}</div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+        }
+
+        // 显示完整图片
+        function showFullImage(src) {
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); display:flex; align-items:center; justify-content:center; z-index:10000;';
+            modal.onclick = () => modal.remove();
+            
+            modal.innerHTML = `<img src="${src}" style="max-width:95%; max-height:95%; object-fit:contain;" />`;
+            
+            document.body.appendChild(modal);
         }
 
         // 格式化时间戳
@@ -11997,12 +12606,18 @@ ${groupContextStr}
                 // 先清理消息内容
                 const cleanedContent = sanitizeMessage(msg.content);
                 
+                // 检查是否有引用
+                let quoteHtml = '';
+                if (msg.quote) {
+                    quoteHtml = `<div class="quoted-message" style="border-left:2px solid rgba(0,0,0,0.15); padding:2px 6px; margin-bottom:4px; font-size:11px; line-height:1.3; max-width:180px;"><div style="color:#666; font-weight:500; font-size:10px;">${escapeHtml(msg.quote.name)}</div><div style="color:#888; font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:160px;">${escapeHtml(msg.quote.content)}</div></div>`;
+                }
+                
                 // 检查AI消息是否包含外语+中文翻译组合
                 const translationParsed = msg.role === 'char' ? parseForeignWithTranslation(cleanedContent) : null;
                 
                 if (translationParsed) {
                     // 有外语+中文组合，默认显示外语，点击显示翻译
-                    content.innerHTML = renderMessageContent(translationParsed.foreign);
+                    content.innerHTML = quoteHtml + renderMessageContent(translationParsed.foreign);
                     content.dataset.chinese = translationParsed.chinese;
                     content.dataset.expanded = 'false';
                     
@@ -12034,7 +12649,7 @@ ${groupContextStr}
                     };
                 } else {
                     // 普通消息，使用统一的渲染函数
-                    content.innerHTML = renderMessageContent(cleanedContent);
+                    content.innerHTML = quoteHtml + renderMessageContent(cleanedContent);
                 }
             }
 
@@ -12402,15 +13017,41 @@ ${groupContextStr}
         // 1. 编辑
         async function handleMsgEdit() {
             hideContextMenu();
-            if (activeMsgIndex === -1 || !currentChatCharId) return;
+            if (activeMsgIndex === -1) return;
+            
+            // 群聊编辑
+            if (window.currentGroupChatId) {
+                const group = await db.group_chats.get(window.currentGroupChatId);
+                if (!group || !group.chat_history) return;
+                
+                const msg = group.chat_history[activeMsgIndex];
+                if (!msg || msg.role === 'system') {
+                    showToast("系统消息不能编辑");
+                    return;
+                }
+                
+                if (msg.content.startsWith('[img:') || msg.type === 'redpacket' || msg.type === 'transfer') {
+                    showToast("该消息类型暂不支持编辑");
+                    return;
+                }
+
+                const newContent = prompt("编辑消息", msg.content);
+                if (newContent !== null && newContent.trim() !== "") {
+                    group.chat_history[activeMsgIndex].content = newContent.trim();
+                    await db.group_chats.put(group);
+                    await renderGroupChatBody(group);
+                }
+                return;
+            }
+            
+            // 私聊编辑
+            if (!currentChatCharId) return;
             
             const char = await db.characters.get(currentChatCharId);
             const accountId = getCurrentAccountId();
             let history = getChatHistory(char, accountId);
             const msg = history[activeMsgIndex];
             
-            // 简单使用 prompt，也可以做自定义 UI
-            // 如果是图片消息，提示无法编辑或只编辑URL
             if (msg.content.startsWith('[img:')) {
                 alert("图片消息暂不支持编辑");
                 return;
@@ -12419,10 +13060,9 @@ ${groupContextStr}
             const newContent = prompt("编辑消息", msg.content);
             if (newContent !== null && newContent.trim() !== "") {
                 msg.content = newContent.trim();
-                history[activeMsgIndex] = msg; // 更新
+                history[activeMsgIndex] = msg;
                 await setChatHistory(char, accountId, history);
                 
-                // ✅ 优化：直接更新 DOM 中的消息内容，不重新渲染
                 const chatBody = document.getElementById('chat-body');
                 const messageRows = chatBody.querySelectorAll('.message-row');
                 if (messageRows[activeMsgIndex]) {
@@ -12437,10 +13077,47 @@ ${groupContextStr}
         // 2. 撤回（保存原内容，点击可查看）
         async function handleMsgRecall() {
             hideContextMenu();
-            if (activeMsgIndex === -1 || !currentChatCharId) return;
+            if (activeMsgIndex === -1) return;
             
             if (!confirm("确定要撤回这条消息吗？")) return;
+            
+            // 群聊撤回
+            if (window.currentGroupChatId) {
+                const group = await db.group_chats.get(window.currentGroupChatId);
+                if (!group || !group.chat_history) return;
+                
+                const msg = group.chat_history[activeMsgIndex];
+                if (!msg || msg.role === 'system') {
+                    showToast("系统消息不能撤回");
+                    return;
+                }
+                
+                const isUser = msg.role === 'user';
+                const recallerName = isUser ? '你' : '成员';
+                
+                msg.recalledContent = msg.content;
+                msg.isRecalled = true;
+                msg.content = "";
+                msg.type = 'recalled';
+                
+                group.chat_history[activeMsgIndex] = msg;
+                
+                // 添加撤回提示系统消息
+                group.chat_history.splice(activeMsgIndex + 1, 0, {
+                    role: 'system',
+                    content: `"${recallerName}"撤回了一条消息`,
+                    time: Date.now(),
+                    recalledContent: msg.recalledContent
+                });
+                
+                await db.group_chats.put(group);
+                await renderGroupChatBody(group);
+                return;
+            }
 
+            // 私聊撤回
+            if (!currentChatCharId) return;
+            
             const char = await db.characters.get(currentChatCharId);
             const accountId = getCurrentAccountId();
             let history = getChatHistory(char, accountId);
@@ -12448,14 +13125,12 @@ ${groupContextStr}
             const isUser = msg.role === 'user';
             const recallerName = isUser ? '你' : char.name;
             
-            // 保存原内容到 recalledContent，然后标记为已撤回
             msg.recalledContent = msg.content;
             msg.isRecalled = true;
-            msg.content = ""; // 清空显示内容
+            msg.content = "";
             
             await setChatHistory(char, accountId, history);
             
-            // ✅ 优化：直接更新 DOM 显示撤回状态 - 居中系统提示样式
             const chatBody = document.getElementById('chat-body');
             const messageRows = chatBody.querySelectorAll('.message-row');
             if (messageRows[activeMsgIndex]) {
@@ -12537,14 +13212,126 @@ ${groupContextStr}
             overlay.appendChild(modal);
             document.body.appendChild(overlay);
         }
+        
+        // 引用消息相关
+        let currentQuote = null; // 当前引用的消息 { name, content, index }
+        
+        // 引用消息
+        async function handleMsgQuote() {
+            hideContextMenu();
+            if (activeMsgIndex === -1) return;
+            
+            let quoteName = '';
+            let quoteContent = '';
+            
+            // 群聊引用
+            if (window.currentGroupChatId) {
+                const group = await db.group_chats.get(window.currentGroupChatId);
+                if (!group || !group.chat_history) return;
+                
+                const msg = group.chat_history[activeMsgIndex];
+                if (!msg || msg.role === 'system') {
+                    showToast("无法引用系统消息");
+                    return;
+                }
+                
+                if (msg.role === 'user') {
+                    const myChar = currentMyCharId ? await db.characters.get(parseInt(currentMyCharId)) : null;
+                    quoteName = group.myNickname || myChar?.name || '我';
+                } else {
+                    const senderChar = msg.senderId ? await db.characters.get(msg.senderId) : null;
+                    const memberNicknames = group.memberNicknames || {};
+                    quoteName = memberNicknames[msg.senderId] || senderChar?.remark || senderChar?.name || '未知成员';
+                }
+                
+                quoteContent = getQuoteDisplayContent(msg.content, msg.type);
+            } else {
+                // 私聊引用
+                if (!currentChatCharId) return;
+                
+                const char = await db.characters.get(currentChatCharId);
+                const accountId = getCurrentAccountId();
+                const history = getChatHistory(char, accountId);
+                const msg = history[activeMsgIndex];
+                
+                if (!msg) return;
+                
+                if (msg.role === 'user') {
+                    const myChar = currentMyCharId ? await db.characters.get(parseInt(currentMyCharId)) : null;
+                    quoteName = myChar?.name || '我';
+                } else {
+                    quoteName = char.remark || char.name;
+                }
+                
+                quoteContent = getQuoteDisplayContent(msg.content, msg.type);
+            }
+            
+            // 设置引用
+            currentQuote = {
+                name: quoteName,
+                content: quoteContent,
+                index: activeMsgIndex
+            };
+            
+            // 显示引用预览
+            showQuotePreview(quoteName, quoteContent);
+            
+            // 聚焦输入框
+            document.getElementById('chat-input-box').focus();
+        }
+        
+        // 获取引用显示内容
+        function getQuoteDisplayContent(content, type) {
+            if (type === 'redpacket') return '[红包]';
+            if (type === 'transfer') return '[转账]';
+            if (content.startsWith('[img:')) return '[图片]';
+            if (content.startsWith('[voice:')) return '[语音]';
+            if (content.startsWith('[imgcard:')) return '[图文消息]';
+            // 截断过长的文本
+            if (content.length > 50) {
+                return content.substring(0, 50) + '...';
+            }
+            return content;
+        }
+        
+        // 显示引用预览
+        function showQuotePreview(name, content) {
+            const preview = document.getElementById('quote-preview');
+            const nameEl = document.getElementById('quote-preview-name');
+            const msgEl = document.getElementById('quote-preview-msg');
+            
+            nameEl.textContent = name;
+            msgEl.textContent = content;
+            preview.style.display = 'flex';
+        }
+        
+        // 取消引用
+        function cancelQuote() {
+            currentQuote = null;
+            document.getElementById('quote-preview').style.display = 'none';
+        }
 
         // 3. 删除 (单条)
         async function handleMsgDelete() {
             hideContextMenu();
-            if (activeMsgIndex === -1 || !currentChatCharId) return;
+            if (activeMsgIndex === -1) return;
             
             if (!confirm("删除这条消息？")) return;
+            
+            // 群聊删除
+            if (window.currentGroupChatId) {
+                const group = await db.group_chats.get(window.currentGroupChatId);
+                if (!group || !group.chat_history) return;
+                
+                group.chat_history.splice(activeMsgIndex, 1);
+                await db.group_chats.put(group);
+                await renderGroupChatBody(group);
+                return;
+            }
 
+            // 私聊删除
+            if (!currentChatCharId) return;
+            
             const char = await db.characters.get(currentChatCharId);
             const accountId = getCurrentAccountId();
             let history = getChatHistory(char, accountId);
@@ -12552,7 +13339,6 @@ ${groupContextStr}
             
             await setChatHistory(char, accountId, history);
             
-            // ✅ 优化：直接从 DOM 中移除消息，不重新渲染整个聊天
             const chatBody = document.getElementById('chat-body');
             const messageRows = chatBody.querySelectorAll('.message-row');
             if (messageRows[activeMsgIndex]) {
@@ -12563,18 +13349,52 @@ ${groupContextStr}
         // --- 多选模式 ---
         function enterSelectionMode() {
             hideContextMenu();
-            if (!currentChatCharId) return;
+            if (!currentChatCharId && !window.currentGroupChatId) return;
             
             isSelectionMode = true;
             selectedIndices.clear();
             
-            // 切换 UI - 只需要添加 CSS 类，不需要重新渲染
-            // checkbox 已经在 DOM 中，通过 CSS .selection-mode 类控制显示
             document.getElementById('chat-body').classList.add('selection-mode');
             document.getElementById('selection-bar').style.display = 'flex';
-            document.getElementById('chat-footer').style.display = 'none'; // 隐藏输入框
+            document.getElementById('chat-footer').style.display = 'none';
             
-            // 更新按钮文字
+            // 为群聊消息添加checkbox
+            if (window.currentGroupChatId) {
+                document.querySelectorAll('.group-message-row').forEach((row) => {
+                    const idx = parseInt(row.dataset.msgIndex);
+                    if (row.querySelector('.group-msg-content')) {
+                        row.classList.add('selection-mode');
+                        row.style.paddingLeft = '40px';
+                        let cb = row.querySelector('.msg-checkbox');
+                        if (!cb) {
+                            cb = document.createElement('div');
+                            cb.className = 'msg-checkbox';
+                            cb.style.cssText = 'position:absolute; left:8px; top:50%; transform:translateY(-50%); width:22px; height:22px; border:2px solid #ccc; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer;';
+                            cb.onclick = (e) => {
+                                e.stopPropagation();
+                                if (selectedIndices.has(idx)) {
+                                    selectedIndices.delete(idx);
+                                    cb.classList.remove('checked');
+                                    cb.style.background = '';
+                                    cb.style.borderColor = '#ccc';
+                                    cb.innerHTML = '';
+                                } else {
+                                    selectedIndices.add(idx);
+                                    cb.classList.add('checked');
+                                    cb.style.background = 'var(--ins-pink)';
+                                    cb.style.borderColor = 'var(--ins-pink)';
+                                    cb.innerHTML = '<svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:#fff;stroke-width:3;fill:none;"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+                                }
+                                updateDeleteBtn();
+                            };
+                            row.style.position = 'relative';
+                            row.insertBefore(cb, row.firstChild);
+                        }
+                        cb.style.display = 'flex';
+                    }
+                });
+            }
+            
             updateDeleteBtn();
         }
 
@@ -12584,15 +13404,23 @@ ${groupContextStr}
             
             document.getElementById('chat-body').classList.remove('selection-mode');
             document.getElementById('selection-bar').style.display = 'none';
-            document.getElementById('chat-footer').style.display = 'flex'; // 恢复输入框
+            document.getElementById('chat-footer').style.display = 'flex';
             
-            // ✅ 优化：通过 CSS 和 DOM 操作隐藏 Checkbox，不重新渲染
+            // 私聊消息
             document.querySelectorAll('.message-row').forEach(row => {
                 row.classList.remove('selection-mode', 'selected');
+            });
+            // 群聊消息
+            document.querySelectorAll('.group-message-row').forEach(row => {
+                row.classList.remove('selection-mode', 'selected');
+                row.style.paddingLeft = '';
             });
             document.querySelectorAll('.msg-checkbox').forEach(cb => {
                 cb.style.display = 'none';
                 cb.classList.remove('checked');
+                cb.style.background = '';
+                cb.style.borderColor = '#ccc';
+                cb.innerHTML = '';
             });
         }
 
@@ -12623,32 +13451,45 @@ ${groupContextStr}
 
         async function deleteSelectedMsgs() {
             if (selectedIndices.size === 0) return;
-            if (!currentChatCharId) return;
             
             if (!confirm(`确定要删除选中的 ${selectedIndices.size} 条消息吗？`)) return;
+            
+            // 群聊批量删除
+            if (window.currentGroupChatId) {
+                const group = await db.group_chats.get(window.currentGroupChatId);
+                if (!group || !group.chat_history) return;
+                
+                const newHistory = group.chat_history.filter((_, idx) => !selectedIndices.has(idx));
+                group.chat_history = newHistory;
+                await db.group_chats.put(group);
+                
+                exitSelectionMode();
+                await renderGroupChatBody(group);
+                return;
+            }
+            
+            // 私聊批量删除
+            if (!currentChatCharId) return;
 
             const char = await db.characters.get(currentChatCharId);
             const accountId = getCurrentAccountId();
             const history = getChatHistory(char, accountId);
             
-            // 过滤掉被选中的索引
-            // 技巧：创建一个保留的新数组
             const newHistory = history.filter((_, idx) => !selectedIndices.has(idx));
             
             await setChatHistory(char, accountId, newHistory);
             await db.characters.put(char);
             
-            // ✅ 优化：先从 DOM 中移除选中的消息（倒序删除避免索引问题）
             const chatBody = document.getElementById('chat-body');
             const messageRows = chatBody.querySelectorAll('.message-row');
-            const sortedIndices = Array.from(selectedIndices).sort((a, b) => b - a); // 倒序
+            const sortedIndices = Array.from(selectedIndices).sort((a, b) => b - a);
             sortedIndices.forEach(idx => {
                 if (messageRows[idx]) {
                     messageRows[idx].remove();
                 }
             });
             
-            exitSelectionMode(); // 删除后自动退出多选
+            exitSelectionMode();
         }
 
         // --- 新增：聊天交互逻辑 (面板/输入/AI触发) ---
@@ -12685,6 +13526,25 @@ ${groupContextStr}
         async function sendSticker(base64) {
             // 发送图片消息
             const msgContent = `[img:${base64}]`;
+            
+            // 支持群聊模式
+            if (window.currentGroupChatId) {
+                const group = await db.group_chats.get(window.currentGroupChatId);
+                if (!group) return;
+                
+                if (!group.chat_history) group.chat_history = [];
+                group.chat_history.push({
+                    role: 'user',
+                    content: msgContent,
+                    time: Date.now()
+                });
+                group.updated_at = Date.now();
+                await db.group_chats.put(group);
+                
+                await renderGroupChatBody(group);
+                closeChatPanel();
+                return;
+            }
             
             if (!currentChatCharId) return;
             const char = await db.characters.get(currentChatCharId);
@@ -12814,6 +13674,24 @@ ${groupContextStr}
             // 发送图片卡片消息（格式：[imgcard:文字内容]）
             const msgContent = `[imgcard:${text}]`;
             
+            // 支持群聊模式
+            if (window.currentGroupChatId) {
+                const group = await db.group_chats.get(window.currentGroupChatId);
+                if (!group) return;
+                
+                if (!group.chat_history) group.chat_history = [];
+                group.chat_history.push({
+                    role: 'user',
+                    content: msgContent,
+                    time: Date.now()
+                });
+                group.updated_at = Date.now();
+                await db.group_chats.put(group);
+                
+                await renderGroupChatBody(group);
+                return;
+            }
+            
             if (!currentChatCharId) return;
             const char = await db.characters.get(currentChatCharId);
             const accountId = getCurrentAccountId();
@@ -12834,7 +13712,35 @@ ${groupContextStr}
         // 发送真实图片消息
         async function sendImageMessage(input) {
             const file = input.files[0];
-            if (!file || !currentChatCharId) return;
+            if (!file) return;
+            
+            // 支持群聊模式
+            if (window.currentGroupChatId) {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const base64 = e.target.result;
+                    const msgContent = `[img:${base64}]`;
+                    
+                    const group = await db.group_chats.get(window.currentGroupChatId);
+                    if (!group) return;
+                    
+                    if (!group.chat_history) group.chat_history = [];
+                    group.chat_history.push({
+                        role: 'user',
+                        content: msgContent,
+                        time: Date.now()
+                    });
+                    group.updated_at = Date.now();
+                    await db.group_chats.put(group);
+                    
+                    await renderGroupChatBody(group);
+                };
+                reader.readAsDataURL(file);
+                input.value = '';
+                return;
+            }
+            
+            if (!currentChatCharId) return;
             
             const reader = new FileReader();
             reader.onload = async (e) => {
@@ -13049,6 +13955,24 @@ ${groupContextStr}
             
             // 发送语音气泡消息（格式：[voice:文字内容]）
             const msgContent = `[voice:${text}]`;
+            
+            // 支持群聊模式
+            if (window.currentGroupChatId) {
+                const group = await db.group_chats.get(window.currentGroupChatId);
+                if (!group) return;
+                
+                if (!group.chat_history) group.chat_history = [];
+                group.chat_history.push({
+                    role: 'user',
+                    content: msgContent,
+                    time: Date.now()
+                });
+                group.updated_at = Date.now();
+                await db.group_chats.put(group);
+                
+                await renderGroupChatBody(group);
+                return;
+            }
             
             if (!currentChatCharId) return;
             const char = await db.characters.get(currentChatCharId);
@@ -14743,6 +15667,13 @@ ${loreContext}
                     }
                 }
                 
+                // ✅ AI回复完成后，检查是否需要自动总结
+                try {
+                    await checkAutoSummary('private', targetCharId, accountId);
+                } catch (summaryError) {
+                    console.error('[AutoSummary] 检查自动总结失败:', summaryError);
+                }
+                
             } catch (err) {
                 console.error("AI 回复失败", err);
                 if (chatTitleEl) chatTitleEl.innerText = originalTitle;
@@ -14754,6 +15685,12 @@ ${loreContext}
 
         // 重新生成回复（删除上一次AI回复的所有消息并重新生成，不删除用户消息）
         async function regenerateLastReply() {
+            // 群聊重回
+            if (window.currentGroupChatId) {
+                await regenerateGroupReply();
+                return;
+            }
+            
             if (!currentChatCharId) return;
             
             const char = await db.characters.get(currentChatCharId);
@@ -14808,6 +15745,75 @@ ${loreContext}
             closeChatPanel();
             
             // 重新生成回复（基于删除后的历史记录，用户消息还在）
+            await triggerAiReply();
+        }
+        
+        // 群聊重新生成回复
+        async function regenerateGroupReply() {
+            if (!window.currentGroupChatId) return;
+            
+            let group = await db.group_chats.get(window.currentGroupChatId);
+            if (!group || !group.chat_history || group.chat_history.length === 0) {
+                showToast('没有聊天记录');
+                return;
+            }
+            
+            const history = group.chat_history;
+            
+            // 找到上一次AI回复的所有消息（从最后往前找，直到遇到用户消息或系统消息）
+            let lastAiMessageStartIndex = -1;
+            let lastAiMessageEndIndex = -1;
+            
+            // 从后往前找最后一条AI角色消息
+            for (let i = history.length - 1; i >= 0; i--) {
+                if (history[i].role === 'char') {
+                    lastAiMessageEndIndex = i;
+                    break;
+                }
+            }
+            
+            // 如果没有AI回复，直接生成新的
+            if (lastAiMessageEndIndex === -1) {
+                closeChatPanel();
+                await triggerAiReply();
+                return;
+            }
+            
+            // 从最后一条AI消息往前找，找到连续的所有AI消息（不包括系统消息）
+            lastAiMessageStartIndex = lastAiMessageEndIndex;
+            for (let i = lastAiMessageEndIndex - 1; i >= 0; i--) {
+                if (history[i].role === 'user') {
+                    // 遇到用户消息，停止
+                    break;
+                }
+                if (history[i].role === 'system') {
+                    // 系统消息也算作分隔，但如果是领取红包等系统消息，也删除
+                    const content = history[i].content || '';
+                    if (content.includes('领取了红包') || content.includes('将自己的群昵称改为')) {
+                        lastAiMessageStartIndex = i;
+                        continue;
+                    }
+                    break;
+                }
+                // 还是AI的消息，继续往前
+                lastAiMessageStartIndex = i;
+            }
+            
+            // 删除所有连续的AI消息和相关系统消息
+            const deleteCount = lastAiMessageEndIndex - lastAiMessageStartIndex + 1;
+            history.splice(lastAiMessageStartIndex, deleteCount);
+            
+            group.chat_history = history;
+            group.updated_at = Date.now();
+            await db.group_chats.put(group);
+            
+            // 重新渲染群聊界面
+            await renderGroupChatBody(group);
+            
+            // 关闭面板
+            closeChatPanel();
+            
+            // 重新生成群聊回复
             await triggerAiReply();
         }
 
@@ -18869,6 +19875,16 @@ function showToast(message) {
 
 // 打开转账页面
 async function showTransferPage() {
+    // 关闭更多面板
+    closeChatPanel();
+    
+    // 判断是否是群聊
+    if (window.currentGroupChatId) {
+        // 群聊：显示转账类型选择弹窗
+        document.getElementById('group-transfer-type-modal').style.display = 'flex';
+        return;
+    }
+    
     if (!currentChatCharId) {
         showToast("请先进入聊天");
         return;
@@ -18892,6 +19908,500 @@ async function showTransferPage() {
 
 function hideTransferPage() {
     document.getElementById('transfer-page').style.display = 'none';
+}
+
+/* =================
+   群红包功能
+   ================= */
+
+let currentRedPacketType = 'lucky'; // 默认拼手气红包
+
+// 显示群红包页面
+function showGroupRedPacketPage() {
+    closeModal('group-transfer-type-modal');
+    
+    // 重置输入
+    document.getElementById('rp-amount-input').value = '';
+    document.getElementById('rp-count-input').value = '';
+    document.getElementById('rp-wish-input').value = '';
+    document.getElementById('rp-total-hint').innerText = '共0.00元';
+    document.getElementById('btn-send-redpacket').disabled = true;
+    document.getElementById('btn-send-redpacket').style.background = '#ccc';
+    document.getElementById('btn-send-redpacket').style.cursor = 'not-allowed';
+    
+    // 默认选中拼手气
+    selectRedPacketType('lucky');
+    
+    document.getElementById('group-redpacket-page').style.display = 'flex';
+}
+
+function hideGroupRedPacketPage() {
+    document.getElementById('group-redpacket-page').style.display = 'none';
+}
+
+// 选择红包类型
+function selectRedPacketType(type) {
+    currentRedPacketType = type;
+    
+    const luckyEl = document.getElementById('rp-type-lucky');
+    const normalEl = document.getElementById('rp-type-normal');
+    
+    if (type === 'lucky') {
+        luckyEl.style.borderColor = '#333';
+        luckyEl.style.background = '#fff';
+        luckyEl.querySelector('div:first-child').style.color = '#333';
+        
+        normalEl.style.borderColor = '#e8e8e8';
+        normalEl.style.background = '#fff';
+        normalEl.querySelector('div:first-child').style.color = '#666';
+    } else {
+        normalEl.style.borderColor = '#333';
+        normalEl.style.background = '#fff';
+        normalEl.querySelector('div:first-child').style.color = '#333';
+        
+        luckyEl.style.borderColor = '#e8e8e8';
+        luckyEl.style.background = '#fff';
+        luckyEl.querySelector('div:first-child').style.color = '#666';
+    }
+}
+
+// 检查红包输入
+function checkRedPacketInput() {
+    const amount = parseFloat(document.getElementById('rp-amount-input').value) || 0;
+    const count = parseInt(document.getElementById('rp-count-input').value) || 0;
+    
+    document.getElementById('rp-total-hint').innerText = `共${amount.toFixed(2)}元`;
+    
+    const btn = document.getElementById('btn-send-redpacket');
+    if (amount > 0 && count > 0) {
+        btn.disabled = false;
+        btn.style.background = '#333';
+        btn.style.cursor = 'pointer';
+    } else {
+        btn.disabled = true;
+        btn.style.background = '#ccc';
+        btn.style.cursor = 'not-allowed';
+    }
+}
+
+// 发送群红包
+async function sendGroupRedPacket() {
+    if (!window.currentGroupChatId) return;
+    
+    const amount = parseFloat(document.getElementById('rp-amount-input').value);
+    const count = parseInt(document.getElementById('rp-count-input').value);
+    const wish = document.getElementById('rp-wish-input').value.trim() || '恭喜发财，大吉大利';
+    
+    if (!amount || amount <= 0 || !count || count <= 0) {
+        showToast('请填写正确的金额和个数');
+        return;
+    }
+    
+    // 检查余额
+    if (!currentMyCharId) {
+        showToast("请先设置User身份");
+        return;
+    }
+    const user = await db.characters.get(parseInt(currentMyCharId));
+    let currentBalance = 0;
+    if (user && user.identity && user.identity.balance) {
+        currentBalance = parseFloat(user.identity.balance.toString().replace(/,/g, ''));
+    }
+    
+    if (currentBalance < amount) {
+        showToast('余额不足 (当前: ¥' + currentBalance.toFixed(2) + ')');
+        return;
+    }
+    
+    // 扣款
+    const newBalance = currentBalance - amount;
+    user.identity.balance = newBalance.toFixed(2);
+    await db.characters.put(user);
+    
+    // 构建红包消息
+    const group = await db.group_chats.get(window.currentGroupChatId);
+    if (!group) return;
+    
+    const redPacketData = {
+        type: 'redpacket',
+        redpacketType: currentRedPacketType, // 'lucky' 或 'normal'
+        totalAmount: amount.toFixed(2),
+        count: count,
+        wish: wish,
+        claimed: [], // 已领取的成员ID列表
+        claimedAmounts: {}, // 每个成员领取的金额
+        id: 'rp_' + Date.now()
+    };
+    
+    if (!group.chat_history) group.chat_history = [];
+    group.chat_history.push({
+        role: 'user',
+        type: 'redpacket',
+        content: JSON.stringify(redPacketData),
+        time: Date.now()
+    });
+    group.updated_at = Date.now();
+    await db.group_chats.put(group);
+    
+    // 记录账单
+    await addTransaction('expense', amount, '发红包', `${group.name} · ${count}个红包`);
+    
+    hideGroupRedPacketPage();
+    await renderGroupChatBody(group);
+    showToast('红包已发出');
+}
+
+/* =================
+   专属转账功能
+   ================= */
+
+let exclusiveTransferTarget = null; // 当前选中的转账目标
+
+// 显示专属转账选人弹窗
+async function showExclusiveTransferPage() {
+    closeModal('group-transfer-type-modal');
+    
+    if (!window.currentGroupChatId) return;
+    
+    const group = await db.group_chats.get(window.currentGroupChatId);
+    if (!group) return;
+    
+    const listEl = document.getElementById('exclusive-member-list');
+    listEl.innerHTML = '';
+    
+    // 渲染群成员列表（不包括自己）
+    for (const memberId of group.memberIds) {
+        const char = await db.characters.get(memberId);
+        if (!char) continue;
+        
+        const avatarStyle = char.avatar ? `background-image:url(${char.avatar})` : 'background:#ccc';
+        const memberNicknames = group.memberNicknames || {};
+        const displayName = memberNicknames[memberId] || char.remark || char.name;
+        
+        const item = document.createElement('div');
+        item.style.cssText = 'display:flex; align-items:center; padding:12px 16px; cursor:pointer; transition:background 0.2s;';
+        item.onmouseover = () => item.style.background = '#f5f5f5';
+        item.onmouseout = () => item.style.background = '';
+        item.innerHTML = `
+            <div style="width:44px; height:44px; border-radius:6px; ${avatarStyle}; background-size:cover; background-position:center; margin-right:12px;"></div>
+            <div style="flex:1;">
+                <div style="font-size:16px; color:#333;">${displayName}</div>
+                <div style="font-size:12px; color:#999;">${char.name}</div>
+            </div>
+        `;
+        item.onclick = () => selectExclusiveTarget(memberId, char, displayName);
+        
+        listEl.appendChild(item);
+    }
+    
+    if (group.memberIds.length === 0) {
+        listEl.innerHTML = '<div style="text-align:center; color:#999; padding:40px;">群内暂无其他成员</div>';
+    }
+    
+    document.getElementById('exclusive-transfer-modal').style.display = 'flex';
+}
+
+// 选择专属转账目标
+async function selectExclusiveTarget(memberId, char, displayName) {
+    closeModal('exclusive-transfer-modal');
+    
+    exclusiveTransferTarget = { memberId, char, displayName };
+    
+    // 打开转账页面
+    document.getElementById('t-target-name').innerText = displayName;
+    document.getElementById('t-target-avatar').style.backgroundImage = char.avatar ? `url(${char.avatar})` : '';
+    
+    // 重置输入
+    document.getElementById('t-amount-input').value = '';
+    document.getElementById('t-note-input').value = '';
+    document.getElementById('btn-do-transfer').disabled = true;
+    
+    document.getElementById('transfer-page').style.display = 'flex';
+}
+
+// 当前查看的红包ID
+let currentViewingRedPacketId = null;
+
+// 显示红包详情页面
+async function showRedPacketDetail(redPacketId) {
+    if (!window.currentGroupChatId) return;
+    
+    const group = await db.group_chats.get(window.currentGroupChatId);
+    if (!group || !group.chat_history) return;
+    
+    // 找到红包消息
+    const msg = group.chat_history.find(m => {
+        if (m.type !== 'redpacket') return false;
+        try {
+            const data = JSON.parse(m.content);
+            return data.id === redPacketId;
+        } catch(e) {
+            return false;
+        }
+    });
+    
+    if (!msg) return;
+    
+    const data = JSON.parse(msg.content);
+    currentViewingRedPacketId = redPacketId;
+    
+    // 获取发送者信息（红包消息的role是user）
+    let senderAvatar = '';
+    let senderName = '红包发送者';
+    if (currentMyCharId && msg.role === 'user') {
+        const user = await db.characters.get(parseInt(currentMyCharId));
+        if (user) {
+            senderAvatar = user.avatar || '';
+            const memberNicknames = group.memberNicknames || {};
+            senderName = memberNicknames[currentMyCharId] || user.name || '我';
+        }
+    }
+    
+    // 更新页面内容
+    document.getElementById('rp-detail-avatar').style.backgroundImage = senderAvatar ? `url(${senderAvatar})` : '';
+    document.getElementById('rp-detail-sender').innerText = senderName + ' 的红包';
+    document.getElementById('rp-detail-wish').innerText = data.wish || '恭喜发财';
+    document.getElementById('rp-detail-type').innerText = data.redpacketType === 'lucky' ? '拼手气红包' : '普通红包';
+    
+    // 更新统计信息
+    const claimedCount = data.claimed?.length || 0;
+    const claimedTotal = Object.values(data.claimedAmounts || {}).reduce((a, b) => a + parseFloat(b), 0);
+    document.getElementById('rp-detail-claimed-count').innerText = claimedCount;
+    document.getElementById('rp-detail-total-count').innerText = data.count;
+    document.getElementById('rp-detail-total-amount').innerText = claimedTotal.toFixed(2);
+    
+    // 更新领取按钮状态
+    const myId = currentMyCharId ? parseInt(currentMyCharId) : null;
+    const isAllClaimed = claimedCount >= data.count;
+    const hasClaimed = data.claimed?.includes(myId);
+    
+    const actionDiv = document.getElementById('rp-detail-action');
+    const btn = document.getElementById('btn-claim-redpacket');
+    
+    if (isAllClaimed) {
+        btn.innerText = '红包已领完';
+        btn.disabled = true;
+        btn.style.background = '#ccc';
+        btn.style.cursor = 'not-allowed';
+    } else if (hasClaimed) {
+        btn.innerText = `已领取 ¥${data.claimedAmounts[myId]}`;
+        btn.disabled = true;
+        btn.style.background = '#ccc';
+        btn.style.cursor = 'not-allowed';
+    } else {
+        btn.innerText = '领取红包';
+        btn.disabled = false;
+        btn.style.background = '#333';
+        btn.style.cursor = 'pointer';
+    }
+    
+    // 渲染已领取列表
+    const listEl = document.getElementById('rp-detail-claimed-list');
+    listEl.innerHTML = '';
+    
+    if (data.claimed && data.claimed.length > 0) {
+        for (const memberId of data.claimed) {
+            const char = await db.characters.get(memberId);
+            const memberNicknames = group.memberNicknames || {};
+            const displayName = memberNicknames[memberId] || char?.remark || char?.name || '未知用户';
+            const avatar = char?.avatar || '';
+            const amount = data.claimedAmounts[memberId] || '0.00';
+            
+            const item = document.createElement('div');
+            item.style.cssText = 'display:flex; align-items:center; padding:12px 0; border-bottom:1px solid #f0f0f0;';
+            item.innerHTML = `
+                <div style="width:40px; height:40px; border-radius:50%; background:#eee; background-image:url(${avatar}); background-size:cover; background-position:center; margin-right:12px; flex-shrink:0;"></div>
+                <div style="flex:1;">
+                    <div style="font-size:14px; color:#333;">${displayName}</div>
+                </div>
+                <div style="font-size:15px; font-weight:500; color:#333;">¥${amount}</div>
+            `;
+            listEl.appendChild(item);
+        }
+    } else {
+        listEl.innerHTML = '<div style="text-align:center; color:#999; padding:30px 0; font-size:13px;">暂无人领取</div>';
+    }
+    
+    document.getElementById('redpacket-detail-page').style.display = 'flex';
+}
+
+// 隐藏红包详情页面
+function hideRedPacketDetail() {
+    document.getElementById('redpacket-detail-page').style.display = 'none';
+    currentViewingRedPacketId = null;
+}
+
+// 领取红包
+async function claimRedPacket() {
+    if (!currentViewingRedPacketId || !window.currentGroupChatId) return;
+    
+    const group = await db.group_chats.get(window.currentGroupChatId);
+    if (!group || !group.chat_history) return;
+    
+    // 找到红包消息
+    const msgIndex = group.chat_history.findIndex(m => {
+        if (m.type !== 'redpacket') return false;
+        try {
+            const data = JSON.parse(m.content);
+            return data.id === currentViewingRedPacketId;
+        } catch(e) {
+            return false;
+        }
+    });
+    
+    if (msgIndex === -1) return;
+    
+    const msg = group.chat_history[msgIndex];
+    const data = JSON.parse(msg.content);
+    
+    // 检查是否已领取完
+    if ((data.claimed?.length || 0) >= data.count) {
+        showToast('红包已被领完');
+        await showRedPacketDetail(currentViewingRedPacketId); // 刷新页面
+        return;
+    }
+    
+    // 检查是否已领取过
+    const myId = currentMyCharId ? parseInt(currentMyCharId) : null;
+    if (!myId) {
+        showToast('请先设置身份');
+        return;
+    }
+    if (data.claimed?.includes(myId)) {
+        showToast('你已领取过该红包');
+        return;
+    }
+    
+    // 领取红包
+    if (!data.claimed) data.claimed = [];
+    if (!data.claimedAmounts) data.claimedAmounts = {};
+    
+    let claimAmount = 0;
+    const totalAmount = parseFloat(data.totalAmount);
+    const remaining = data.count - data.claimed.length;
+    const alreadyClaimed = Object.values(data.claimedAmounts).reduce((a, b) => a + parseFloat(b), 0);
+    const remainingAmount = totalAmount - alreadyClaimed;
+    
+    if (data.redpacketType === 'lucky') {
+        // 拼手气红包：随机金额
+        if (remaining === 1) {
+            claimAmount = remainingAmount;
+        } else {
+            // 随机金额，确保每人至少0.01
+            const maxAmount = remainingAmount - (remaining - 1) * 0.01;
+            claimAmount = Math.random() * maxAmount * 0.8 + 0.01; // 保守随机
+            claimAmount = Math.min(claimAmount, maxAmount);
+        }
+    } else {
+        // 普通红包：平均分配
+        claimAmount = totalAmount / data.count;
+    }
+    
+    claimAmount = parseFloat(claimAmount.toFixed(2));
+    
+    // 记录领取
+    data.claimed.push(myId);
+    data.claimedAmounts[myId] = claimAmount.toFixed(2);
+    
+    // 更新红包消息
+    group.chat_history[msgIndex].content = JSON.stringify(data);
+    await db.group_chats.put(group);
+    
+    // 增加余额
+    const user = await db.characters.get(myId);
+    if (user) {
+        if (!user.identity) user.identity = {};
+        let balance = parseFloat(user.identity.balance || 0);
+        balance += claimAmount;
+        user.identity.balance = balance.toFixed(2);
+        await db.characters.put(user);
+    }
+    
+    // 记录账单（收入）
+    await addTransaction('income', claimAmount, '红包', `${group.name}`);
+    
+    // 刷新红包详情页面
+    await showRedPacketDetail(currentViewingRedPacketId);
+    
+    // 刷新群聊
+    await renderGroupChatBody(group);
+    
+    showToast(`成功领取 ¥${claimAmount.toFixed(2)}`);
+}
+
+// 领取群聊专属转账
+async function receiveGroupTransfer(msgId) {
+    if (!window.currentGroupChatId) return;
+    
+    const group = await db.group_chats.get(window.currentGroupChatId);
+    if (!group || !group.chat_history) return;
+    
+    // 找到转账消息
+    const msgIndex = group.chat_history.findIndex(m => m.id === msgId && m.type === 'transfer');
+    if (msgIndex === -1) return;
+    
+    const msg = group.chat_history[msgIndex];
+    const data = JSON.parse(msg.content);
+    
+    // 检查是否已经被领取
+    if (data.status === 'received') {
+        showToast('该转账已被领取');
+        return;
+    }
+    
+    // 检查是否是自己发的
+    const myId = currentMyCharId ? parseInt(currentMyCharId) : null;
+    if (msg.role === 'user') {
+        showToast('不能领取自己发的转账');
+        return;
+    }
+    
+    // 检查是否是转给自己的（专属转账）
+    if (data.targetId && data.targetId !== myId) {
+        // 获取目标名称
+        const targetChar = await db.characters.get(data.targetId);
+        const targetName = data.targetName || targetChar?.name || '其他人';
+        showToast(`这是专属转账给 ${targetName} 的`);
+        return;
+    }
+    
+    // 领取转账
+    data.status = 'received';
+    data.receivedBy = myId;
+    data.receivedAt = Date.now();
+    
+    group.chat_history[msgIndex].content = JSON.stringify(data);
+    await db.group_chats.put(group);
+    
+    // 增加余额
+    if (currentMyCharId) {
+        const user = await db.characters.get(parseInt(currentMyCharId));
+        if (user) {
+            if (!user.identity) user.identity = {};
+            let balance = parseFloat(user.identity.balance || 0);
+            balance += parseFloat(data.amount);
+            user.identity.balance = balance.toFixed(2);
+            await db.characters.put(user);
+        }
+    }
+    
+    // 获取发送者名称
+    let senderName = '群友';
+    // 从群聊历史中获取发送者信息（假设msg包含senderId）
+    if (data.senderId) {
+        const senderChar = await db.characters.get(data.senderId);
+        if (senderChar) {
+            const memberNicknames = group.memberNicknames || {};
+            senderName = memberNicknames[data.senderId] || senderChar.remark || senderChar.name;
+        }
+    }
+    
+    // 记录账单（收入）
+    await addTransaction('income', data.amount, '转账收款', `来自${senderName}`);
+    
+    // 刷新群聊
+    await renderGroupChatBody(group);
+    showToast(`已收款 ¥${data.amount}`);
 }
 
 /* =================
@@ -19076,7 +20586,49 @@ async function doTransfer() {
     user.identity.balance = newBalance.toFixed(2);
     await db.characters.put(user);
     
-    // 3. 发送消息 - 存入chat_history（按账号）
+    // 3. 判断是群聊专属转账还是私聊转账
+    if (window.currentGroupChatId && exclusiveTransferTarget) {
+        // 群聊专属转账
+        const group = await db.group_chats.get(window.currentGroupChatId);
+        if (!group) {
+            showToast("群聊不存在");
+            return;
+        }
+        
+        const msgId = 'trans_' + Date.now();
+        const msg = {
+            role: 'user',
+            type: 'transfer',
+            content: JSON.stringify({
+                amount: amountVal.toFixed(2),
+                desc: noteVal,
+                status: 'sent',
+                senderId: parseInt(currentMyCharId),
+                targetId: exclusiveTransferTarget.memberId,
+                targetName: exclusiveTransferTarget.displayName
+            }), 
+            time: Date.now(),
+            id: msgId
+        };
+        
+        if (!group.chat_history) group.chat_history = [];
+        group.chat_history.push(msg);
+        group.updated_at = Date.now();
+        await db.group_chats.put(group);
+        
+        // 记录账单
+        await addTransaction('expense', amountVal, '转账', `转给${exclusiveTransferTarget.displayName}`);
+        
+        // 刷新群聊界面
+        await renderGroupChatBody(group);
+        
+        hideTransferPage();
+        exclusiveTransferTarget = null; // 清空目标
+        showToast("转账成功");
+        return;
+    }
+    
+    // 私聊转账
     const chatChar = await db.characters.get(currentChatCharId);
     if (!chatChar) {
         showToast("聊天对象不存在");
@@ -19101,6 +20653,9 @@ async function doTransfer() {
     
     history.push(msg);
     await setChatHistory(chatChar, accountId, history);
+    
+    // 记录账单
+    await addTransaction('expense', amountVal, '转账', `转给${chatChar.remark || chatChar.name}`);
     
     // 刷新聊天界面
     renderChatBody(chatChar);
@@ -23765,4 +25320,1331 @@ function formatTime(timestamp) {
     const minute = date.getMinutes();
     
     return `${month}月${day}日 ${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+}
+
+// ===== 聊天总结功能 =====
+
+// 当前查看的总结ID
+let currentViewingSummaryId = null;
+
+// 显示收藏页面
+async function showFavoritesPage() {
+    const page = document.getElementById('favorites-page');
+    if (!page) return;
+    
+    page.style.display = 'flex';
+    await renderFavoritesList('all');
+}
+
+// 隐藏收藏页面
+function hideFavoritesPage() {
+    const page = document.getElementById('favorites-page');
+    if (page) page.style.display = 'none';
+}
+
+// 切换收藏标签
+async function switchFavTab(type) {
+    // 更新标签样式
+    document.querySelectorAll('.fav-tab').forEach(tab => {
+        if (tab.dataset.type === type) {
+            tab.style.background = 'var(--ins-pink)';
+            tab.style.color = '#fff';
+            tab.style.border = 'none';
+            tab.classList.add('active');
+        } else {
+            tab.style.background = '#fff';
+            tab.style.color = '#666';
+            tab.style.border = '1px solid #e0e0e0';
+            tab.classList.remove('active');
+        }
+    });
+    
+    await renderFavoritesList(type);
+}
+
+// 渲染收藏列表
+async function renderFavoritesList(type) {
+    const listContainer = document.getElementById('favorites-list');
+    const emptyState = document.getElementById('favorites-empty');
+    
+    if (!listContainer) return;
+    
+    const accountId = getCurrentAccountId();
+    if (!accountId) {
+        listContainer.innerHTML = '';
+        emptyState.style.display = 'block';
+        return;
+    }
+    
+    // 获取所有总结
+    let summaries = await db.chat_summaries.where('accountId').equals(accountId).toArray();
+    
+    // 按时间倒序
+    summaries.sort((a, b) => b.time - a.time);
+    
+    if (summaries.length === 0) {
+        listContainer.innerHTML = '';
+        emptyState.style.display = 'block';
+        return;
+    }
+    
+    emptyState.style.display = 'none';
+    
+    // 生成列表HTML
+    let html = '';
+    for (const summary of summaries) {
+        let avatarUrl = '';
+        let name = '未知';
+        let chatTypeLabel = '';
+        
+        if (summary.chatType === 'private') {
+            const char = await db.characters.get(parseInt(summary.chatId));
+            if (char) {
+                avatarUrl = char.avatar || '';
+                name = char.remark || char.name || '未知';
+            }
+            chatTypeLabel = '私聊';
+        } else if (summary.chatType === 'group') {
+            const group = await db.group_chats.get(parseInt(summary.chatId));
+            if (group) {
+                avatarUrl = group.avatar || '';
+                name = group.name || '群聊';
+            }
+            chatTypeLabel = '群聊';
+        }
+        
+        const timeStr = formatSummaryTime(summary.time);
+        const preview = summary.content ? summary.content.substring(0, 80) + (summary.content.length > 80 ? '...' : '') : '暂无内容';
+        
+        html += `
+            <div onclick="showSummaryDetail(${summary.id})" style="background:#fff; border-radius:12px; padding:16px; cursor:pointer; transition:all 0.2s; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                <div style="display:flex; align-items:center; margin-bottom:12px;">
+                    <div style="width:44px; height:44px; border-radius:${summary.chatType === 'group' ? '8px' : '50%'}; background-size:cover; background-position:center; background-color:#e0e0e0; margin-right:12px; ${avatarUrl ? `background-image:url(${avatarUrl})` : ''}"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span style="font-size:16px; font-weight:600; color:#333;">${name}</span>
+                            <span style="font-size:11px; padding:2px 6px; background:${summary.chatType === 'group' ? '#e8f5e9' : '#fff3e0'}; color:${summary.chatType === 'group' ? '#4caf50' : '#ff9800'}; border-radius:4px;">${chatTypeLabel}</span>
+                        </div>
+                        <div style="font-size:12px; color:#999; margin-top:2px;">${timeStr}</div>
+                    </div>
+                    <div style="font-size:12px; color:#999;">${summary.messageCount || 0}条消息</div>
+                </div>
+                <div style="font-size:14px; color:#666; line-height:1.5; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${preview}</div>
+            </div>
+        `;
+    }
+    
+    listContainer.innerHTML = html;
+}
+
+// 格式化总结时间
+function formatSummaryTime(timestamp) {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    const hour = date.getHours().toString().padStart(2, '0');
+    const minute = date.getMinutes().toString().padStart(2, '0');
+    return `${year}-${month}-${day} ${hour}:${minute}`;
+}
+
+// 显示总结详情
+async function showSummaryDetail(summaryId) {
+    const page = document.getElementById('summary-detail-page');
+    if (!page) return;
+    
+    currentViewingSummaryId = summaryId;
+    
+    const summary = await db.chat_summaries.get(summaryId);
+    if (!summary) {
+        alert('总结不存在');
+        return;
+    }
+    
+    // 获取聊天对象信息
+    let avatarUrl = '';
+    let name = '未知';
+    
+    if (summary.chatType === 'private') {
+        const char = await db.characters.get(parseInt(summary.chatId));
+        if (char) {
+            avatarUrl = char.avatar || '';
+            name = char.remark || char.name || '未知';
+        }
+    } else if (summary.chatType === 'group') {
+        const group = await db.group_chats.get(parseInt(summary.chatId));
+        if (group) {
+            avatarUrl = group.avatar || '';
+            name = group.name || '群聊';
+        }
+    }
+    
+    // 填充页面内容
+    document.getElementById('summary-detail-title').textContent = name + ' - 聊天总结';
+    
+    const avatarEl = document.getElementById('summary-detail-avatar');
+    if (avatarUrl) {
+        avatarEl.style.backgroundImage = `url(${avatarUrl})`;
+    } else {
+        avatarEl.style.backgroundImage = '';
+    }
+    avatarEl.style.borderRadius = summary.chatType === 'group' ? '8px' : '50%';
+    
+    document.getElementById('summary-detail-name').textContent = name;
+    document.getElementById('summary-detail-time').textContent = formatSummaryTime(summary.time);
+    document.getElementById('summary-msg-count').textContent = summary.messageCount || 0;
+    document.getElementById('summary-time-range').textContent = summary.timeRange || '-';
+    document.getElementById('summary-detail-content').textContent = summary.content || '暂无内容';
+    
+    // 关键词标签
+    const keywordsSection = document.getElementById('summary-keywords-section');
+    const keywordsContainer = document.getElementById('summary-detail-keywords');
+    if (summary.keywords && summary.keywords.length > 0) {
+        keywordsSection.style.display = 'block';
+        keywordsContainer.innerHTML = summary.keywords.map(kw => 
+            `<span style="padding:6px 12px; background:#f0f0f5; border-radius:16px; font-size:13px; color:#666;">${kw}</span>`
+        ).join('');
+    } else {
+        keywordsSection.style.display = 'none';
+    }
+    
+    page.style.display = 'flex';
+}
+
+// 隐藏总结详情页
+function hideSummaryDetailPage() {
+    const page = document.getElementById('summary-detail-page');
+    if (page) page.style.display = 'none';
+    currentViewingSummaryId = null;
+}
+
+// 删除总结
+async function deleteSummary() {
+    if (!currentViewingSummaryId) return;
+    
+    if (!confirm('确定要删除这条总结吗？')) return;
+    
+    try {
+        await db.chat_summaries.delete(currentViewingSummaryId);
+        hideSummaryDetailPage();
+        
+        // 刷新收藏列表
+        const favPage = document.getElementById('favorites-page');
+        if (favPage && favPage.style.display !== 'none') {
+            await renderFavoritesList('all');
+        }
+        
+        // 刷新聊天总结列表
+        const chatSummariesPage = document.getElementById('chat-summaries-page');
+        if (chatSummariesPage && chatSummariesPage.style.display !== 'none') {
+            // 重新加载当前聊天的总结
+        }
+        
+        showToast('删除成功');
+    } catch (e) {
+        console.error('删除总结失败:', e);
+        alert('删除失败');
+    }
+}
+
+// 显示某个聊天的总结列表
+async function showChatSummaries(chatType) {
+    const page = document.getElementById('chat-summaries-page');
+    if (!page) return;
+    
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    let chatId, name;
+    
+    if (chatType === 'private') {
+        if (!currentChatCharId) return;
+        chatId = currentChatCharId;
+        const char = await db.characters.get(parseInt(chatId));
+        name = char ? (char.remark || char.name) : '私聊';
+    } else if (chatType === 'group') {
+        if (!window.currentGroupChatId) return;
+        chatId = window.currentGroupChatId;
+        const group = await db.group_chats.get(parseInt(chatId));
+        name = group ? group.name : '群聊';
+    }
+    
+    document.getElementById('chat-summaries-title').textContent = name + ' - 总结记录';
+    
+    // 获取该聊天的所有总结
+    let summaries = await db.chat_summaries
+        .where(['accountId', 'chatType', 'chatId'])
+        .equals([accountId, chatType, String(chatId)])
+        .toArray();
+    
+    // 如果复合索引不工作，使用过滤
+    if (summaries.length === 0) {
+        summaries = await db.chat_summaries.where('accountId').equals(accountId).toArray();
+        summaries = summaries.filter(s => s.chatType === chatType && String(s.chatId) === String(chatId));
+    }
+    
+    // 按时间倒序
+    summaries.sort((a, b) => b.time - a.time);
+    
+    const listContainer = document.getElementById('chat-summaries-list');
+    const emptyState = document.getElementById('chat-summaries-empty');
+    
+    if (summaries.length === 0) {
+        listContainer.innerHTML = '';
+        emptyState.style.display = 'block';
+    } else {
+        emptyState.style.display = 'none';
+        listContainer.innerHTML = summaries.map(summary => `
+            <div onclick="showSummaryDetail(${summary.id})" style="background:#fff; border-radius:12px; padding:16px; cursor:pointer; transition:all 0.2s; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <span style="font-size:14px; font-weight:600; color:#333;">第 ${summaries.indexOf(summary) + 1} 次总结</span>
+                    <span style="font-size:12px; color:#999;">${formatSummaryTime(summary.time)}</span>
+                </div>
+                <div style="font-size:13px; color:#666; line-height:1.5; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;">
+                    ${summary.content ? summary.content.substring(0, 120) + (summary.content.length > 120 ? '...' : '') : '暂无内容'}
+                </div>
+                <div style="margin-top:10px; font-size:12px; color:#999;">
+                    ${summary.messageCount || 0}条消息 · ${summary.timeRange || '-'}
+                </div>
+            </div>
+        `).join('');
+    }
+    
+    page.style.display = 'flex';
+}
+
+// 隐藏聊天总结列表页
+function hideChatSummariesPage() {
+    const page = document.getElementById('chat-summaries-page');
+    if (page) page.style.display = 'none';
+}
+
+// 手动触发生成总结
+async function triggerManualSummary(chatType) {
+    const accountId = getCurrentAccountId();
+    if (!accountId) {
+        alert('请先登录账号');
+        return;
+    }
+    
+    let chatId, chatHistory, name;
+    
+    if (chatType === 'private') {
+        if (!currentChatCharId) {
+            alert('请先打开一个聊天');
+            return;
+        }
+        chatId = currentChatCharId;
+        const char = await db.characters.get(parseInt(chatId));
+        name = char ? (char.remark || char.name) : '私聊';
+        chatHistory = getChatHistory(char, accountId);
+    } else if (chatType === 'group') {
+        if (!window.currentGroupChatId) {
+            alert('请先打开一个群聊');
+            return;
+        }
+        chatId = window.currentGroupChatId;
+        const group = await db.group_chats.get(parseInt(chatId));
+        name = group ? group.name : '群聊';
+        chatHistory = group ? (group.messages || []) : [];
+    }
+    
+    if (!chatHistory || chatHistory.length < 5) {
+        alert('聊天记录太少（至少需要5条），无法生成总结');
+        return;
+    }
+    
+    if (!confirm(`确定要为与「${name}」的聊天生成总结吗？\n将总结最近的聊天内容。`)) {
+        return;
+    }
+    
+    showToast('正在生成总结...');
+    
+    try {
+        await generateChatSummary(chatType, chatId, accountId, chatHistory);
+        showToast('总结生成成功！');
+        
+        // 更新总结计数显示
+        await updateSummaryCount(chatType, chatId, accountId);
+    } catch (e) {
+        console.error('生成总结失败:', e);
+        alert('生成总结失败: ' + e.message);
+    }
+}
+
+// 生成聊天总结
+async function generateChatSummary(chatType, chatId, accountId, chatHistory) {
+    // 获取最近的消息（最多100条）
+    const recentMessages = chatHistory.slice(-100);
+    
+    if (recentMessages.length < 5) {
+        throw new Error('聊天记录太少');
+    }
+    
+    // 计算时间范围
+    const firstMsgTime = recentMessages[0].time || recentMessages[0].timestamp || Date.now();
+    const lastMsgTime = recentMessages[recentMessages.length - 1].time || recentMessages[recentMessages.length - 1].timestamp || Date.now();
+    const timeRange = formatTimeRange(firstMsgTime, lastMsgTime);
+    
+    // 构建聊天内容文本
+    let chatContent = recentMessages.map(msg => {
+        const role = msg.role === 'user' ? '我' : (msg.name || 'AI');
+        const content = msg.content || msg.message || '';
+        return `${role}: ${content}`;
+    }).join('\n');
+    
+    // 调用API生成总结
+    const systemPrompt = `你是一个专业的聊天记录总结助手。请根据以下聊天记录，生成一份简洁但完整的总结。
+
+总结要求：
+1. 用第三人称描述对话双方的交流内容
+2. 提炼出主要话题和关键信息
+3. 如果有重要的情感变化或事件，要特别指出
+4. 总结长度控制在200-400字之间
+5. 使用自然流畅的中文表达
+6. 如果能提取3-5个关键词，请在最后用【关键词】标注
+
+聊天记录如下：
+${chatContent}`;
+
+    const messages = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: '请为这段聊天记录生成总结。' }
+    ];
+    
+    const summary = await callAI(messages);
+    
+    // 提取关键词
+    let keywords = [];
+    const keywordMatch = summary.match(/【关键词】[:：]?\s*(.+?)$/);
+    let content = summary;
+    if (keywordMatch) {
+        keywords = keywordMatch[1].split(/[,，、\s]+/).filter(k => k.trim());
+        content = summary.replace(/【关键词】[:：]?\s*.+?$/, '').trim();
+    }
+    
+    // 保存到数据库
+    const summaryData = {
+        accountId: accountId,
+        chatType: chatType,
+        chatId: String(chatId),
+        time: Date.now(),
+        content: content,
+        messageCount: recentMessages.length,
+        timeRange: timeRange,
+        keywords: keywords,
+        startTime: firstMsgTime,
+        endTime: lastMsgTime
+    };
+    
+    await db.chat_summaries.add(summaryData);
+    
+    return summaryData;
+}
+
+// 格式化时间范围
+function formatTimeRange(startTime, endTime) {
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    
+    const formatDate = (d) => {
+        const month = d.getMonth() + 1;
+        const day = d.getDate();
+        return `${month}月${day}日`;
+    };
+    
+    const startStr = formatDate(start);
+    const endStr = formatDate(end);
+    
+    if (startStr === endStr) {
+        return startStr;
+    }
+    return `${startStr} - ${endStr}`;
+}
+
+// 更新总结计数显示
+async function updateSummaryCount(chatType, chatId, accountId) {
+    let summaries = await db.chat_summaries.where('accountId').equals(accountId).toArray();
+    summaries = summaries.filter(s => s.chatType === chatType && String(s.chatId) === String(chatId));
+    
+    const count = summaries.length;
+    
+    if (chatType === 'private') {
+        const countEl = document.getElementById('detail-summary-count');
+        if (countEl) countEl.textContent = `${count}条总结`;
+    } else if (chatType === 'group') {
+        const countEl = document.getElementById('group-detail-summary-count');
+        if (countEl) countEl.textContent = `${count}条总结`;
+    }
+}
+
+// 检查是否需要自动总结（在发送消息后调用）
+async function checkAutoSummary(chatType, chatId, accountId) {
+    let autoSummaryEnabled = false;
+    let summaryInterval = 50;
+    let chatHistory = [];
+    
+    if (chatType === 'private') {
+        const char = await db.characters.get(parseInt(chatId));
+        if (!char) return;
+        autoSummaryEnabled = char.auto_summary_enabled;
+        summaryInterval = char.summary_interval || 50;
+        chatHistory = getChatHistory(char, accountId);
+    } else if (chatType === 'group') {
+        const group = await db.group_chats.get(parseInt(chatId));
+        if (!group) return;
+        autoSummaryEnabled = group.auto_summary_enabled;
+        summaryInterval = group.summary_interval || 50;
+        chatHistory = group.messages || [];
+    }
+    
+    if (!autoSummaryEnabled) return;
+    
+    // 获取上次总结后的消息数
+    let summaries = await db.chat_summaries.where('accountId').equals(accountId).toArray();
+    summaries = summaries.filter(s => s.chatType === chatType && String(s.chatId) === String(chatId));
+    summaries.sort((a, b) => b.time - a.time);
+    
+    const lastSummary = summaries[0];
+    const lastSummaryTime = lastSummary ? lastSummary.endTime : 0;
+    
+    // 统计上次总结后的消息数
+    const newMessages = chatHistory.filter(msg => {
+        const msgTime = msg.time || msg.timestamp || 0;
+        return msgTime > lastSummaryTime;
+    });
+    
+    // 如果达到阈值，自动生成总结
+    if (newMessages.length >= summaryInterval) {
+        console.log(`[AutoSummary] 达到阈值 ${summaryInterval}，自动生成总结`);
+        try {
+            await generateChatSummary(chatType, chatId, accountId, newMessages);
+            showToast('已自动生成聊天总结');
+        } catch (e) {
+            console.error('[AutoSummary] 自动总结失败:', e);
+        }
+    }
+}
+
+// 在加载聊天详情时更新总结计数
+async function loadSummarySettings(chatType, chatId) {
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    // 更新总结计数
+    await updateSummaryCount(chatType, chatId, accountId);
+    
+    // 加载自动总结设置
+    if (chatType === 'private') {
+        const char = await db.characters.get(parseInt(chatId));
+        if (char) {
+            document.getElementById('detail-auto-summary-switch').checked = !!char.auto_summary_enabled;
+            document.getElementById('detail-summary-interval').value = char.summary_interval || '';
+        }
+    } else if (chatType === 'group') {
+        const group = await db.group_chats.get(parseInt(chatId));
+        if (group) {
+            document.getElementById('group-detail-auto-summary-switch').checked = !!group.auto_summary_enabled;
+            document.getElementById('group-detail-summary-interval').value = group.summary_interval || '';
+        }
+    }
+}
+
+// ===== 联机功能 =====
+
+// 全局变量
+let onlineSocket = null;
+let onlineConnected = false;
+let onlineUserData = null;
+let onlineToken = null;
+let onlineCharacters = []; // 已上线的角色列表
+
+// 切换联机设置面板
+function toggleOnlineSettings() {
+    const body = document.getElementById('online-setting-body');
+    const arrow = document.getElementById('online-setting-arrow');
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        arrow.textContent = '▲';
+        loadOnlineSettings();
+    } else {
+        body.style.display = 'none';
+        arrow.textContent = '▼';
+    }
+}
+
+// 加载联机设置
+function loadOnlineSettings() {
+    const serverUrl = localStorage.getItem('online_server_url') || '';
+    document.getElementById('online-server-url').value = serverUrl;
+    
+    // 加载已保存的token
+    onlineToken = localStorage.getItem('online_token');
+    const savedUserData = localStorage.getItem('online_user_data');
+    if (savedUserData) {
+        try {
+            onlineUserData = JSON.parse(savedUserData);
+        } catch (e) {
+            onlineUserData = null;
+        }
+    }
+    
+    updateOnlineStatus();
+    
+    // 如果有token，尝试自动连接
+    if (serverUrl && onlineToken) {
+        connectToOnlineServer();
+    }
+}
+
+// 保存联机设置
+function saveOnlineSettings() {
+    const serverUrl = document.getElementById('online-server-url').value.trim();
+    localStorage.setItem('online_server_url', serverUrl);
+}
+
+// 更新在线状态显示
+function updateOnlineStatus() {
+    const statusDot = document.getElementById('online-status-dot');
+    const statusText = document.getElementById('online-status-text');
+    const userInfo = document.getElementById('online-user-info');
+    const usernameDisplay = document.getElementById('online-username-display');
+    const authButtons = document.getElementById('online-auth-buttons');
+    const loggedInActions = document.getElementById('online-logged-in-actions');
+    
+    if (onlineConnected && onlineUserData) {
+        statusDot.style.background = '#4caf50';
+        statusText.textContent = '已连接';
+        statusText.style.color = '#4caf50';
+        userInfo.style.display = 'block';
+        usernameDisplay.textContent = onlineUserData.username;
+        authButtons.style.display = 'none';
+        loggedInActions.style.display = 'block';
+    } else if (onlineConnected) {
+        statusDot.style.background = '#ff9800';
+        statusText.textContent = '已连接（未登录）';
+        statusText.style.color = '#ff9800';
+        userInfo.style.display = 'none';
+        authButtons.style.display = 'flex';
+        loggedInActions.style.display = 'none';
+    } else {
+        statusDot.style.background = '#ccc';
+        statusText.textContent = '未连接';
+        statusText.style.color = '#666';
+        userInfo.style.display = 'none';
+        authButtons.style.display = 'flex';
+        loggedInActions.style.display = 'none';
+    }
+}
+
+// 测试连接
+async function testOnlineConnection() {
+    const serverUrl = document.getElementById('online-server-url').value.trim();
+    const statusEl = document.getElementById('online-connection-status');
+    const btnText = document.getElementById('test-online-btn-text');
+    
+    if (!serverUrl) {
+        statusEl.innerHTML = '<span style="color:#ff3b30;">请填写服务器地址</span>';
+        return;
+    }
+    
+    btnText.textContent = '连接中...';
+    statusEl.innerHTML = '<span style="color:#999;">正在连接...</span>';
+    
+    try {
+        await connectToOnlineServer();
+        statusEl.innerHTML = '<span style="color:#4caf50;">✓ 连接成功</span>';
+    } catch (e) {
+        statusEl.innerHTML = `<span style="color:#ff3b30;">✗ 连接失败: ${e.message}</span>`;
+    }
+    
+    btnText.textContent = '测试连接';
+}
+
+// 连接到服务器
+function connectToOnlineServer() {
+    return new Promise((resolve, reject) => {
+        const serverUrl = document.getElementById('online-server-url').value.trim() || localStorage.getItem('online_server_url');
+        
+        if (!serverUrl) {
+            reject(new Error('未设置服务器地址'));
+            return;
+        }
+        
+        // 关闭旧连接
+        if (onlineSocket) {
+            onlineSocket.close();
+        }
+        
+        try {
+            onlineSocket = new WebSocket(serverUrl);
+            
+            onlineSocket.onopen = () => {
+                console.log('[Online] WebSocket connected');
+                onlineConnected = true;
+                updateOnlineStatus();
+                
+                // 如果有token，发送认证
+                if (onlineToken) {
+                    onlineSocket.send(JSON.stringify({
+                        type: 'auth',
+                        token: onlineToken
+                    }));
+                }
+                
+                resolve();
+            };
+            
+            onlineSocket.onmessage = (event) => {
+                handleOnlineMessage(JSON.parse(event.data));
+            };
+            
+            onlineSocket.onclose = () => {
+                console.log('[Online] WebSocket disconnected');
+                onlineConnected = false;
+                updateOnlineStatus();
+            };
+            
+            onlineSocket.onerror = (error) => {
+                console.error('[Online] WebSocket error:', error);
+                onlineConnected = false;
+                updateOnlineStatus();
+                reject(new Error('连接失败'));
+            };
+            
+            // 设置超时
+            setTimeout(() => {
+                if (!onlineConnected) {
+                    onlineSocket.close();
+                    reject(new Error('连接超时'));
+                }
+            }, 10000);
+            
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
+
+// 处理服务器消息
+function handleOnlineMessage(data) {
+    console.log('[Online] Received:', data);
+    
+    switch (data.type) {
+        case 'auth_success':
+            onlineUserData = data.user;
+            localStorage.setItem('online_user_data', JSON.stringify(data.user));
+            updateOnlineStatus();
+            showToast('联机登录成功');
+            // 获取已上线的角色
+            requestOnlineCharacters();
+            break;
+            
+        case 'auth_failed':
+            onlineToken = null;
+            onlineUserData = null;
+            localStorage.removeItem('online_token');
+            localStorage.removeItem('online_user_data');
+            updateOnlineStatus();
+            alert('登录失败: ' + (data.message || '认证失败'));
+            break;
+            
+        case 'login_success':
+            onlineToken = data.token;
+            onlineUserData = data.user;
+            localStorage.setItem('online_token', data.token);
+            localStorage.setItem('online_user_data', JSON.stringify(data.user));
+            updateOnlineStatus();
+            closeModal('online-login-modal');
+            showToast('登录成功');
+            requestOnlineCharacters();
+            break;
+            
+        case 'register_success':
+            onlineToken = data.token;
+            onlineUserData = data.user;
+            localStorage.setItem('online_token', data.token);
+            localStorage.setItem('online_user_data', JSON.stringify(data.user));
+            updateOnlineStatus();
+            closeModal('online-register-modal');
+            showToast('注册成功');
+            break;
+            
+        case 'error':
+            alert(data.message || '操作失败');
+            break;
+            
+        case 'search_result':
+            displayOnlineSearchResult(data.result);
+            break;
+            
+        case 'friend_request':
+            // 收到好友申请
+            handleOnlineFriendRequest(data.request);
+            break;
+            
+        case 'friend_request_accepted':
+            // 好友申请被接受
+            handleFriendRequestAccepted(data);
+            break;
+            
+        case 'message':
+            // 收到联机消息
+            handleOnlineIncomingMessage(data);
+            break;
+            
+        case 'online_characters':
+            // 已上线的角色列表
+            onlineCharacters = data.characters || [];
+            break;
+            
+        case 'character_online':
+            showToast(`角色 ${data.nickname} 已上线`);
+            requestOnlineCharacters();
+            break;
+            
+        case 'character_offline':
+            showToast(`角色已下线`);
+            requestOnlineCharacters();
+            break;
+    }
+}
+
+// 显示登录弹窗
+function showOnlineLoginModal() {
+    const serverUrl = document.getElementById('online-server-url').value.trim();
+    if (!serverUrl) {
+        alert('请先填写服务器地址');
+        return;
+    }
+    document.getElementById('online-login-modal').style.display = 'flex';
+}
+
+// 显示注册弹窗
+function showOnlineRegisterModal() {
+    const serverUrl = document.getElementById('online-server-url').value.trim();
+    if (!serverUrl) {
+        alert('请先填写服务器地址');
+        return;
+    }
+    document.getElementById('online-register-modal').style.display = 'flex';
+}
+
+// 执行登录
+async function doOnlineLogin() {
+    const username = document.getElementById('online-login-username').value.trim();
+    const password = document.getElementById('online-login-password').value;
+    
+    if (!username || !password) {
+        alert('请填写用户名和密码');
+        return;
+    }
+    
+    // 确保已连接
+    if (!onlineConnected) {
+        try {
+            await connectToOnlineServer();
+        } catch (e) {
+            alert('无法连接服务器: ' + e.message);
+            return;
+        }
+    }
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'login',
+        username: username,
+        password: password
+    }));
+}
+
+// 执行注册
+async function doOnlineRegister() {
+    const username = document.getElementById('online-register-username').value.trim();
+    const email = document.getElementById('online-register-email').value.trim();
+    const password = document.getElementById('online-register-password').value;
+    const password2 = document.getElementById('online-register-password2').value;
+    
+    if (!username) {
+        alert('请填写用户名');
+        return;
+    }
+    
+    if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+        alert('用户名只能包含字母、数字和下划线，长度3-20位');
+        return;
+    }
+    
+    if (!password || password.length < 6) {
+        alert('密码至少6位');
+        return;
+    }
+    
+    if (password !== password2) {
+        alert('两次输入的密码不一致');
+        return;
+    }
+    
+    // 确保已连接
+    if (!onlineConnected) {
+        try {
+            await connectToOnlineServer();
+        } catch (e) {
+            alert('无法连接服务器: ' + e.message);
+            return;
+        }
+    }
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'register',
+        username: username,
+        email: email || null,
+        password: password
+    }));
+}
+
+// 退出登录
+function onlineLogout() {
+    if (confirm('确定要退出联机登录吗？')) {
+        onlineToken = null;
+        onlineUserData = null;
+        onlineCharacters = [];
+        localStorage.removeItem('online_token');
+        localStorage.removeItem('online_user_data');
+        updateOnlineStatus();
+        
+        if (onlineSocket) {
+            onlineSocket.send(JSON.stringify({ type: 'logout' }));
+        }
+        
+        showToast('已退出登录');
+    }
+}
+
+// 显示联机搜索弹窗
+async function showOnlineSearchModal() {
+    toggleWechatMenu(); // 关闭菜单
+    
+    if (!onlineConnected || !onlineUserData) {
+        alert('请先在设置中连接服务器并登录');
+        return;
+    }
+    
+    // 检查是否有已上线的角色
+    if (onlineCharacters.length === 0) {
+        alert('请先在「我」页面上线至少一个User角色');
+        return;
+    }
+    
+    // 填充身份选择下拉框
+    const select = document.getElementById('online-search-my-persona');
+    select.innerHTML = onlineCharacters.map(char => 
+        `<option value="${char.wx_account}">${char.nickname} (${char.wx_account})</option>`
+    ).join('');
+    
+    // 清空之前的搜索结果
+    document.getElementById('online-search-input').value = '';
+    document.getElementById('online-search-result').style.display = 'none';
+    document.getElementById('online-search-empty').style.display = 'none';
+    document.getElementById('online-search-message').value = '';
+    
+    document.getElementById('online-search-modal').style.display = 'flex';
+}
+
+// 执行联机搜索
+function doOnlineSearch() {
+    const wxAccount = document.getElementById('online-search-input').value.trim();
+    
+    if (!wxAccount) {
+        alert('请输入要搜索的虚拟微信号');
+        return;
+    }
+    
+    if (!onlineConnected) {
+        alert('服务器未连接');
+        return;
+    }
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'search_user',
+        wx_account: wxAccount
+    }));
+}
+
+// 显示搜索结果
+function displayOnlineSearchResult(result) {
+    const resultEl = document.getElementById('online-search-result');
+    const emptyEl = document.getElementById('online-search-empty');
+    
+    if (!result) {
+        resultEl.style.display = 'none';
+        emptyEl.style.display = 'block';
+        return;
+    }
+    
+    emptyEl.style.display = 'none';
+    resultEl.style.display = 'block';
+    
+    // 填充结果
+    document.getElementById('online-search-avatar').style.backgroundImage = result.avatar ? `url(${result.avatar})` : '';
+    document.getElementById('online-search-nickname').textContent = result.nickname || '未设置昵称';
+    document.getElementById('online-search-wxid').textContent = result.wx_account;
+    document.getElementById('online-search-bio').textContent = result.bio || '这个人很懒，什么都没写~';
+    
+    const statusEl = document.getElementById('online-search-online-status');
+    if (result.is_online) {
+        statusEl.textContent = '在线';
+        statusEl.style.background = '#e8f5e9';
+        statusEl.style.color = '#4caf50';
+    } else {
+        statusEl.textContent = '离线';
+        statusEl.style.background = '#f5f5f5';
+        statusEl.style.color = '#999';
+    }
+    
+    // 保存搜索结果供发送申请使用
+    resultEl.dataset.wxAccount = result.wx_account;
+}
+
+// 发送联机好友申请
+function sendOnlineFriendRequest() {
+    const resultEl = document.getElementById('online-search-result');
+    const toWxAccount = resultEl.dataset.wxAccount;
+    const fromWxAccount = document.getElementById('online-search-my-persona').value;
+    const message = document.getElementById('online-search-message').value.trim();
+    
+    if (!toWxAccount || !fromWxAccount) {
+        alert('请选择你的身份');
+        return;
+    }
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'friend_request',
+        from_wx_account: fromWxAccount,
+        to_wx_account: toWxAccount,
+        message: message || '请求添加你为好友'
+    }));
+    
+    closeModal('online-search-modal');
+    showToast('好友申请已发送');
+}
+
+// 处理收到的好友申请
+async function handleOnlineFriendRequest(request) {
+    console.log('[Online] 收到好友申请:', request);
+    
+    // 创建一个通知
+    sendSystemNotification('新的好友申请', `${request.from_nickname} (${request.from_wx_account}) 想添加你为好友`);
+    
+    // 将申请保存到本地好友申请列表
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    await db.friend_requests.add({
+        fromCharId: null, // 联机好友没有本地charId
+        toAccountId: accountId,
+        status: 'pending',
+        time: Date.now(),
+        isOnline: true, // 标记为联机好友申请
+        onlineData: request // 保存联机数据
+    });
+    
+    // 刷新新的好友页面
+    if (document.getElementById('new-friends-page').style.display !== 'none') {
+        renderNewFriendsPage();
+    }
+}
+
+// 好友申请被接受
+async function handleFriendRequestAccepted(data) {
+    console.log('[Online] 好友申请被接受:', data);
+    
+    // 在本地创建一个联机好友角色
+    const newChar = {
+        name: data.friend_nickname,
+        type: 'online_friend', // 特殊类型：联机好友
+        avatar: data.friend_avatar || '',
+        description: data.friend_bio || '',
+        identity: {
+            account: data.friend_wx_account
+        },
+        isOnlineFriend: true,
+        onlineData: {
+            wx_account: data.friend_wx_account,
+            user_id: data.friend_user_id
+        },
+        friends_by_account: {}
+    };
+    
+    // 设置好友关系
+    const accountId = getCurrentAccountId();
+    if (accountId) {
+        newChar.friends_by_account[accountId] = 'friend';
+    }
+    
+    const charId = await db.characters.add(newChar);
+    
+    showToast(`${data.friend_nickname} 已成为你的好友`);
+    
+    // 刷新微信列表
+    const content = document.getElementById('wechat-content');
+    if (content) {
+        renderWechatList(content);
+    }
+}
+
+// 处理收到的联机消息
+async function handleOnlineIncomingMessage(data) {
+    console.log('[Online] 收到消息:', data);
+    
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    // 查找本地对应的联机好友角色
+    const chars = await db.characters.where('type').equals('online_friend').toArray();
+    let targetChar = chars.find(c => c.onlineData?.wx_account === data.from_wx_account);
+    
+    if (!targetChar) {
+        console.warn('[Online] 未找到对应的联机好友角色');
+        return;
+    }
+    
+    // 保存消息到聊天历史
+    let history = getChatHistory(targetChar, accountId);
+    history.push({
+        role: 'char',
+        content: data.content,
+        time: data.timestamp || Date.now(),
+        isOnlineMessage: true
+    });
+    await setChatHistory(targetChar, accountId, history);
+    
+    // 如果当前正在查看这个聊天，更新UI
+    if (currentChatCharId === targetChar.id) {
+        appendMessageToUI('char', data.content, targetChar.avatar);
+    } else {
+        // 发送通知
+        sendSystemNotification(targetChar.name, data.content);
+    }
+}
+
+// 请求已上线的角色列表
+function requestOnlineCharacters() {
+    if (!onlineConnected || !onlineUserData) return;
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'get_online_characters'
+    }));
+}
+
+// 上线角色
+async function goOnlineWithCharacter(charId) {
+    if (!onlineConnected || !onlineUserData) {
+        alert('请先在设置中连接服务器并登录');
+        return;
+    }
+    
+    const char = await db.characters.get(charId);
+    if (!char || char.type !== 'user') {
+        alert('只能上线User类型的角色');
+        return;
+    }
+    
+    const wxAccount = char.identity?.account;
+    if (!wxAccount) {
+        alert('该角色没有设置虚拟微信号，请先在WeChat中注册');
+        return;
+    }
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'go_online',
+        wx_account: wxAccount,
+        nickname: char.remark || char.name,
+        avatar: char.avatar || '',
+        bio: char.description?.substring(0, 100) || '',
+        local_char_id: charId
+    }));
+}
+
+// 下线角色
+function goOfflineWithCharacter(wxAccount) {
+    if (!onlineConnected) return;
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'go_offline',
+        wx_account: wxAccount
+    }));
+}
+
+// 发送联机消息
+function sendOnlineMessage(toWxAccount, content, fromWxAccount) {
+    if (!onlineConnected) {
+        console.warn('[Online] 未连接，无法发送消息');
+        return false;
+    }
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'message',
+        to_wx_account: toWxAccount,
+        from_wx_account: fromWxAccount,
+        content: content
+    }));
+    
+    return true;
+}
+
+// 检查角色是否已上线
+function isCharacterOnline(wxAccount) {
+    return onlineCharacters.some(c => c.wx_account === wxAccount);
+}
+
+// 获取联机状态
+function getOnlineStatus() {
+    return {
+        connected: onlineConnected,
+        loggedIn: !!onlineUserData,
+        user: onlineUserData,
+        characters: onlineCharacters
+    };
+}
+
+// 更新联机功能区显示
+function updateOnlineFeatureSection() {
+    const badge = document.getElementById('online-char-count-badge');
+    if (!badge) return;
+    
+    if (!onlineConnected) {
+        badge.textContent = '未连接';
+        badge.style.color = '#999';
+    } else if (!onlineUserData) {
+        badge.textContent = '未登录';
+        badge.style.color = '#ff9800';
+    } else if (onlineCharacters.length === 0) {
+        badge.textContent = '已登录';
+        badge.style.color = '#4caf50';
+    } else {
+        badge.textContent = `${onlineCharacters.length}个角色在线`;
+        badge.style.color = '#4caf50';
+    }
+}
+
+// 显示联机状态页面
+async function showOnlineStatusPage() {
+    // 获取所有User类型角色
+    const users = await db.characters.where('type').equals('user').toArray();
+    
+    // 检查每个角色的在线状态
+    const charList = users.map(char => {
+        const wxAccount = char.identity?.account || '';
+        const isOnline = wxAccount && onlineCharacters.some(c => c.wx_account === wxAccount);
+        return {
+            id: char.id,
+            name: char.remark || char.name,
+            avatar: char.avatar || '',
+            wxAccount: wxAccount,
+            isOnline: isOnline
+        };
+    }).filter(c => c.wxAccount); // 只显示有微信号的角色
+    
+    const modal = document.createElement('div');
+    modal.id = 'online-status-modal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: #f5f5f5;
+        z-index: 10000;
+        display: flex;
+        flex-direction: column;
+    `;
+    
+    let connectionStatus = '';
+    if (!onlineConnected) {
+        connectionStatus = `
+            <div style="padding:16px; background:#fff5f5; color:#ff3b30; text-align:center; font-size:14px;">
+                未连接服务器，请在设置中配置联机设置
+            </div>
+        `;
+    } else if (!onlineUserData) {
+        connectionStatus = `
+            <div style="padding:16px; background:#fff8e1; color:#ff9800; text-align:center; font-size:14px;">
+                已连接服务器，请先登录
+            </div>
+        `;
+    } else {
+        connectionStatus = `
+            <div style="padding:16px; background:#e8f5e9; color:#4caf50; text-align:center; font-size:14px;">
+                已连接 - ${onlineUserData.username}
+            </div>
+        `;
+    }
+    
+    let charListHtml = '';
+    if (charList.length === 0) {
+        charListHtml = `
+            <div style="text-align:center; padding:40px 20px; color:#999;">
+                <div style="font-size:14px;">没有可上线的角色</div>
+                <div style="font-size:12px; margin-top:8px;">请先在角色档案创建User类型角色，并在微信中注册</div>
+            </div>
+        `;
+    } else {
+        charListHtml = charList.map(char => `
+            <div style="padding:12px 16px; background:#fff; display:flex; align-items:center; gap:12px; border-bottom:1px solid #f0f0f0;">
+                <div style="width:44px; height:44px; border-radius:8px; background-image:url(${char.avatar}); background-size:cover; background-position:center; background-color:#e0e0e0;"></div>
+                <div style="flex:1;">
+                    <div style="font-size:15px; font-weight:500; color:#333;">${char.name}</div>
+                    <div style="font-size:12px; color:#999; margin-top:2px;">${char.wxAccount}</div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    ${char.isOnline ? `
+                        <span style="font-size:12px; color:#4caf50;">● 在线</span>
+                        <button onclick="goOfflineWithCharacter('${char.wxAccount}')" style="padding:6px 12px; background:#f5f5f5; color:#ff3b30; border:none; border-radius:6px; font-size:13px; cursor:pointer;">下线</button>
+                    ` : `
+                        <span style="font-size:12px; color:#999;">○ 离线</span>
+                        <button onclick="goOnlineWithCharacter(${char.id})" style="padding:6px 12px; background:var(--ins-pink); color:#fff; border:none; border-radius:6px; font-size:13px; cursor:pointer;" ${!onlineConnected || !onlineUserData ? 'disabled style="opacity:0.5;padding:6px 12px; background:#ccc; color:#fff; border:none; border-radius:6px; font-size:13px;"' : ''}>上线</button>
+                    `}
+                </div>
+            </div>
+        `).join('');
+    }
+    
+    modal.innerHTML = `
+        <div style="background: #fff; height: 88px; padding-top: 44px; padding-left: 16px; padding-right: 16px; display: flex; align-items: center; border-bottom: 1px solid #e8e8e8; box-sizing: border-box;">
+            <svg onclick="closeOnlineStatusPage()" viewBox="0 0 24 24" style="width: 24px; height: 24px; cursor: pointer; stroke: #333; fill: none; stroke-width: 2;">
+                <polyline points="15 18 9 12 15 6"></polyline>
+            </svg>
+            <span style="flex: 1; text-align: center; font-size: 16px; font-weight: 600; margin-left: -24px;">联机状态</span>
+        </div>
+        
+        ${connectionStatus}
+        
+        <div style="flex: 1; overflow-y: auto;">
+            <div style="padding:12px 16px; font-size:13px; color:#888;">
+                我的User角色（可上线）
+            </div>
+            ${charListHtml}
+            
+            <div style="padding:16px; font-size:12px; color:#999; line-height:1.6;">
+                <div style="font-weight:600; color:#666; margin-bottom:6px;">💡 使用说明</div>
+                <div>• 上线后，其他用户可以通过你的虚拟微信号搜索到你</div>
+                <div>• 你可以同时上线多个角色</div>
+                <div>• 上线的角色可以接收好友申请和消息</div>
+                <div>• 关闭页面或刷新后需要重新上线</div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 关闭联机状态页面
+function closeOnlineStatusPage() {
+    const modal = document.getElementById('online-status-modal');
+    if (modal) {
+        modal.remove();
+        // 更新"我"页面的联机状态
+        updateOnlineFeatureSection();
+    }
 }

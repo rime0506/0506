@@ -1865,6 +1865,94 @@
             flex-direction: column;
             padding-bottom: env(safe-area-inset-bottom);
         }
+        /* 引用预览区域 */
+        .quote-preview {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: #f8f8f8;
+            border-bottom: 1px solid #eee;
+        }
+        .quote-preview-content {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+            min-width: 0;
+        }
+        .quote-preview-line {
+            width: 3px;
+            height: 32px;
+            background: var(--ins-pink);
+            border-radius: 2px;
+            flex-shrink: 0;
+        }
+        .quote-preview-text {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+            flex: 1;
+        }
+        .quote-preview-name {
+            font-size: 12px;
+            color: var(--ins-pink);
+            font-weight: 500;
+        }
+        .quote-preview-msg {
+            font-size: 13px;
+            color: #666;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .quote-preview-close {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: #999;
+            flex-shrink: 0;
+        }
+        .quote-preview-close:hover {
+            color: #666;
+        }
+        /* 引用消息样式 - 统一私聊和群聊 */
+        .quoted-message {
+            border-left: 2px solid rgba(0,0,0,0.15);
+            padding: 2px 6px;
+            margin-bottom: 4px;
+            font-size: 11px;
+            line-height: 1.3;
+            max-width: 180px;
+        }
+        .quoted-message-name {
+            color: #555;
+            font-weight: 500;
+            font-size: 10px;
+            margin-bottom: 1px;
+        }
+        .quoted-message-text {
+            color: #666;
+            font-size: 10px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 160px;
+            display: block;
+        }
+        /* 群聊引用样式（使用内联style的div） */
+        .group-msg-content .quoted-message {
+            border-left: 2px solid rgba(0,0,0,0.15);
+            padding: 2px 6px;
+            margin-bottom: 4px;
+            font-size: 11px;
+            line-height: 1.3;
+            max-width: 180px;
+        }
         .chat-input-bar {
             min-height: 60px;
             padding: 10px 12px;
@@ -3025,7 +3113,7 @@
             border-color: #e8e8e8;
         }
         
-        /* 图片图标 - 更柔和的颜色 */
+        /* 图片图标 - 统一灰色 */
         .img-card-icon {
             width: 36px;
             height: 36px;
@@ -3033,17 +3121,17 @@
             stroke-width: 1.5;
         }
         .message-row.self .img-card-icon {
-            stroke: #d4a5c0;
+            stroke: #bbb;
         }
         
-        /* 提示文字 - 更柔和 */
+        /* 提示文字 - 统一灰色 */
         .img-card-hint {
             font-size: 13px;
             color: #aaa;
             font-weight: 400;
         }
         .message-row.self .img-card-hint {
-            color: #c4a0b5;
+            color: #aaa;
         }
         
         /* 展开后的文字内容 - 保持相同大小 */
