@@ -26364,6 +26364,7 @@ async function handleFriendRequestAccepted(data) {
     console.log('[Online] 好友申请被接受:', data);
     
     // 在本地创建一个联机好友角色
+    const accountId = getCurrentAccountId();
     const newChar = {
         name: data.friend_nickname,
         type: 'online_friend', // 特殊类型：联机好友
@@ -26377,13 +26378,12 @@ async function handleFriendRequestAccepted(data) {
             wx_account: data.friend_wx_account,
             user_id: data.friend_user_id
         },
-        friends_by_account: {}
+        wechat_status_by_user: {}  // 使用正确的字段名，与 getFriendStatus 匹配
     };
     
     // 设置好友关系
-    const accountId = getCurrentAccountId();
     if (accountId) {
-        newChar.friends_by_account[accountId] = 'friend';
+        newChar.wechat_status_by_user[accountId] = 'friend';
     }
     
     const charId = await db.characters.add(newChar);
