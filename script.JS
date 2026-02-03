@@ -8949,7 +8949,7 @@ ${history.length > 0 ? `你们之前的聊天记录：\n${recentMessages}` : '�
                 // 🎯 直接恢复为好友状态，不用重新申请
                 await setFriendStatus(char, accountId, 'friend');
                 
-                showToast('已解除拉黑，已恢复好友关系');
+                showToast('已解除拉黑，正在生成角色反应...');
                 
                 // 刷新界面
                 if (currentChatCharId === charId) {
@@ -8961,6 +8961,147 @@ ${history.length > 0 ? `你们之前的聊天记录：\n${recentMessages}` : '�
                 if (activeTab) {
                     const tabIndex = Array.from(document.querySelectorAll('.wechat-tab-item')).indexOf(activeTab);
                     switchWechatTab(tabIndex);
+                }
+                
+                // 🎯 调用AI生成解除拉黑后的反应
+                try {
+                    await generateUnblockReaction(char, accountId);
+                } catch (error) {
+                    console.error('[Unblock] 生成反应失败:', error);
+                }
+            }
+        }
+        
+        // 🎯 生成解除拉黑后角色的反应
+        async function generateUnblockReaction(char, accountId) {
+            const myChar = await db.characters.get(parseInt(accountId));
+            if (!myChar) return;
+            
+            // 获取聊天历史作为上下文
+            const chatHistory = getChatHistory(char, accountId);
+            const recentMessages = chatHistory.slice(-8).map(m => {
+                const role = m.role === 'user' ? myChar.name : char.name;
+                return `${role}: ${m.content}`;
+            }).join('\n');
+            
+            // 计算被拉黑的大概时长（根据最后一条消息的时间）
+            const lastMsg = chatHistory[chatHistory.length - 1];
+            const blockedDuration = lastMsg ? Math.floor((Date.now() - (lastMsg.timestamp || Date.now())) / (1000 * 60)) : 0;
+            const durationText = blockedDuration > 1440 ? `${Math.floor(blockedDuration / 1440)}天` : 
+                                 blockedDuration > 60 ? `${Math.floor(blockedDuration / 60)}小时` : 
+                                 blockedDuration > 0 ? `${blockedDuration}分钟` : '刚才';
+            
+            const prompt = `【角色扮演任务】
+你现在是「${char.name}」，请完全代入这个角色。
+
+【你的人设】
+${char.description || char.desc || '一个普通人'}
+
+【对方信息】
+名字：${myChar.name}
+${myChar.description ? `简介：${myChar.description.substring(0, 200)}` : ''}
+
+【最近的聊天记录（被拉黑前）】
+${recentMessages || '（无记录）'}
+
+【当前情境】
+你之前被「${myChar.name}」拉黑了大约 ${durationText}。
+在这段时间里，你可能打过电话、发过短信，但都没有得到回应。
+现在，对方突然解除了对你的拉黑！你们又能正常聊天了。
+
+【你需要思考】
+1. 被拉黑这段时间你经历了什么？（焦虑等待？愤怒不甘？伤心难过？无所谓？）
+2. 现在对方解除拉黑了，你是什么心情？（惊喜？激动？冷淡？试探？报复心理？）
+3. 你会立刻发消息吗？还是故意冷一下对方？
+4. 如果发消息，你会说什么？（兴师问罪？装作什么都没发生？小心翼翼？撒娇抱怨？）
+
+【输出要求】
+根据你的性格，生成你发现被解除拉黑后发的第一条/第一组微信消息。
+
+要求：
+- 用「|||」分隔多条消息（1-4条）
+- 符合你的人设和说话风格
+- 情绪要真实，不要太理性
+- 可以有语气词、表情、错别字
+- 如果你的性格是会冷处理的，可以只发一个字或表情
+
+直接输出消息内容，不要任何解释。
+
+示例格式：
+在吗|||你终于肯理我了|||我还以为你要拉黑我一辈子`;
+
+            console.log('[Unblock] 正在生成解除拉黑反应...');
+            
+            // 🎯 显示"对方正在输入中..."
+            const chatTitleEl = document.getElementById('chat-title');
+            const originalTitle = chatTitleEl ? chatTitleEl.innerText : (char.remark || char.name);
+            if (chatTitleEl && currentChatCharId === char.id) {
+                chatTitleEl.innerText = "对方正在输入中...";
+            }
+            
+            try {
+                const response = await callAI([
+                    { role: 'user', content: prompt }
+                ]);
+                
+                const replyText = response.trim();
+                if (!replyText) {
+                    // 恢复标题
+                    if (chatTitleEl && currentChatCharId === char.id) {
+                        chatTitleEl.innerText = originalTitle;
+                    }
+                    return;
+                }
+                
+                console.log('[Unblock] AI返回:', replyText);
+                
+                // 解析多条消息
+                const segments = replyText.split('|||').map(s => s.trim()).filter(s => s.length > 0);
+                if (segments.length === 0) {
+                    if (chatTitleEl && currentChatCharId === char.id) {
+                        chatTitleEl.innerText = originalTitle;
+                    }
+                    return;
+                }
+                
+                // 获取当前聊天记录
+                let currentHistory = getChatHistory(char, accountId);
+                
+                // 添加所有消息到聊天记录
+                for (let i = 0; i < segments.length; i++) {
+                    currentHistory.push({
+                        role: 'char',
+                        content: segments[i],
+                        time: Date.now() + i * 100
+                    });
+                }
+                
+                // 保存聊天记录
+                await setChatHistory(char, currentHistory, accountId);
+                
+                // 直接重新渲染聊天界面
+                if (currentChatCharId === char.id) {
+                    await renderChatBody(char);
+                    // 滚动到底部
+                    const chatBody = document.getElementById('chat-body');
+                    if (chatBody) chatBody.scrollTop = chatBody.scrollHeight;
+                }
+                
+                // 恢复标题
+                if (chatTitleEl && currentChatCharId === char.id) {
+                    chatTitleEl.innerText = originalTitle;
+                }
+                
+                // 显示通知
+                showToast(`${char.name} 发来了消息`);
+                
+                console.log('[Unblock] ✅ 解除拉黑反应已生成');
+                
+            } catch (error) {
+                console.error('[Unblock] AI调用失败:', error);
+                // 恢复标题
+                if (chatTitleEl && currentChatCharId === char.id) {
+                    chatTitleEl.innerText = originalTitle;
                 }
             }
         }
