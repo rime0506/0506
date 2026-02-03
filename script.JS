@@ -9901,6 +9901,27 @@ ${chatContext || '（没有聊天记录）'}
                 chatFooter.style.display = 'flex';
             }
             
+            // ✅ 联机好友：隐藏AI魔法棒，简化菜单（只显示语音输入、相册、转账）
+            const isOnlineFriend = char.isOnlineFriend === true;
+            const actionPanel = document.getElementById('action-panel');
+            const actionItems = actionPanel.querySelectorAll('.action-item');
+            const aiMagicBtn = document.querySelector('.chat-input-bar .chat-icon-btn'); // 第一个按钮是AI魔法棒
+            
+            if (isOnlineFriend) {
+                // 隐藏AI魔法棒
+                if (aiMagicBtn) aiMagicBtn.style.display = 'none';
+                // 只显示前3个菜单项（语音输入、相册、转账）
+                actionItems.forEach((item, index) => {
+                    item.style.display = index < 3 ? '' : 'none';
+                });
+            } else {
+                // 普通角色：显示所有菜单
+                if (aiMagicBtn) aiMagicBtn.style.display = '';
+                actionItems.forEach(item => {
+                    item.style.display = '';
+                });
+            }
+            
             renderChatBody(char);
         }
 
@@ -9920,6 +9941,26 @@ ${chatContext || '（没有聊天记录）'}
             if (!char) return;
 
             document.getElementById('chat-detail-page').style.display = 'flex';
+            
+            // ✅ 联机好友：隐藏不相关的设置项
+            const isOnlineFriend = char.isOnlineFriend === true;
+            const detailPage = document.getElementById('chat-detail-page');
+            const detailGroups = detailPage.querySelectorAll('.detail-group');
+            
+            // 显示或隐藏特定的设置组（按顺序：档案关联、主动聊天、AI上下文、表情包、聊天背景、气泡样式、自定义样式、危险操作）
+            detailGroups.forEach((group, index) => {
+                if (isOnlineFriend) {
+                    // 联机好友只显示第一组（档案关联）和最后一组（危险操作）
+                    // 隐藏：主动聊天(1)、AI上下文(2)、表情包(3)、聊天背景(4)、气泡样式(5)、自定义样式(6)
+                    if (index >= 1 && index <= 6) {
+                        group.style.display = 'none';
+                    } else {
+                        group.style.display = '';
+                    }
+                } else {
+                    group.style.display = '';
+                }
+            });
             
             // 1. 回显基本信息
             document.getElementById('detail-char-remark').value = char.remark || '';
@@ -10467,10 +10508,72 @@ window.saveMountedStickers = saveMountedStickers;
             if (customContainer) customContainer.remove();
         }
 
-        function jumpToCharEditor() {
+        async function jumpToCharEditor() {
             if (!currentChatCharId) return;
+            
+            // 检查是否是联机好友
+            const char = await db.characters.get(currentChatCharId);
+            if (char && char.isOnlineFriend) {
+                // 联机好友只显示简化信息
+                showOnlineFriendProfile(char);
+                return;
+            }
+            
             hideChatDetail();
             editCharacter(currentChatCharId);
+        }
+        
+        // 显示联机好友的简化档案（只有基本信息，没有人设）
+        function showOnlineFriendProfile(char) {
+            const avatar = char.avatar || '';
+            const avatarStyle = avatar ? `background-image:url(${avatar})` : 'background:#e0e0e0';
+            
+            const html = `
+                <div style="position:fixed; top:0; left:0; right:0; bottom:0; background:#f5f5f5; z-index:9999; display:flex; flex-direction:column;">
+                    <div class="wechat-header" style="background:#fff;">
+                        <div class="back-btn" onclick="this.closest('div[style*=position]').remove()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:var(--ins-text);">
+                            <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                        </div>
+                        <div class="wechat-title">联机好友资料</div>
+                        <div style="width:40px;"></div>
+                    </div>
+                    
+                    <div style="flex:1; overflow-y:auto; padding:20px;">
+                        <!-- 头像和基本信息 -->
+                        <div style="text-align:center; padding:30px 0;">
+                            <div style="width:100px; height:100px; border-radius:12px; margin:0 auto 16px; background-size:cover; background-position:center; ${avatarStyle}"></div>
+                            <div style="font-size:20px; font-weight:600; color:#333; margin-bottom:8px;">${char.name || '未知'}</div>
+                            <div style="font-size:14px; color:#999;">联机好友</div>
+                        </div>
+                        
+                        <!-- 信息卡片 -->
+                        <div style="background:#fff; border-radius:12px; overflow:hidden; margin-bottom:16px;">
+                            <div style="padding:16px; border-bottom:1px solid #f0f0f0; display:flex; justify-content:space-between;">
+                                <span style="color:#666;">微信号</span>
+                                <span style="color:#333;">${char.identity?.account || '未知'}</span>
+                            </div>
+                            <div style="padding:16px; border-bottom:1px solid #f0f0f0; display:flex; justify-content:space-between;">
+                                <span style="color:#666;">昵称</span>
+                                <span style="color:#333;">${char.name || '未知'}</span>
+                            </div>
+                            ${char.description ? `
+                            <div style="padding:16px; display:flex; justify-content:space-between;">
+                                <span style="color:#666;">签名</span>
+                                <span style="color:#333; max-width:200px; text-align:right;">${char.description.substring(0, 50)}${char.description.length > 50 ? '...' : ''}</span>
+                            </div>
+                            ` : ''}
+                        </div>
+                        
+                        <!-- 提示信息 -->
+                        <div style="text-align:center; padding:20px; color:#999; font-size:13px;">
+                            <div style="margin-bottom:8px;">🌐 这是一位联机好友</div>
+                            <div>对方的详细人设档案不可见</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.insertAdjacentHTML('beforeend', html);
         }
 
         async function clearChatHistory() {
@@ -20667,15 +20770,16 @@ async function doTransfer() {
     let history = getChatHistory(chatChar, accountId);
     
     const msgId = 'trans_' + Date.now();
+    const transferData = {
+        amount: amountVal.toFixed(2),
+        desc: noteVal,
+        status: 'sent'
+    };
     const msg = {
         id: msgId,
         role: 'user',
         type: 'transfer',
-        content: JSON.stringify({
-            amount: amountVal.toFixed(2),
-            desc: noteVal,
-            status: 'sent'
-        }), 
+        content: JSON.stringify(transferData), 
         time: Date.now()
     };
     
@@ -20684,6 +20788,24 @@ async function doTransfer() {
     
     // 记录账单
     await addTransaction('expense', amountVal, '转账', `转给${chatChar.remark || chatChar.name}`);
+    
+    // ✅ 联机好友：通过服务器发送转账消息
+    if (chatChar.isOnlineFriend && chatChar.onlineData?.wx_account) {
+        // 获取当前用户的 wx_account
+        const userChars = await db.characters.where('type').equals('user').toArray();
+        const onlineUserChar = userChars.find(c => 
+            c.identity?.account && onlineCharacters.some(oc => oc.wx_account === c.identity.account)
+        );
+        
+        if (onlineUserChar && onlineConnected) {
+            const fromWxAccount = onlineUserChar.identity.account;
+            const toWxAccount = chatChar.onlineData.wx_account;
+            // 发送转账消息（格式化为特殊格式，对方可以识别）
+            const transferContent = `[转账] ¥${amountVal.toFixed(2)} - ${noteVal}`;
+            sendOnlineMessage(toWxAccount, transferContent, fromWxAccount);
+            console.log('[Online] 转账消息已发送到服务器');
+        }
+    }
     
     // 刷新聊天界面
     renderChatBody(chatChar);
