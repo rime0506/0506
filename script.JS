@@ -103,6 +103,87 @@ db.version(72).stores({
     friend_requests: '++id, fromCharId, toAccountId, status, time',
     group_chats: '++id, name, ownerAccountId, created_at' // 群聊表：id自增，名称，创建者账号ID，创建时间
 });
+// 版本73：添加电话记录和短信记录表（从localStorage迁移到IndexedDB）
+db.version(73).stores({
+    dexiData: 'key, value',
+    lorebooks: '++id, name',
+    characters: '++id, name, type',
+    sticker_categories: '++id, name',
+    moments: '++id, userId, time, ownerUserId',
+    friend_requests: '++id, fromCharId, toAccountId, status, time',
+    group_chats: '++id, name, ownerAccountId, created_at',
+    phone_recents: '++id, accountId, charId, time, type', // 电话记录：accountId账号隔离，charId角色ID，time时间，type类型(missed/incoming/outgoing)
+    sms_messages: '++id, accountId, charId, time, read'   // 短信记录：accountId账号隔离，charId角色ID，time时间，read是否已读
+});
+
+// 📦 数据迁移：将 localStorage 中的电话和短信记录迁移到 IndexedDB
+async function migratePhoneAndSmsToIndexedDB() {
+    const migrationKey = 'phone_sms_migrated_to_indexeddb';
+    if (localStorage.getItem(migrationKey) === 'true') {
+        return; // 已经迁移过
+    }
+    
+    console.log('[Migration] 开始迁移电话和短信记录到 IndexedDB...');
+    
+    // 获取默认账号ID
+    const currentAccountId = localStorage.getItem('current_my_char_id') || '1';
+    
+    // 迁移电话记录
+    try {
+        const phoneRecents = JSON.parse(localStorage.getItem('phone_recents') || '[]');
+        if (phoneRecents.length > 0) {
+            console.log(`[Migration] 迁移 ${phoneRecents.length} 条电话记录...`);
+            for (const record of phoneRecents) {
+                await db.phone_recents.add({
+                    accountId: currentAccountId,
+                    charId: null, // 旧数据没有 charId
+                    name: record.name,
+                    number: record.number,
+                    time: record.time || Date.now(),
+                    type: record.type || 'missed',
+                    isBlocked: record.isBlocked || false
+                });
+            }
+            // 清理旧数据
+            localStorage.removeItem('phone_recents');
+            console.log('[Migration] ✅ 电话记录迁移完成');
+        }
+    } catch (e) {
+        console.error('[Migration] ❌ 电话记录迁移失败:', e);
+    }
+    
+    // 迁移短信记录
+    try {
+        const smsMessages = JSON.parse(localStorage.getItem('sms_messages') || '[]');
+        if (smsMessages.length > 0) {
+            console.log(`[Migration] 迁移 ${smsMessages.length} 条短信记录...`);
+            for (const msg of smsMessages) {
+                await db.sms_messages.add({
+                    accountId: currentAccountId,
+                    charId: null, // 旧数据没有 charId
+                    sender: msg.sender,
+                    number: msg.number,
+                    content: msg.content || msg.message,
+                    time: msg.time || msg.timestamp || Date.now(),
+                    read: msg.read !== false,
+                    type: msg.type || 'received',
+                    isBlocked: msg.isBlocked || false,
+                    receiverName: msg.receiverName,
+                    receiverId: msg.receiverId
+                });
+            }
+            // 清理旧数据
+            localStorage.removeItem('sms_messages');
+            console.log('[Migration] ✅ 短信记录迁移完成');
+        }
+    } catch (e) {
+        console.error('[Migration] ❌ 短信记录迁移失败:', e);
+    }
+    
+    // 标记迁移完成
+    localStorage.setItem(migrationKey, 'true');
+    console.log('[Migration] 🎉 电话和短信数据迁移完成');
+}
 
         let currentSelectIcon = '';
         let currentCharacterType = 'char'; // 默认为 char
@@ -157,6 +238,7 @@ db.version(72).stores({
             await restoreDesktopOrder(); // 优先恢复桌面图标顺序
             await restoreSetting(); // 异步恢复DEXie数据
             await migrateAccountData(); // 迁移账号隔离数据
+            await migratePhoneAndSmsToIndexedDB(); // 迁移电话和短信记录到IndexedDB
             await loadWardrobeCharacter(); // 加载衣柜人物形象
             initDesktopDrag(); // 初始化桌面拖拽
             syncPreview();
@@ -4062,20 +4144,22 @@ async function deleteSelectedMessageChats() {
         return;
     }
     
-    const smsMessages = JSON.parse(localStorage.getItem('sms_messages') || '[]');
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
     
-    // 删除选中聊天的所有消息（排除欢迎小助手）
-    const filteredMessages = smsMessages.filter(msg => {
+    // 从 Dexie 删除选中聊天的所有消息
+    const allMessages = await db.sms_messages.where('accountId').equals(accountId).toArray();
+    const idsToDelete = allMessages.filter(msg => {
         let chatId;
         if (msg.type === 'sent') {
             chatId = msg.number || msg.receiverId || msg.sender;
         } else {
             chatId = msg.number || msg.sender;
         }
-        return !chatsToDelete.includes(chatId);
-    });
+        return chatsToDelete.includes(chatId);
+    }).map(msg => msg.id);
     
-    localStorage.setItem('sms_messages', JSON.stringify(filteredMessages));
+    await db.sms_messages.bulkDelete(idsToDelete);
     
     // 如果当前打开的聊天被删除了，先返回列表页
     if (currentMessageChatId && selectedMessageChats.has(currentMessageChatId)) {
@@ -4105,31 +4189,21 @@ async function renderMessageList() {
     const listContainer = document.getElementById('message-chat-list-container');
     if (!listContainer) return;
     
-    // 🎯 从 localStorage 读取短信记录（按账号过滤）
+    // 🎯 从 Dexie 读取短信记录（按账号过滤）
     const accountId = getCurrentAccountId();
-    let smsMessages = JSON.parse(localStorage.getItem('sms_messages') || '[]');
+    let smsMessages = [];
     
-    // 如果启用了账号隔离，只显示当前账号的消息
     if (accountId) {
-        const myChar = await db.characters.get(parseInt(accountId));
-        if (myChar) {
-            const myName = myChar.nick || myChar.name;
-            smsMessages = smsMessages.filter(msg => {
-                // 对于发送的消息，检查sender是否是当前账号
-                // 对于接收的消息，都显示（因为都是发给当前账号的）
-                if (msg.type === 'sent') {
-                    return msg.sender === myName;
-                } else {
-                    return true;
-                }
-            });
-        }
+        smsMessages = await db.sms_messages.where('accountId').equals(accountId).toArray();
     }
     
     // 按聊天ID分组（修复：发送的消息使用接收者ID，接收的消息使用发送者ID）
     const groupedChats = {};
     
-    smsMessages.forEach(msg => {
+    // 预加载角色头像缓存
+    const charAvatarCache = {};
+    
+    for (const msg of smsMessages) {
         // 🎯 修复：对于发送的消息，使用number（接收者ID）分组
         // 对于接收的消息，使用number或sender（发送者ID）分组
         let chatId;
@@ -4144,7 +4218,18 @@ async function renderMessageList() {
         if (!groupedChats[chatId]) {
             // 🎯 修复：显示接收者的名字（对于发送的消息，使用存储的接收者信息）
             let displayName = msg.sender;
-            let displayAvatar = msg.senderAvatar || 'https://img.icons8.com/color/96/user.png';
+            let displayAvatar = 'https://img.icons8.com/color/96/user.png';
+            
+            // 如果有 charId，从数据库获取角色头像
+            if (msg.charId && !charAvatarCache[msg.charId]) {
+                const char = await db.characters.get(msg.charId);
+                if (char) {
+                    charAvatarCache[msg.charId] = char.avatar;
+                }
+            }
+            if (msg.charId && charAvatarCache[msg.charId]) {
+                displayAvatar = charAvatarCache[msg.charId];
+            }
             
             // 如果是发送的消息，使用存储的接收者信息
             if (msg.type === 'sent' && msg.receiverName) {
@@ -4153,8 +4238,12 @@ async function renderMessageList() {
                 const receivedMsg = smsMessages.find(m => 
                     (m.number || m.sender) === chatId && m.type !== 'sent'
                 );
-                if (receivedMsg) {
-                    displayAvatar = receivedMsg.senderAvatar || displayAvatar;
+                if (receivedMsg && receivedMsg.charId) {
+                    if (!charAvatarCache[receivedMsg.charId]) {
+                        const char = await db.characters.get(receivedMsg.charId);
+                        if (char) charAvatarCache[receivedMsg.charId] = char.avatar;
+                    }
+                    displayAvatar = charAvatarCache[receivedMsg.charId] || displayAvatar;
                 }
             }
             
@@ -4168,7 +4257,7 @@ async function renderMessageList() {
             };
         }
         groupedChats[chatId].messages.push(msg);
-    });
+    }
     
     // 转换成数组并按最新消息时间排序
     const chats = Object.values(groupedChats).map(chat => {
@@ -4292,11 +4381,16 @@ let currentMessageChatId = null;
 let currentMessageChatName = null;
 
 // 打开聊天详情
-function openMessageChat(id) {
+async function openMessageChat(id) {
     console.log('openMessageChat called with id:', id);
     
-    // 🎯 从 localStorage 读取短信记录
-    const smsMessages = JSON.parse(localStorage.getItem('sms_messages') || '[]');
+    const accountId = getCurrentAccountId();
+    
+    // 🎯 从 Dexie 读取短信记录
+    let smsMessages = [];
+    if (accountId) {
+        smsMessages = await db.sms_messages.where('accountId').equals(accountId).toArray();
+    }
     
     // 查找该联系人的所有消息（修复：支持发送和接收的消息）
     const chatMessages = smsMessages.filter(msg => {
@@ -4341,17 +4435,28 @@ function openMessageChat(id) {
         
         console.log('[openMessageChat] 第一条消息内容:', firstMsg);
         
-        // 确定显示的名字和头像
+        // 确定显示的名字和头像（从角色数据库获取）
         let displayName = firstMsg.sender;
-        let displayAvatar = firstMsg.senderAvatar || 'https://img.icons8.com/color/96/user.png';
+        let displayAvatar = 'https://img.icons8.com/color/96/user.png';
+        
+        // 如果有 charId，从数据库获取角色头像
+        if (firstMsg.charId) {
+            const char = await db.characters.get(firstMsg.charId);
+            if (char) {
+                displayAvatar = char.avatar || displayAvatar;
+            }
+        }
         
         // 如果第一条消息是发送的消息，使用存储的接收者信息
         if (firstMsg.type === 'sent' && firstMsg.receiverName) {
             displayName = firstMsg.receiverName;
             // 尝试从接收消息中获取头像
             const receivedMsgForAvatar = chatMessages.find(msg => msg.type !== 'sent');
-            if (receivedMsgForAvatar) {
-                displayAvatar = receivedMsgForAvatar.senderAvatar || displayAvatar;
+            if (receivedMsgForAvatar && receivedMsgForAvatar.charId) {
+                const char = await db.characters.get(receivedMsgForAvatar.charId);
+                if (char) {
+                    displayAvatar = char.avatar || displayAvatar;
+                }
             }
         }
         
@@ -4380,18 +4485,10 @@ function openMessageChat(id) {
         currentMessageChatName = displayName;
         
         // 标记为已读（修复：支持发送和接收的消息）
-        smsMessages.forEach(msg => {
-            let matches = false;
-            if (msg.type === 'sent') {
-                matches = (msg.number || msg.receiverId) === id;
-            } else {
-                matches = (msg.number || msg.sender) === id;
-            }
-            if (matches) {
-                msg.read = true;
-            }
-        });
-        localStorage.setItem('sms_messages', JSON.stringify(smsMessages));
+        const idsToUpdate = chatMessages.map(msg => msg.id);
+        for (const msgId of idsToUpdate) {
+            await db.sms_messages.update(msgId, { read: true });
+        }
     }
     
     // 隐藏列表页
@@ -4569,17 +4666,16 @@ async function sendMessageDetail() {
     input.value = '';
     handleMessageInputChange(input);
     
-    // 保存发送的消息到 localStorage
-    const smsMessages = JSON.parse(localStorage.getItem('sms_messages') || '[]');
+    // 保存发送的消息到 Dexie
     const myPhoneNumber = myChar.identity?.phone || generateVirtualPhoneNumber(myChar.id);
     
     // 🎯 关键修复：使用当前聊天的ID（接收者的ID）作为聊天标识
     // 这样消息会归入正确的聊天，而不是创建新的聊天
     // 同时存储接收者信息，确保分组和显示正确
-    const newMessage = {
-        id: Date.now() + Math.random().toString(36).substr(2, 9),
+    await db.sms_messages.add({
+        accountId: accountId,
+        charId: null, // 发送的消息不需要 charId
         sender: myChar.nick || myChar.name,
-        senderAvatar: myChar.avatar,
         number: currentMessageChatId, // 使用接收者的ID作为number，确保分组正确
         content: text,
         time: Date.now(),
@@ -4587,10 +4683,7 @@ async function sendMessageDetail() {
         type: 'sent', // 标记为发送的消息
         receiverName: currentMessageChatName, // 存储接收者名字，用于显示
         receiverId: currentMessageChatId // 存储接收者ID
-    };
-    
-    smsMessages.unshift(newMessage);
-    localStorage.setItem('sms_messages', JSON.stringify(smsMessages));
+    });
     
     // 重新渲染消息列表
     renderMessageList();
@@ -4706,8 +4799,8 @@ async function acceptMessageReply() {
         const fullWechatHistory = getChatHistory(targetChar, accountId);
         console.log('[acceptMessageReply] 📚 微信聊天历史条数:', fullWechatHistory.length);
         
-        // 3. 获取短信聊天历史
-        const smsMessages = JSON.parse(localStorage.getItem('sms_messages') || '[]');
+        // 3. 获取短信聊天历史（从 Dexie）
+        let smsMessages = await db.sms_messages.where('accountId').equals(accountId).toArray();
         const chatMessages = smsMessages.filter(msg => (msg.number || msg.sender) === currentMessageChatId);
         console.log('[acceptMessageReply] 📱 短信聊天历史条数:', chatMessages.length);
         
@@ -4827,18 +4920,17 @@ ${loreContext}
                 await new Promise(r => setTimeout(r, 500));
             }
             
-            const newMessage = {
-                id: Date.now() + Math.random().toString(36).substr(2, 9) + '_' + i,
+            // 保存到 Dexie 数据库
+            await db.sms_messages.add({
+                accountId: accountId,
+                charId: targetChar.id,
                 sender: targetChar.nick || targetChar.name,
-                senderAvatar: targetChar.avatar,
                 number: phoneNumber,
                 content: segment,
                 time: Date.now() + i * 100, // 稍微错开时间
                 read: true,
                 type: 'received'
-            };
-            
-            smsMessages.unshift(newMessage);
+            });
             
             // 在详情页显示新消息
             const msgContainer = document.getElementById('message-container');
@@ -4847,9 +4939,6 @@ ${loreContext}
                 msgContainer.innerHTML += newMsgHtml;
             }
         }
-        
-        // 保存所有消息
-        localStorage.setItem('sms_messages', JSON.stringify(smsMessages));
         
         // 重新渲染消息列表
         renderMessageList();
@@ -6838,6 +6927,10 @@ ${loreContext}
             }
         }
 
+        // 当前心声相关变量
+        let currentThoughtsCharId = null;
+        let currentThoughtsMessageIndex = null;
+
         // 显示角色心声
         async function showCharacterThoughts(charId, messageIndex) {
             if (!charId) return;
@@ -6845,54 +6938,128 @@ ${loreContext}
             const char = await db.characters.get(charId);
             if (!char) return;
             
+            currentThoughtsCharId = charId;
+            currentThoughtsMessageIndex = messageIndex;
+            
             const modal = document.getElementById('thoughts-modal');
             const title = document.getElementById('thoughts-modal-title');
-            const content = document.getElementById('thoughts-content');
+            const currentText = document.getElementById('thoughts-current-text');
+            const currentTime = document.getElementById('thoughts-current-time');
+            const historyContent = document.getElementById('thoughts-history-content');
+            const historySection = document.getElementById('thoughts-history');
+            const arrow = document.getElementById('thoughts-arrow');
             
-            title.textContent = `${char.name}的心声`;
-            content.innerHTML = '';
+            title.textContent = `TA的心声`;
             
-            // 获取该消息对应的心声（根据messageIndex匹配）
+            // 重置历史区域状态
+            historySection.style.display = 'none';
+            arrow.classList.remove('expanded');
+            historyContent.innerHTML = '';
+            
+            // 获取心声
             if (!char.thoughts || char.thoughts.length === 0) {
-                content.innerHTML = '<div style="text-align:center; color:#999; padding:40px 20px;">暂无心声记录</div>';
+                currentText.textContent = '暂无心声';
+                currentTime.textContent = '';
+                document.getElementById('thoughts-history-btn').style.display = 'none';
             } else {
-                // 找到与当前消息相关的心声（messageIndex匹配或最近的心声）
-                let relevantThoughts = char.thoughts.filter(t => t.messageIndex === messageIndex);
+                // 找到最新的心声作为当前心声
+                const latestThought = char.thoughts[char.thoughts.length - 1];
+                currentText.textContent = latestThought.content;
+                const timeStr = new Date(latestThought.time).toLocaleString('zh-CN', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+                currentTime.textContent = timeStr;
                 
-                // 如果没有精确匹配，显示最近的心声
-                if (relevantThoughts.length === 0) {
-                    relevantThoughts = char.thoughts.slice(-5); // 显示最近5条
-                }
-                
-                if (relevantThoughts.length === 0) {
-                    content.innerHTML = '<div style="text-align:center; color:#999; padding:40px 20px;">暂无相关心声</div>';
-                } else {
-                    relevantThoughts.reverse().forEach(thought => {
+                // 如果有历史心声（超过1条），显示查看历史按钮
+                if (char.thoughts.length > 1) {
+                    document.getElementById('thoughts-history-btn').style.display = 'flex';
+                    
+                    // 渲染历史心声（除了最新的）
+                    const historyThoughts = char.thoughts.slice(0, -1).reverse();
+                    historyThoughts.forEach(thought => {
                         const item = document.createElement('div');
-                        item.style.cssText = 'padding:12px; margin-bottom:10px; background:#f5f5f5; border-radius:8px; border-left:3px solid var(--ins-pink);';
+                        item.className = 'thoughts-history-item';
                         
                         const text = document.createElement('div');
+                        text.className = 'thoughts-history-text';
                         text.textContent = thought.content;
-                        text.style.cssText = 'font-size:14px; line-height:1.6; color:#333; margin-bottom:6px;';
                         
                         const time = document.createElement('div');
-                        const timeStr = new Date(thought.time).toLocaleString('zh-CN', {
+                        time.className = 'thoughts-history-time';
+                        time.textContent = new Date(thought.time).toLocaleString('zh-CN', {
                             month: 'short',
                             day: 'numeric',
                             hour: '2-digit',
                             minute: '2-digit'
                         });
-                        time.textContent = timeStr;
-                        time.style.cssText = 'font-size:12px; color:#999;';
                         
                         item.appendChild(text);
                         item.appendChild(time);
-                        content.appendChild(item);
+                        historyContent.appendChild(item);
                     });
+                } else {
+                    document.getElementById('thoughts-history-btn').style.display = 'none';
                 }
             }
             
             modal.style.display = 'flex';
+        }
+
+        // 切换历史心声显示
+        function toggleThoughtsHistory() {
+            const historySection = document.getElementById('thoughts-history');
+            const arrow = document.getElementById('thoughts-arrow');
+            
+            if (historySection.style.display === 'none') {
+                historySection.style.display = 'block';
+                arrow.classList.add('expanded');
+            } else {
+                historySection.style.display = 'none';
+                arrow.classList.remove('expanded');
+            }
+        }
+
+        // 编辑当前心声
+        async function editCurrentThought() {
+            if (!currentThoughtsCharId) return;
+            
+            const char = await db.characters.get(currentThoughtsCharId);
+            if (!char || !char.thoughts || char.thoughts.length === 0) {
+                showToast('暂无心声可编辑');
+                return;
+            }
+            
+            const latestThought = char.thoughts[char.thoughts.length - 1];
+            const newContent = prompt('编辑心声：', latestThought.content);
+            
+            if (newContent !== null && newContent.trim()) {
+                char.thoughts[char.thoughts.length - 1].content = newContent.trim();
+                await db.characters.put(char);
+                
+                // 更新显示
+                document.getElementById('thoughts-current-text').textContent = newContent.trim();
+                showToast('心声已更新');
+            }
+        }
+
+        // 重新生成心声
+        async function regenerateThought() {
+            if (!currentThoughtsCharId) return;
+            
+            const char = await db.characters.get(currentThoughtsCharId);
+            if (!char) return;
+            
+            showToast('正在生成新心声...');
+            
+            // 关闭弹窗
+            closeModal('thoughts-modal');
+            
+            // 触发AI重新生成（这里简单处理，实际可以调用AI接口）
+            // 由于心声是在AI回复时自动生成的，这里提示用户发送消息触发
+            showToast('请发送一条消息来触发新的心声生成');
         }
 
         // 搜索好友
@@ -11321,6 +11488,36 @@ ${groupContextStr}
                     </div>
                 `;
             }
+            // 处理位置消息
+            else if (msg.type === 'location') {
+                content.style.padding = '0';
+                content.style.background = 'transparent';
+                content.style.boxShadow = 'none';
+                
+                let locationData = {};
+                try {
+                    locationData = JSON.parse(msg.content);
+                } catch(e) {
+                    locationData = { name: '未知位置', address: '' };
+                }
+                
+                content.innerHTML = `
+                    <div class="location-card" onclick="showLocationDetail('${encodeURIComponent(locationData.name)}', '${encodeURIComponent(locationData.address)}')">
+                        <div class="location-card-text">
+                            <div class="location-card-name">${locationData.name}</div>
+                            <div class="location-card-sub">位置分享</div>
+                        </div>
+                        <div class="location-card-map">
+                            <div class="location-card-pin">
+                                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M12 11.5C11.1716 11.5 10.5 10.8284 10.5 10C10.5 9.17157 11.1716 8.5 12 8.5C12.8284 8.5 13.5 9.17157 13.5 10C13.5 10.8284 12.8284 11.5 12 11.5Z"></path>
+                                    <path d="M12 2C7.92134 2 4.5 5.42134 4.5 9.5C4.5 14.5312 11.2188 21.4375 11.5938 21.8125C11.7954 22.014 12.2046 22.014 12.4062 21.8125C12.7812 21.4375 19.5 14.5312 19.5 9.5C19.5 5.42134 16.0787 2 12 2ZM12 12.5C10.6193 12.5 9.5 11.3807 9.5 10C9.5 8.61929 10.6193 7.5 12 7.5C13.3807 7.5 14.5 8.61929 14.5 10C14.5 11.3807 13.3807 12.5 12 12.5Z"></path>
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
             // 处理撤回消息（居中系统提示样式，点击可查看原内容）
             else if (msg.isRecalled) {
                 const isUser = msg.role === 'user';
@@ -12783,26 +12980,66 @@ ${groupContextStr}
                 suggestedSmsCount = Math.floor(Math.random() * 6) + 10; // 10-15条
             }
             
-            // 简单的 prompt
-            const prompt = `角色"${char.name}"被拉黑了，过去了${elapsedText}。
-性格：${char.desc || '普通人'}
+            // 获取聊天历史作为上下文
+            const accountId = getCurrentAccountId();
+            const chatHistory = getChatHistory(char, accountId);
+            const recentMessages = chatHistory.slice(-5).map(m => {
+                const role = m.role === 'user' ? myChar.name : char.name;
+                return `${role}: ${m.content}`;
+            }).join('\n');
+            
+            // 🎯 增强版提示词：更贴合角色人设和被拉黑情景
+            const prompt = `【角色扮演任务】
+你现在是「${char.name}」，请完全代入这个角色。
 
-根据性格判断是否会尝试联系，如果会联系，生成指令：
+【你的人设】
+${char.description || char.desc || '一个普通人'}
+
+【对方信息】
+名字：${myChar.name}
+${myChar.description ? `简介：${myChar.description.substring(0, 200)}` : ''}
+
+【最近的聊天记录】
+${recentMessages || '（无记录）'}
+
+【当前情境】
+你突然发现自己被「${myChar.name}」拉黑了！
+微信消息发不出去，好友申请石沉大海，对方彻底将你屏蔽。
+已经过去了 ${elapsedText}。
+
+【你需要思考】
+1. 以你的性格，被这个人拉黑后会有什么反应？
+2. 你会感到愤怒？悲伤？不甘？困惑？绝望？释然？还是其他情绪？
+3. 你会选择疯狂打电话？发短信质问？冷静等待？还是直接放弃？
+4. 随着时间推移，你的情绪会如何变化？（比如从愤怒到悲伤，从质问到哀求，从不甘到释然...）
+
+【输出要求】
+根据你的性格和与对方的关系，决定是否会通过电话/短信联系对方。
+
+如果你会联系，按以下格式输出：
 
 [CALL]
 count: ${suggestedCallCount}
-interval: 随机分布在整个时间段
+interval: 随机分布
 
 [SMS]
 messages:
-- 第1条短信内容（1句话）
-- 第2条短信内容（1句话）
-- 第3条短信内容（1句话）
-...（共${suggestedSmsCount}条，每条都是独立的一句话，符合角色性格和被拉黑后的情绪）
+- 第1条短信（要有情绪，符合你的性格）
+- 第2条短信（情绪可能变化）
+- 第3条短信（继续推进情绪）
+...（共${suggestedSmsCount}条）
 
-如果不会联系，返回：不联系`;
+【短信内容要求】
+- 每条短信要简短有力，像真实短信一样（5-20字最佳）
+- 情绪要有层次和变化，不要一成不变
+- 可以包含：质问、哀求、愤怒、威胁、道歉、回忆、不舍、放狠话、最后通牒等
+- 符合你的人设和说话风格，用你平时的语气
+- 可以有错别字、语气词、表情符号，更真实
+- 如果关系亲密，可以更激烈；如果关系一般，可以更克制
 
-            // 🎯 使用callAI函数，和好友申请一样
+如果你决定不联系（比如你很骄傲/无所谓/已经释然），直接返回：不联系`;
+
+            // 🎯 使用callAI函数
             const response = await callAI([
                 { role: 'user', content: prompt }
             ]);
@@ -12905,25 +13142,26 @@ messages:
 
         // 创建被拉黑角色的电话记录
         async function createBlockedCallRecord(char, myChar, accountId, callTime) {
-            // 将电话记录写入桌面电话应用的数据源 (phone_recents)
-            const recents = JSON.parse(localStorage.getItem('phone_recents') || '[]');
-            
-            // 获取角色的电话号码，如果没有则随机生成一个或者使用ID
+            // 将电话记录写入 Dexie 数据库
             const phoneNumber = char.identity?.phone || generateVirtualPhoneNumber(char.id);
             
-            recents.unshift({
+            await db.phone_recents.add({
+                accountId: accountId,
+                charId: char.id,
                 name: char.nick || char.name,
                 number: phoneNumber,
-                avatar: char.avatar, // 扩展支持头像
                 time: callTime,
                 type: 'missed', // 未接电话
                 isBlocked: true // 标记为拉黑
             });
             
-            // 只保留最近50条
-            if (recents.length > 50) recents.pop();
-            
-            localStorage.setItem('phone_recents', JSON.stringify(recents));
+            // 限制每个账号最多保留100条电话记录
+            const count = await db.phone_recents.where('accountId').equals(accountId).count();
+            if (count > 100) {
+                const oldest = await db.phone_recents.where('accountId').equals(accountId).sortBy('time');
+                const toDelete = oldest.slice(0, count - 100);
+                await db.phone_recents.bulkDelete(toDelete.map(r => r.id));
+            }
             
             // 显示电话通知
             showBlockedCallNotification(char, callTime);
@@ -12938,15 +13176,13 @@ messages:
                     messageContent = await generateBlockedMessage(char, myChar);
                 }
                 
-                // 将短信写入桌面短信应用的数据源 (sms_messages)
-                const messages = JSON.parse(localStorage.getItem('sms_messages') || '[]');
-                
+                // 将短信写入 Dexie 数据库
                 const phoneNumber = char.identity?.phone || generateVirtualPhoneNumber(char.id);
                 
-                messages.unshift({
-                    id: Date.now() + Math.random().toString(36).substr(2, 9),
+                await db.sms_messages.add({
+                    accountId: accountId,
+                    charId: char.id,
                     sender: char.nick || char.name,
-                    senderAvatar: char.avatar,
                     number: phoneNumber,
                     content: messageContent,
                     time: messageTime,
@@ -12954,7 +13190,13 @@ messages:
                     isBlocked: true
                 });
                 
-                localStorage.setItem('sms_messages', JSON.stringify(messages));
+                // 限制每个账号最多保留200条短信
+                const count = await db.sms_messages.where('accountId').equals(accountId).count();
+                if (count > 200) {
+                    const oldest = await db.sms_messages.where('accountId').equals(accountId).sortBy('time');
+                    const toDelete = oldest.slice(0, count - 200);
+                    await db.sms_messages.bulkDelete(toDelete.map(m => m.id));
+                }
                 
                 // 不再自动显示toast，由调用方控制通知
                 
@@ -17858,6 +18100,147 @@ function hideTransferPage() {
     document.getElementById('transfer-page').style.display = 'none';
 }
 
+/* =================
+   位置功能
+   ================= */
+
+// 打开位置输入弹窗
+function showLocationModal() {
+    // 清空输入
+    document.getElementById('location-name-input').value = '';
+    document.getElementById('location-address-input').value = '';
+    
+    const modal = document.getElementById('location-modal');
+    modal.style.display = 'flex';
+}
+
+// 关闭位置输入弹窗
+function hideLocationModal() {
+    document.getElementById('location-modal').style.display = 'none';
+}
+
+// 发送位置消息
+async function sendLocationMessage() {
+    const nameVal = document.getElementById('location-name-input').value.trim();
+    const addressVal = document.getElementById('location-address-input').value.trim();
+    
+    if (!nameVal) {
+        showToast("请输入位置名称");
+        return;
+    }
+    
+    if (!currentChatCharId) {
+        showToast("请先进入聊天");
+        return;
+    }
+    
+    const chatChar = await db.characters.get(currentChatCharId);
+    if (!chatChar) {
+        showToast("聊天对象不存在");
+        return;
+    }
+    
+    const accountId = getCurrentAccountId();
+    let history = getChatHistory(chatChar, accountId);
+    
+    const msgId = 'loc_' + Date.now();
+    const msg = {
+        id: msgId,
+        role: 'user',
+        type: 'location',
+        content: JSON.stringify({
+            name: nameVal,
+            address: addressVal || '暂无详细地址'
+        }), 
+        time: Date.now()
+    };
+    
+    history.push(msg);
+    await setChatHistory(chatChar, accountId, history);
+    
+    // 刷新聊天界面
+    renderChatBody(chatChar);
+    
+    hideLocationModal();
+    showToast("位置已发送");
+    
+    // 关闭更多面板
+    document.getElementById('action-panel').style.display = 'none';
+    document.getElementById('chat-panel-container').classList.remove('open');
+}
+
+// 显示位置详情
+function showLocationDetail(encodedName, encodedAddress) {
+    const name = decodeURIComponent(encodedName);
+    const address = decodeURIComponent(encodedAddress);
+    
+    // 创建详情弹窗
+    const overlay = document.createElement('div');
+    overlay.id = 'location-detail-overlay';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.4);
+        z-index: 999;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    `;
+    
+    overlay.innerHTML = `
+        <div style="
+            background: #fff;
+            width: 260px;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+        ">
+            <div style="padding: 20px; text-align: center;">
+                <div style="
+                    width: 48px;
+                    height: 48px;
+                    background: #f5f5f5;
+                    border-radius: 12px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    margin: 0 auto 16px;
+                ">
+                    <svg viewBox="0 0 24 24" style="width:24px; height:24px; fill:none; stroke:#666; stroke-width:2;">
+                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                        <circle cx="12" cy="10" r="3"></circle>
+                    </svg>
+                </div>
+                <div style="font-size: 16px; font-weight: 600; color: #333; margin-bottom: 6px;">${name}</div>
+                <div style="font-size: 13px; color: #999;">${address || '暂无详细地址'}</div>
+            </div>
+            <div style="border-top: 1px solid #f0f0f0;">
+                <button onclick="document.getElementById('location-detail-overlay').remove()" style="
+                    width: 100%;
+                    padding: 14px;
+                    background: #fff;
+                    color: #333;
+                    border: none;
+                    font-size: 15px;
+                    font-weight: 500;
+                    cursor: pointer;
+                ">关闭</button>
+            </div>
+        </div>
+    `;
+    
+    overlay.onclick = (e) => {
+        if (e.target === overlay) {
+            overlay.remove();
+        }
+    };
+    
+    document.body.appendChild(overlay);
+}
+
 // 检查金额输入，控制按钮状态
 function checkTransferAmount(input) {
     const btn = document.getElementById('btn-do-transfer');
@@ -18162,12 +18545,18 @@ function loadPhoneContacts() {
     });
 }
 
-function loadPhoneRecents() {
+async function loadPhoneRecents() {
     const recentsList = document.getElementById('phone-recents-list');
     if (!recentsList) return;
     
-    // 从localStorage加载最近通话记录
-    const recents = JSON.parse(localStorage.getItem('phone_recents') || '[]');
+    const accountId = getCurrentAccountId();
+    if (!accountId) {
+        recentsList.innerHTML = `<div class="phone-empty-state"><div>请先登录账号</div></div>`;
+        return;
+    }
+    
+    // 从 Dexie 加载最近通话记录
+    let recents = await db.phone_recents.where('accountId').equals(accountId).toArray();
     
     if (recents.length === 0) {
         recentsList.innerHTML = `
@@ -18183,23 +18572,37 @@ function loadPhoneRecents() {
     recents.sort((a, b) => b.time - a.time);
     
     let html = '';
-    recents.forEach(recent => {
+    for (const recent of recents) {
+        // 如果有 charId，尝试从数据库获取最新的角色头像
+        let avatar = null;
+        if (recent.charId) {
+            const char = await db.characters.get(recent.charId);
+            if (char) {
+                avatar = char.avatar;
+            }
+        }
+        
         const name = recent.name || recent.number || '未知';
         const phone = recent.number || '';
         const time = new Date(recent.time);
         const timeStr = formatPhoneTime(time);
         const firstLetter = name.charAt(0).toUpperCase();
         
+        // 使用头像或首字母
+        const avatarHtml = avatar 
+            ? `<img src="${avatar}" class="phone-list-avatar" style="object-fit:cover;border-radius:50%;" />`
+            : `<div class="phone-list-avatar">${firstLetter}</div>`;
+        
         html += `
             <div class="phone-list-item" onclick="phoneCallNumber('${phone}')">
-                <div class="phone-list-avatar">${firstLetter}</div>
+                ${avatarHtml}
                 <div class="phone-list-info">
                     <div class="phone-list-name">${name}</div>
                     <div class="phone-list-subtitle">${timeStr}</div>
                 </div>
             </div>
         `;
-    });
+    }
     
     recentsList.innerHTML = html;
 }
@@ -18348,20 +18751,27 @@ function phoneCallNumber(number) {
     phoneMakeCall();
 }
 
-function addPhoneRecent(name, number) {
-    const recents = JSON.parse(localStorage.getItem('phone_recents') || '[]');
-    recents.unshift({
+async function addPhoneRecent(name, number, charId = null) {
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    // 添加到 Dexie 数据库
+    await db.phone_recents.add({
+        accountId: accountId,
+        charId: charId,
         name: name,
         number: number,
-        time: Date.now()
+        time: Date.now(),
+        type: 'outgoing' // 拨出电话
     });
     
-    // 只保留最近50条
-    if (recents.length > 50) {
-        recents.pop();
+    // 限制每个账号最多保留100条
+    const count = await db.phone_recents.where('accountId').equals(accountId).count();
+    if (count > 100) {
+        const oldest = await db.phone_recents.where('accountId').equals(accountId).sortBy('time');
+        const toDelete = oldest.slice(0, count - 100);
+        await db.phone_recents.bulkDelete(toDelete.map(r => r.id));
     }
-    
-    localStorage.setItem('phone_recents', JSON.stringify(recents));
 }
 
 // 拨号键盘初始化在showPhonePage中完成
@@ -21028,28 +21438,22 @@ async function sendVerificationCodeMessage(userId, code) {
     
     console.log('[欢迎小助手] User信息:', user.name);
     
-    // 🔥 添加到主页面的短信消息列表（这样才能在桌面显示）
-    const smsMessages = JSON.parse(localStorage.getItem('sms_messages') || '[]');
-    
+    const accountId = String(userId); // 使用userId作为accountId
     const messageContent = `【微信验证码】您的验证码是：${code}，5分钟内有效，请勿泄露。`;
     
-    const newMessage = {
-        id: Date.now(),
+    // 🔥 添加到 Dexie 数据库
+    await db.sms_messages.add({
+        accountId: accountId,
+        charId: null, // 系统消息没有角色ID
         type: 'received',  // 接收的消息
         sender: '欢迎小助手',
-        senderAvatar: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="%23FFB6C1"/><text x="50" y="60" text-anchor="middle" font-size="40" fill="white">📬</text></svg>',
         number: '欢迎小助手',
-        content: messageContent,  // ✅ 使用 content 字段
-        message: messageContent,  // ✅ 兼容旧字段
-        time: Date.now(),  // ✅ 使用 time 字段
-        timestamp: Date.now(),  // ✅ 兼容 timestamp
+        content: messageContent,
+        time: Date.now(),
         read: false
-    };
+    });
     
-    smsMessages.unshift(newMessage);  // ✅ 使用 unshift 把新消息放在最前面
-    localStorage.setItem('sms_messages', JSON.stringify(smsMessages));
-    
-    console.log('[欢迎小助手] ✅ 验证码消息已添加到短信列表:', newMessage);
+    console.log('[欢迎小助手] ✅ 验证码消息已添加到短信列表');
     
     // 🔥 立即刷新主页面的消息列表
     console.log('[欢迎小助手] 🔄 正在刷新主页面消息列表...');
