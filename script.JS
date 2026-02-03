@@ -26102,11 +26102,15 @@ function handleOnlineMessage(data) {
         case 'character_online':
             showToast(`角色 ${data.nickname} 已上线`);
             requestOnlineCharacters();
+            // 刷新联机状态页面（如果打开的话）
+            refreshOnlineStatusPageContent();
             break;
             
         case 'character_offline':
             showToast(`角色已下线`);
             requestOnlineCharacters();
+            // 刷新联机状态页面（如果打开的话）
+            refreshOnlineStatusPageContent();
             break;
     }
 }
@@ -26530,6 +26534,47 @@ function updateOnlineFeatureSection() {
 
 // 显示联机状态页面
 async function showOnlineStatusPage() {
+    const page = document.getElementById('online-status-page');
+    if (!page) return;
+    
+    page.style.display = 'flex';
+    
+    // 更新连接状态
+    updateOnlineConnectionStatus();
+    
+    // 更新角色列表
+    await renderOnlineCharList();
+}
+
+// 隐藏联机状态页面
+function hideOnlineStatusPage() {
+    const page = document.getElementById('online-status-page');
+    if (page) {
+        page.style.display = 'none';
+        // 更新"我"页面的联机状态
+        updateOnlineFeatureSection();
+    }
+}
+
+// 更新连接状态显示
+function updateOnlineConnectionStatus() {
+    const container = document.getElementById('online-status-connection');
+    if (!container) return;
+    
+    if (!onlineConnected) {
+        container.innerHTML = `<div style="background:#fff5f5; color:#ff3b30; padding:12px; border-radius:8px;">未连接服务器，请在设置中配置联机设置</div>`;
+    } else if (!onlineUserData) {
+        container.innerHTML = `<div style="background:#fff8e1; color:#ff9800; padding:12px; border-radius:8px;">已连接服务器，请先登录</div>`;
+    } else {
+        container.innerHTML = `<div style="background:#e8f5e9; color:#4caf50; padding:12px; border-radius:8px;">已连接 - ${onlineUserData.username}</div>`;
+    }
+}
+
+// 渲染角色列表
+async function renderOnlineCharList() {
+    const container = document.getElementById('online-status-char-list');
+    if (!container) return;
+    
     // 获取所有User类型角色
     const users = await db.characters.where('type').equals('user').toArray();
     
@@ -26544,107 +26589,66 @@ async function showOnlineStatusPage() {
             wxAccount: wxAccount,
             isOnline: isOnline
         };
-    }).filter(c => c.wxAccount); // 只显示有微信号的角色
+    }).filter(c => c.wxAccount);
     
-    const modal = document.createElement('div');
-    modal.id = 'online-status-modal';
-    modal.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: #f5f5f5;
-        z-index: 10000;
-        display: flex;
-        flex-direction: column;
-    `;
-    
-    let connectionStatus = '';
-    if (!onlineConnected) {
-        connectionStatus = `
-            <div style="padding:16px; background:#fff5f5; color:#ff3b30; text-align:center; font-size:14px;">
-                未连接服务器，请在设置中配置联机设置
-            </div>
-        `;
-    } else if (!onlineUserData) {
-        connectionStatus = `
-            <div style="padding:16px; background:#fff8e1; color:#ff9800; text-align:center; font-size:14px;">
-                已连接服务器，请先登录
-            </div>
-        `;
-    } else {
-        connectionStatus = `
-            <div style="padding:16px; background:#e8f5e9; color:#4caf50; text-align:center; font-size:14px;">
-                已连接 - ${onlineUserData.username}
-            </div>
-        `;
-    }
-    
-    let charListHtml = '';
     if (charList.length === 0) {
-        charListHtml = `
+        container.innerHTML = `
             <div style="text-align:center; padding:40px 20px; color:#999;">
                 <div style="font-size:14px;">没有可上线的角色</div>
                 <div style="font-size:12px; margin-top:8px;">请先在角色档案创建User类型角色，并在微信中注册</div>
             </div>
         `;
-    } else {
-        charListHtml = charList.map(char => `
-            <div style="padding:12px 16px; background:#fff; display:flex; align-items:center; gap:12px; border-bottom:1px solid #f0f0f0;">
-                <div style="width:44px; height:44px; border-radius:8px; background-image:url(${char.avatar}); background-size:cover; background-position:center; background-color:#e0e0e0;"></div>
-                <div style="flex:1;">
-                    <div style="font-size:15px; font-weight:500; color:#333;">${char.name}</div>
-                    <div style="font-size:12px; color:#999; margin-top:2px;">${char.wxAccount}</div>
-                </div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                    ${char.isOnline ? `
-                        <span style="font-size:12px; color:#4caf50;">● 在线</span>
-                        <button onclick="goOfflineWithCharacter('${char.wxAccount}')" style="padding:6px 12px; background:#f5f5f5; color:#ff3b30; border:none; border-radius:6px; font-size:13px; cursor:pointer;">下线</button>
-                    ` : `
-                        <span style="font-size:12px; color:#999;">○ 离线</span>
-                        <button onclick="goOnlineWithCharacter(${char.id})" style="padding:6px 12px; background:var(--ins-pink); color:#fff; border:none; border-radius:6px; font-size:13px; cursor:pointer;" ${!onlineConnected || !onlineUserData ? 'disabled style="opacity:0.5;padding:6px 12px; background:#ccc; color:#fff; border:none; border-radius:6px; font-size:13px;"' : ''}>上线</button>
-                    `}
-                </div>
-            </div>
-        `).join('');
+        return;
     }
     
-    modal.innerHTML = `
-        <div style="background: #fff; height: 88px; padding-top: 44px; padding-left: 16px; padding-right: 16px; display: flex; align-items: center; border-bottom: 1px solid #e8e8e8; box-sizing: border-box;">
-            <svg onclick="closeOnlineStatusPage()" viewBox="0 0 24 24" style="width: 24px; height: 24px; cursor: pointer; stroke: #333; fill: none; stroke-width: 2;">
-                <polyline points="15 18 9 12 15 6"></polyline>
-            </svg>
-            <span style="flex: 1; text-align: center; font-size: 16px; font-weight: 600; margin-left: -24px;">联机状态</span>
-        </div>
-        
-        ${connectionStatus}
-        
-        <div style="flex: 1; overflow-y: auto;">
-            <div style="padding:12px 16px; font-size:13px; color:#888;">
-                我的User角色（可上线）
+    container.innerHTML = charList.map(char => `
+        <div style="padding:12px 16px; background:#fff; display:flex; align-items:center; gap:12px; border-bottom:1px solid #f0f0f0;">
+            <div style="width:44px; height:44px; border-radius:8px; background-image:url(${char.avatar}); background-size:cover; background-position:center; background-color:#e0e0e0;"></div>
+            <div style="flex:1;">
+                <div style="font-size:15px; font-weight:500; color:#333;">${char.name}</div>
+                <div style="font-size:12px; color:#999; margin-top:2px;">${char.wxAccount}</div>
             </div>
-            ${charListHtml}
-            
-            <div style="padding:16px; font-size:12px; color:#999; line-height:1.6;">
-                <div style="font-weight:600; color:#666; margin-bottom:6px;">💡 使用说明</div>
-                <div>• 上线后，其他用户可以通过你的虚拟微信号搜索到你</div>
-                <div>• 你可以同时上线多个角色</div>
-                <div>• 上线的角色可以接收好友申请和消息</div>
-                <div>• 关闭页面或刷新后需要重新上线</div>
+            <div style="display:flex; align-items:center; gap:8px;">
+                ${char.isOnline ? `
+                    <span style="font-size:12px; color:#4caf50;">● 在线</span>
+                    <button onclick="goOfflineWithCharacter('${char.wxAccount}')" style="padding:6px 12px; background:#f5f5f5; color:#ff3b30; border:none; border-radius:6px; font-size:13px; cursor:pointer;">下线</button>
+                ` : `
+                    <span style="font-size:12px; color:#999;">○ 离线</span>
+                    <button onclick="goOnlineWithCharacter(${char.id})" style="padding:6px 12px; background:var(--ins-pink); color:#fff; border:none; border-radius:6px; font-size:13px; cursor:pointer;" ${!onlineConnected || !onlineUserData ? 'disabled style="opacity:0.5;padding:6px 12px; background:#ccc; color:#fff; border:none; border-radius:6px; font-size:13px;"' : ''}>上线</button>
+                `}
             </div>
         </div>
-    `;
-    
-    document.body.appendChild(modal);
+    `).join('');
 }
 
-// 关闭联机状态页面
-function closeOnlineStatusPage() {
-    const modal = document.getElementById('online-status-modal');
-    if (modal) {
-        modal.remove();
-        // 更新"我"页面的联机状态
-        updateOnlineFeatureSection();
-    }
+// 刷新联机状态页面内容
+async function refreshOnlineStatusPageContent() {
+    const page = document.getElementById('online-status-page');
+    if (!page || page.style.display === 'none') return; // 页面没打开
+    
+    // 刷新角色列表
+    await renderOnlineCharList();
 }
+
+// 将联机相关函数暴露到全局作用域
+window.toggleOnlineSettings = toggleOnlineSettings;
+window.loadOnlineSettings = loadOnlineSettings;
+window.saveOnlineSettings = saveOnlineSettings;
+window.testOnlineConnection = testOnlineConnection;
+window.connectToOnlineServer = connectToOnlineServer;
+window.showOnlineLoginModal = showOnlineLoginModal;
+window.showOnlineRegisterModal = showOnlineRegisterModal;
+window.doOnlineLogin = doOnlineLogin;
+window.doOnlineRegister = doOnlineRegister;
+window.onlineLogout = onlineLogout;
+window.showOnlineSearchModal = showOnlineSearchModal;
+window.doOnlineSearch = doOnlineSearch;
+window.sendOnlineFriendRequest = sendOnlineFriendRequest;
+window.goOnlineWithCharacter = goOnlineWithCharacter;
+window.goOfflineWithCharacter = goOfflineWithCharacter;
+window.showOnlineStatusPage = showOnlineStatusPage;
+window.hideOnlineStatusPage = hideOnlineStatusPage;
+window.updateOnlineFeatureSection = updateOnlineFeatureSection;
+window.refreshOnlineStatusPageContent = refreshOnlineStatusPageContent;
+window.renderOnlineCharList = renderOnlineCharList;
+window.updateOnlineConnectionStatus = updateOnlineConnectionStatus;

@@ -1076,6 +1076,38 @@
         </div>
     </div>
 
+    <!-- 联机状态页面 -->
+    <div class="wechat-page" id="online-status-page" style="display:none; background:#f5f5f5; z-index:10000;">
+        <div class="wechat-header" style="background:#fff;">
+            <div class="back-btn" onclick="hideOnlineStatusPage()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:var(--ins-text);">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="wechat-title">联机状态</div>
+            <div style="width:40px;"></div>
+        </div>
+        
+        <div id="online-status-connection" style="padding:16px; text-align:center; font-size:14px;">
+            <!-- 连接状态动态更新 -->
+        </div>
+        
+        <div style="flex:1; overflow-y:auto;">
+            <div style="padding:12px 16px; font-size:13px; color:#888;">
+                我的User角色（可上线）
+            </div>
+            <div id="online-status-char-list">
+                <!-- 角色列表动态更新 -->
+            </div>
+            
+            <div style="padding:16px; font-size:12px; color:#999; line-height:1.6;">
+                <div style="font-weight:600; color:#666; margin-bottom:6px;">💡 使用说明</div>
+                <div>• 上线后，其他用户可以通过你的虚拟微信号搜索到你</div>
+                <div>• 你可以同时上线多个角色</div>
+                <div>• 上线的角色可以接收好友申请和消息</div>
+                <div>• 关闭页面或刷新后需要重新上线</div>
+            </div>
+        </div>
+    </div>
+
     <!-- 新的好友页面 -->
     <div class="wechat-page" id="new-friends-page" style="display:none;">
         <div class="wechat-header" style="background:#fff;">
