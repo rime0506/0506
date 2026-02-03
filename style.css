@@ -1704,8 +1704,8 @@
         
         .chat-input {
             flex: 1;
-            background: #f5f5f5;
-            border: none;
+            background: #fff;
+            border: 1px solid #e0e0e0;
             border-radius: 20px;
             padding: 10px 16px;
             font-size: 15px;
@@ -1744,7 +1744,7 @@
             height: 0;
             overflow: hidden;
             transition: height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-            background: #f9f9f9;
+            background: #fff;
         }
         .chat-panel-container.open {
             height: 280px; /* 面板高度 */
@@ -1866,6 +1866,59 @@
             display: none;
         }
         
+        /* ========== 仿微信气泡样式 ========== */
+        .bubble-style-wechat .message-content {
+            border-radius: 6px !important; /* 稍微圆一点的方圆角 */
+            position: relative;
+            box-shadow: none;
+            background: #fff !important; /* 白色背景 */
+            border: 1px solid #e0e0e0 !important; /* 灰色描边 */
+        }
+        .bubble-style-wechat .message-row.other .message-content {
+            margin-left: 6px;
+        }
+        .bubble-style-wechat .message-row.self .message-content {
+            margin-right: 6px;
+        }
+        /* 对方消息的小尾巴（左侧） - 使用圆角小三角 */
+        .bubble-style-wechat .message-row.other .message-content::before {
+            content: '';
+            display: block !important;
+            position: absolute;
+            left: -4px;
+            top: 10px;
+            width: 7px;
+            height: 7px;
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-right: none;
+            border-top: none;
+            transform: rotate(45deg);
+            border-radius: 0 0 0 2px; /* 小圆角 */
+        }
+        /* 自己消息的小尾巴（右侧） - 使用圆角小三角 */
+        .bubble-style-wechat .message-row.self .message-content::after {
+            content: '';
+            display: block !important;
+            position: absolute;
+            right: -4px;
+            top: 10px;
+            width: 7px;
+            height: 7px;
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-left: none;
+            border-bottom: none;
+            transform: rotate(45deg);
+            border-radius: 0 2px 0 0; /* 小圆角 */
+        }
+        
+        /* 气泡样式选择器 */
+        .bubble-style-option.selected {
+            border-color: var(--ins-pink) !important;
+            background: #fff5f7;
+        }
+        
         /* 消息时间戳 */
         .message-timestamp {
             width: 100%;
@@ -1963,7 +2016,7 @@
             bottom: 0;
             left: 0;
             width: 100%;
-            background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+            background: linear-gradient(to top, rgba(0,0,0,0.4), transparent);
             padding: 20px 10px 10px;
             color: #fff;
         }
@@ -2429,14 +2482,39 @@
             filter: brightness(0.9);
         }
 
-        /* 撤回样式 */
+        /* 撤回消息 - 居中系统提示样式（与群聊系统消息一致） */
+        .recalled-system-row {
+            display: flex !important;
+            justify-content: center !important;
+            align-items: center !important;
+            padding: 8px 0 !important;
+        }
+        .recalled-system-tip {
+            background: #fff;
+            color: #999;
+            font-size: 12px;
+            padding: 4px 12px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .recalled-system-tip:hover,
+        .recalled-system-tip:active {
+            background: #f9f9f9;
+            color: #666;
+        }
+        
+        /* 兼容旧的撤回样式 */
         .recalled-msg {
             font-size: 12px;
             color: #999;
             font-style: italic;
             background: transparent !important;
-            padding: 4px 0 !important;
+            padding: 8px 0 !important;
             box-shadow: none !important;
+            cursor: pointer;
         }
 
         /* 多选模式样式 */
@@ -2929,7 +3007,10 @@
 }
 
 .svc-nav-bar {
-    padding: 20px 24px;
+    height: 88px; /* 与微信页面顶栏一致 */
+    padding-top: 44px; /* 避让状态栏 */
+    padding-left: 16px;
+    padding-right: 16px;
     font-size: 18px;
     font-weight: 500;
     color: #333;
@@ -2939,6 +3020,7 @@
     z-index: 10;
     display: flex;
     align-items: center;
+    box-sizing: border-box;
 }
 
 .svc-container {
@@ -3073,16 +3155,19 @@
 
 /* 钱包详情页样式 */
 .wallet-nav {
-    height: 50px;
+    height: 88px; /* 与微信页面顶栏一致 */
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0 16px;
+    padding-top: 44px; /* 避让状态栏 */
+    padding-left: 16px;
+    padding-right: 16px;
     background: rgba(255,255,255,0.8);
     backdrop-filter: blur(10px);
     position: sticky;
     top: 0;
     z-index: 10;
+    box-sizing: border-box;
 }
 
 /* 覆盖一下 wallet-nav 里的 back-btn */
@@ -3212,7 +3297,9 @@
 .balance-icon-large {
     width: 64px;
     height: 64px;
-    fill: #ffdce5; /* 浅粉色图标 */
+    fill: #FFF7FA; /* 和生成余额按钮一样的浅粉 */
+    stroke: #f0e8ea;
+    stroke-width: 1;
     margin-bottom: 24px;
 }
 
@@ -3260,8 +3347,8 @@
 }
 
 .btn-generate {
-    background: #fff0f5; /* 超级浅粉 */
-    color: var(--ins-pink);
+    background: #FFF7FA; /* 与桌面图标一致的浅粉 */
+    color: #666; /* 深灰色字体 */
     margin-top: 20px;
     display: flex;
     align-items: center;
@@ -3302,7 +3389,7 @@
     padding: 24px;
     background: #ffffff;
     border-radius: 20px;
-    box-shadow: 0 4px 24px rgba(255, 192, 203, 0.15); /* 统一阴影 */
+    box-shadow: 0 4px 24px rgba(255, 192, 203, 0.15); /* 与服务页一致的粉色阴影 */
     border: 1px solid rgba(255, 255, 255, 0.8);
 }
 
@@ -3314,8 +3401,9 @@
 }
 
 .btn-recharge {
-    background: var(--ins-pink); /* 保持主题粉 */
-    color: #fff;
+    background: #FFF7FA;
+    color: #333;
+    border: 1px solid #f0e8ea;
 }
 
 .btn-withdraw {
@@ -3326,13 +3414,14 @@
 
 /* 生成按钮优化 */
 .btn-generate {
-    background: linear-gradient(135deg, #fff0f5 0%, #ffe4e8 100%);
-    color: var(--ins-pink);
-    border: none;
+    background: #FFF7FA; /* 与桌面图标一致的浅粉 */
+    color: #666; /* 深灰色字体 */
+    border: 1px solid #ffe4e8;
     font-weight: 500;
 }
 .btn-generate:active {
     transform: scale(0.98);
+    background: #fff0f3;
 }
 
 /* 底部链接颜色调整 */
@@ -3676,8 +3765,9 @@
     border: none;
 }
 .family-card-btn.view {
-    background: var(--ins-pink-light);
-    color: var(--ins-pink);
+    background: #FFF7FA;
+    color: #333;
+    border: 1px solid #f0e8ea;
 }
 .family-card-btn.cancel {
     background: #f5f5f5;
@@ -3689,17 +3779,17 @@
     justify-content: center;
     gap: 8px;
     padding: 16px;
-    background: var(--ins-pink-light);
-    border: 2px dashed var(--ins-pink);
+    background: #FFF7FA;
+    border: 2px dashed #f0e8ea;
     border-radius: 12px;
-    color: var(--ins-pink);
+    color: #333;
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s;
 }
 .family-card-add:hover {
-    background: #ffd6dc;
+    background: #fff0f3;
 }
 .family-card-friend-item {
     display: flex;
@@ -3760,7 +3850,7 @@
 .family-card-record-amount {
     font-size: 15px;
     font-weight: 600;
-    color: var(--ins-pink);
+    color: #333;
     float: right;
     margin-top: -20px;
 }

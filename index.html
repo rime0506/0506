@@ -401,6 +401,16 @@
                 </div>
                 <div class="api-body" id="api-setting-body">
                     
+                    <!-- API 预设选择 -->
+                    <div class="api-label">API 预设</div>
+                    <div style="display:flex; gap:8px; margin-bottom:16px;">
+                        <select class="api-input" id="api-preset-select" onchange="loadApiPreset(this.value)" style="flex:1;">
+                            <option value="">-- 选择预设 --</option>
+                        </select>
+                        <button onclick="saveApiPreset()" style="padding:8px 12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:12px; white-space:nowrap; cursor:pointer;">保存预设</button>
+                        <button onclick="deleteApiPreset()" style="padding:8px 12px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:12px; white-space:nowrap; cursor:pointer;">删除</button>
+                    </div>
+                    
                     <div class="api-label">反代地址</div>
                     <div class="api-input-group">
                         <input type="text" class="api-input" id="ai-url-input" placeholder="https://api.openai.com (无需 /v1)" onchange="autoSaveApi()">
@@ -1155,7 +1165,7 @@
                 <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
             </div>
             <div class="wechat-title">世界书</div>
-            <div class="wechat-add" onclick="document.getElementById('lorebook-import').click()" style="width:40px; text-align:right; font-size:16px; color:var(--ins-pink);">导入</div>
+            <div class="wechat-add" onclick="document.getElementById('lorebook-import').click()" style="width:40px; text-align:right; font-size:16px; color:#666;">导入</div>
         </div>
         
         <div class="wechat-content" id="lorebook-content" style="display:block; padding:16px;">
@@ -1300,49 +1310,84 @@
                 </div>
             </div>
 
-            <!-- 自定义样式设置 -->
+            <!-- 聊天样式设置（合并气泡预设和自定义样式） -->
             <div class="detail-group">
                 <div class="detail-item" style="flex-direction:column; align-items:flex-start; cursor:pointer;" onclick="toggleCustomStyleSection()">
                     <div style="width:100%; display:flex; justify-content:space-between; align-items:center;">
-                        <div>自定义聊天样式</div>
+                        <div>聊天样式</div>
                         <span id="custom-style-toggle-icon" class="detail-arrow" style="transition: transform 0.3s;">›</span>
                     </div>
                 </div>
                 <div id="custom-style-section" style="display:none; padding:16px; background:#f9f9f9; border-radius:8px; margin:0 16px 16px;">
-                    <!-- 可用类名提示 -->
-                    <div style="background:#fff; border:1px solid #e0e0e0; border-radius:8px; padding:12px; margin-bottom:16px;">
-                        <div style="font-size:13px; font-weight:600; margin-bottom:8px; color:#333;">📝 可用类名参考：</div>
-                        <div style="font-size:11px; font-family:monospace; color:#666; line-height:1.8; user-select:all;">
-                            <div style="margin-bottom:4px; padding:4px 6px; background:#f5f5f5; border-radius:4px;"><strong style="color:#d63384;">.ai-bubble</strong> <span style="color:#999;">// AI气泡</span></div>
-                            <div style="margin-bottom:4px; padding:4px 6px; background:#f5f5f5; border-radius:4px;"><strong style="color:#d63384;">.user-bubble</strong> <span style="color:#999;">// 用户气泡</span></div>
-                            <div style="margin-bottom:4px; padding:4px 6px; background:#f5f5f5; border-radius:4px;"><strong style="color:#d63384;">.message-content</strong> <span style="color:#999;">// 所有气泡</span></div>
-                            <div style="margin-bottom:4px; padding:4px 6px; background:#f5f5f5; border-radius:4px;"><strong style="color:#d63384;">.message-avatar</strong> <span style="color:#999;">// 头像</span></div>
-                            <div style="margin-bottom:4px; padding:4px 6px; background:#f5f5f5; border-radius:4px;"><strong style="color:#d63384;">.message-row.self</strong> <span style="color:#999;">// 用户消息行</span></div>
-                            <div style="margin-bottom:4px; padding:4px 6px; background:#f5f5f5; border-radius:4px;"><strong style="color:#d63384;">.message-row.other</strong> <span style="color:#999;">// AI消息行</span></div>
+                    <!-- 预设气泡样式 -->
+                    <div style="margin-bottom:20px;">
+                        <div style="font-size:14px; font-weight:500; margin-bottom:12px; color:#333;">预设样式</div>
+                        <div style="display:flex; gap:12px;">
+                            <!-- 默认样式 -->
+                            <div class="bubble-style-option" data-style="default" onclick="selectBubbleStyle('default')" style="flex:1; padding:12px; border:2px solid #e0e0e0; border-radius:12px; cursor:pointer; transition:all 0.2s; background:#fff;">
+                                <div style="font-size:12px; font-weight:500; text-align:center; margin-bottom:8px; color:#333;">默认圆角</div>
+                                <div style="display:flex; flex-direction:column; gap:5px; padding:6px; background:#f5f5f5; border-radius:6px;">
+                                    <div style="align-self:flex-start; background:#f2f2f7; color:#333; padding:3px 8px; border-radius:12px 12px 12px 4px; font-size:10px;">你好</div>
+                                    <div style="align-self:flex-end; background:#ffe4e8; color:#333; padding:3px 8px; border-radius:12px 12px 4px 12px; font-size:10px;">嗨~</div>
+                                </div>
+                            </div>
+                            <!-- 仿微信样式 -->
+                            <div class="bubble-style-option" data-style="wechat" onclick="selectBubbleStyle('wechat')" style="flex:1; padding:12px; border:2px solid #e0e0e0; border-radius:12px; cursor:pointer; transition:all 0.2s; background:#fff;">
+                                <div style="font-size:12px; font-weight:500; text-align:center; margin-bottom:8px; color:#333;">仿微信</div>
+                                <div style="display:flex; flex-direction:column; gap:5px; padding:6px; background:#f5f5f5; border-radius:6px;">
+                                    <div style="align-self:flex-start; position:relative; margin-left:4px;">
+                                        <div style="position:absolute; left:-3px; top:4px; width:5px; height:5px; background:#fff; border-left:1px solid #e0e0e0; border-bottom:1px solid #e0e0e0; transform:rotate(45deg);"></div>
+                                        <div style="background:#fff; color:#333; padding:3px 8px; border-radius:4px; font-size:10px; border:1px solid #e0e0e0;">你好</div>
+                                    </div>
+                                    <div style="align-self:flex-end; position:relative; margin-right:4px;">
+                                        <div style="position:absolute; right:-3px; top:4px; width:5px; height:5px; background:#fff; border-right:1px solid #e0e0e0; border-top:1px solid #e0e0e0; transform:rotate(45deg);"></div>
+                                        <div style="background:#fff; color:#333; padding:3px 8px; border-radius:4px; font-size:10px; border:1px solid #e0e0e0;">嗨~</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 分割线 -->
+                    <div style="height:1px; background:#e0e0e0; margin:16px 0;"></div>
+                    
+                    <!-- 自定义样式 -->
+                    <div style="margin-bottom:16px;">
+                        <div style="font-size:14px; font-weight:500; margin-bottom:8px; color:#333;">自定义样式</div>
+                        <div style="font-size:12px; color:#999; margin-bottom:12px;">在预设基础上进一步自定义，或完全自定义样式</div>
+                        
+                        <!-- 可用类名提示 -->
+                        <div style="background:#fff; border:1px solid #e0e0e0; border-radius:8px; padding:10px; margin-bottom:12px;">
+                            <div style="font-size:12px; font-weight:600; margin-bottom:6px; color:#333;">📝 可用类名：</div>
+                            <div style="font-size:10px; font-family:monospace; color:#666; line-height:1.6; display:flex; flex-wrap:wrap; gap:4px;">
+                                <span style="padding:2px 6px; background:#f5f5f5; border-radius:3px;">.ai-bubble</span>
+                                <span style="padding:2px 6px; background:#f5f5f5; border-radius:3px;">.user-bubble</span>
+                                <span style="padding:2px 6px; background:#f5f5f5; border-radius:3px;">.message-content</span>
+                                <span style="padding:2px 6px; background:#f5f5f5; border-radius:3px;">.message-avatar</span>
+                                <span style="padding:2px 6px; background:#f5f5f5; border-radius:3px;">.message-row.self</span>
+                                <span style="padding:2px 6px; background:#f5f5f5; border-radius:3px;">.message-row.other</span>
+                            </div>
                         </div>
                     </div>
                     
                     <div style="margin-bottom:16px;">
-                        <div style="font-size:14px; font-weight:500; margin-bottom:8px; color:#333;">气泡样式 (CSS)</div>
-                        <div style="font-size:12px; color:#999; margin-bottom:8px;">自定义AI聊天气泡的CSS样式（自动应用到 .ai-bubble）</div>
-                        <textarea id="detail-bubble-css" placeholder="例如：&#10;background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);&#10;color: white;&#10;border-radius: 20px;&#10;padding: 12px 16px;" style="width:100%; min-height:120px; padding:10px; border:1px solid #ddd; border-radius:8px; font-family:monospace; font-size:12px; resize:vertical; outline:none;" oninput="saveChatDetail()"></textarea>
+                        <div style="font-size:13px; font-weight:500; margin-bottom:6px; color:#333;">气泡样式 (CSS)</div>
+                        <textarea id="detail-bubble-css" placeholder="例如：&#10;background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);&#10;color: white;" style="width:100%; min-height:80px; padding:10px; border:1px solid #ddd; border-radius:8px; font-family:monospace; font-size:11px; resize:vertical; outline:none; box-sizing:border-box;" oninput="saveChatDetail()"></textarea>
                     </div>
                     
                     <div style="margin-bottom:16px;">
-                        <div style="font-size:14px; font-weight:500; margin-bottom:8px; color:#333;">自定义容器 (HTML)</div>
-                        <div style="font-size:12px; color:#999; margin-bottom:8px;">添加自定义HTML容器，显示在聊天顶部（禁止JS）</div>
-                        <textarea id="detail-custom-html" placeholder="例如：&#10;<div style=&quot;text-align:center; padding:10px; background:#f0f0f0;&quot;>&#10;  <h3>Welcome!</h3>&#10;</div>" style="width:100%; min-height:100px; padding:10px; border:1px solid #ddd; border-radius:8px; font-family:monospace; font-size:12px; resize:vertical; outline:none;" oninput="saveChatDetail()"></textarea>
+                        <div style="font-size:13px; font-weight:500; margin-bottom:6px; color:#333;">自定义容器 (HTML)</div>
+                        <textarea id="detail-custom-html" placeholder="显示在聊天顶部的HTML" style="width:100%; min-height:60px; padding:10px; border:1px solid #ddd; border-radius:8px; font-family:monospace; font-size:11px; resize:vertical; outline:none; box-sizing:border-box;" oninput="saveChatDetail()"></textarea>
                     </div>
                     
                     <div style="margin-bottom:16px;">
-                        <div style="font-size:14px; font-weight:500; margin-bottom:8px; color:#333;">容器样式 (CSS)</div>
-                        <div style="font-size:12px; color:#999; margin-bottom:8px;">为自定义容器添加额外的CSS样式</div>
-                        <textarea id="detail-custom-css" placeholder="例如：&#10;.custom-header {&#10;  background: linear-gradient(to right, #4facfe 0%, #00f2fe 100%);&#10;  padding: 20px;&#10;}" style="width:100%; min-height:100px; padding:10px; border:1px solid #ddd; border-radius:8px; font-family:monospace; font-size:12px; resize:vertical; outline:none;" oninput="saveChatDetail()"></textarea>
+                        <div style="font-size:13px; font-weight:500; margin-bottom:6px; color:#333;">容器样式 (CSS)</div>
+                        <textarea id="detail-custom-css" placeholder="自定义容器的CSS样式" style="width:100%; min-height:60px; padding:10px; border:1px solid #ddd; border-radius:8px; font-family:monospace; font-size:11px; resize:vertical; outline:none; box-sizing:border-box;" oninput="saveChatDetail()"></textarea>
                     </div>
                     
                     <div style="display:flex; gap:10px;">
-                        <button onclick="previewCustomStyle()" style="flex:1; padding:10px; background:var(--ins-pink); color:white; border:none; border-radius:8px; font-size:14px; cursor:pointer;">预览效果</button>
-                        <button onclick="clearCustomStyle()" style="flex:1; padding:10px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:14px; cursor:pointer;">清除样式</button>
+                        <button onclick="previewCustomStyle()" style="flex:1; padding:10px; background:var(--ins-pink); color:white; border:none; border-radius:8px; font-size:13px; cursor:pointer;">预览效果</button>
+                        <button onclick="clearCustomStyle()" style="flex:1; padding:10px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:13px; cursor:pointer;">清除样式</button>
                     </div>
                 </div>
             </div>
@@ -1548,13 +1593,13 @@
                 <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
             </div>
             <div class="wechat-title">角色档案</div>
-            <div class="wechat-add" onclick="document.getElementById('character-import').click()" style="width:40px; text-align:right; font-size:16px; color:var(--ins-pink);">导入</div>
+            <div class="wechat-add" onclick="document.getElementById('character-import').click()" style="width:40px; text-align:right; font-size:16px; color:#666;">导入</div>
         </div>
         
         <div class="wechat-content" id="character-content" style="display:block; padding:16px; padding-bottom: 100px;"> <!-- 底部留空给 Tabbar -->
             <!-- 工具栏 -->
             <div style="display:flex; gap:10px; margin-bottom:16px;">
-                <div onclick="createNewCharacter()" style="flex:1; background:#f2f2f7; padding:12px; border-radius:10px; text-align:center; color:var(--ins-pink); font-weight:500;">+ 新建角色</div>
+                <div onclick="createNewCharacter()" style="flex:1; background:#fff; padding:12px; border-radius:10px; text-align:center; color:#333; font-weight:500; border:1px solid #e0e0e0;">+ 新建角色</div>
             </div>
             
             <!-- 列表 -->
@@ -2180,8 +2225,8 @@
     </div>
 
     <!-- 零钱页面 -->
-    <div class="sub-page-container" id="balance-page">
-        <div class="wallet-nav" style="background:#fff;">
+    <div class="sub-page-container service-sub-page" id="balance-page">
+        <div class="wallet-nav" style="background:rgba(255,251,252,0.95); backdrop-filter:blur(10px);">
             <div class="back-btn" onclick="hideBalancePage()">
                 <svg width="24" height="24" fill="none" stroke="#333" stroke-width="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"></polyline></svg>
             </div>
@@ -2288,8 +2333,8 @@
     </div>
 
     <!-- 亲属卡页面 -->
-    <div class="sub-page-container" id="family-card-page" style="display:none;">
-        <div class="wallet-nav" style="background:#fff;">
+    <div class="sub-page-container service-sub-page" id="family-card-page" style="display:none;">
+        <div class="wallet-nav" style="background:rgba(255,251,252,0.95); backdrop-filter:blur(10px);">
             <div class="back-btn" onclick="hideFamilyCardPage()">
                 <svg width="24" height="24" fill="none" stroke="#333" stroke-width="2" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"></polyline></svg>
             </div>
@@ -2298,7 +2343,7 @@
         </div>
         <div style="padding:16px;">
             <!-- 说明 -->
-            <div style="background:var(--ins-pink-light); border-radius:12px; padding:16px; margin-bottom:20px; border:1px solid var(--ins-pink);">
+            <div style="background:#FFF7FA; border-radius:12px; padding:16px; margin-bottom:20px; border:1px solid #f0e8ea;">
                 <div style="font-size:14px; color:#333; line-height:1.6;">
                     💝 亲属卡可以让对方使用你的零钱消费，你可以随时查看消费记录或解绑。
                 </div>
@@ -2311,7 +2356,7 @@
                     <!-- 动态渲染 -->
                 </div>
                 <div class="family-card-add" onclick="showGiveFamilyCardModal()">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--ins-pink)" stroke-width="2">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2">
                         <line x1="12" y1="5" x2="12" y2="19"></line>
                         <line x1="5" y1="12" x2="19" y2="12"></line>
                     </svg>

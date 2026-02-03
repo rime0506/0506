@@ -1162,6 +1162,9 @@ db.version(72).stores({
                 if (modelItem) {
                     select.value = modelItem.value;
                 }
+                
+                // 加载预设列表
+                await loadApiPresetList();
             } catch (e) {
                 console.error("加载 API 配置失败", e);
             }
@@ -1178,6 +1181,167 @@ db.version(72).stores({
             await db.dexiData.put({ key: 'aiApiKey', value: key });
             await db.dexiData.put({ key: 'aiCurrentModel', value: model });
             await db.dexiData.put({ key: 'aiTemperature', value: temp });
+        }
+        
+        // ========== API 预设管理 ==========
+        
+        // 加载预设列表到下拉框
+        async function loadApiPresetList() {
+            const select = document.getElementById('api-preset-select');
+            if (!select) return;
+            
+            try {
+                const presetsData = await db.dexiData.get('apiPresets');
+                const presets = presetsData?.value ? JSON.parse(presetsData.value) : [];
+                const currentPresetData = await db.dexiData.get('currentApiPreset');
+                const currentPresetName = currentPresetData?.value || '';
+                
+                select.innerHTML = '<option value="">-- 选择预设 --</option>';
+                presets.forEach(preset => {
+                    const opt = document.createElement('option');
+                    opt.value = preset.name;
+                    opt.textContent = preset.name;
+                    if (preset.name === currentPresetName) {
+                        opt.selected = true;
+                    }
+                    select.appendChild(opt);
+                });
+            } catch (e) {
+                console.error('加载API预设列表失败:', e);
+            }
+        }
+        
+        // 保存当前配置为预设
+        async function saveApiPreset() {
+            const name = prompt('请输入预设名称：');
+            if (!name || !name.trim()) return;
+            
+            const presetName = name.trim();
+            const url = document.getElementById('ai-url-input').value.trim();
+            const key = document.getElementById('ai-key-input').value.trim();
+            const model = document.getElementById('ai-model-select').value;
+            const temp = document.getElementById('ai-temp-slider').value;
+            const modelListData = await db.dexiData.get('aiModelList');
+            const modelList = modelListData?.value || '[]';
+            
+            const newPreset = {
+                name: presetName,
+                url: url,
+                key: key,
+                model: model,
+                temperature: temp,
+                modelList: modelList
+            };
+            
+            try {
+                const presetsData = await db.dexiData.get('apiPresets');
+                let presets = presetsData?.value ? JSON.parse(presetsData.value) : [];
+                
+                // 检查是否已存在同名预设
+                const existingIndex = presets.findIndex(p => p.name === presetName);
+                if (existingIndex >= 0) {
+                    if (!confirm(`预设"${presetName}"已存在，是否覆盖？`)) return;
+                    presets[existingIndex] = newPreset;
+                } else {
+                    presets.push(newPreset);
+                }
+                
+                await db.dexiData.put({ key: 'apiPresets', value: JSON.stringify(presets) });
+                await db.dexiData.put({ key: 'currentApiPreset', value: presetName });
+                
+                await loadApiPresetList();
+                alert(`预设"${presetName}"已保存！`);
+            } catch (e) {
+                console.error('保存API预设失败:', e);
+                alert('保存预设失败：' + e.message);
+            }
+        }
+        
+        // 加载选中的预设
+        async function loadApiPreset(presetName) {
+            if (!presetName) return;
+            
+            try {
+                const presetsData = await db.dexiData.get('apiPresets');
+                const presets = presetsData?.value ? JSON.parse(presetsData.value) : [];
+                const preset = presets.find(p => p.name === presetName);
+                
+                if (!preset) {
+                    alert('预设不存在');
+                    return;
+                }
+                
+                // 应用预设到输入框
+                document.getElementById('ai-url-input').value = preset.url || '';
+                document.getElementById('ai-key-input').value = preset.key || '';
+                document.getElementById('ai-temp-slider').value = preset.temperature || '0.7';
+                updateTempDisplay(preset.temperature || '0.7');
+                
+                // 恢复模型列表和选择
+                const select = document.getElementById('ai-model-select');
+                if (preset.modelList) {
+                    try {
+                        const models = JSON.parse(preset.modelList);
+                        select.innerHTML = '<option value="" disabled>请选择模型</option>';
+                        models.forEach(m => {
+                            const opt = document.createElement('option');
+                            opt.value = m.id;
+                            opt.text = m.id;
+                            select.appendChild(opt);
+                        });
+                    } catch (e) {
+                        select.innerHTML = '<option value="" disabled>请拉取</option>';
+                    }
+                }
+                if (preset.model) {
+                    select.value = preset.model;
+                }
+                
+                // 保存到数据库
+                await db.dexiData.put({ key: 'aiBaseUrl', value: preset.url || '' });
+                await db.dexiData.put({ key: 'aiApiKey', value: preset.key || '' });
+                await db.dexiData.put({ key: 'aiCurrentModel', value: preset.model || '' });
+                await db.dexiData.put({ key: 'aiTemperature', value: preset.temperature || '0.7' });
+                await db.dexiData.put({ key: 'aiModelList', value: preset.modelList || '[]' });
+                await db.dexiData.put({ key: 'currentApiPreset', value: presetName });
+                
+            } catch (e) {
+                console.error('加载API预设失败:', e);
+                alert('加载预设失败：' + e.message);
+            }
+        }
+        
+        // 删除当前选中的预设
+        async function deleteApiPreset() {
+            const select = document.getElementById('api-preset-select');
+            const presetName = select.value;
+            
+            if (!presetName) {
+                alert('请先选择要删除的预设');
+                return;
+            }
+            
+            if (!confirm(`确定要删除预设"${presetName}"吗？`)) return;
+            
+            try {
+                const presetsData = await db.dexiData.get('apiPresets');
+                let presets = presetsData?.value ? JSON.parse(presetsData.value) : [];
+                
+                presets = presets.filter(p => p.name !== presetName);
+                await db.dexiData.put({ key: 'apiPresets', value: JSON.stringify(presets) });
+                
+                // 如果删除的是当前预设，清空当前预设标记
+                const currentPresetData = await db.dexiData.get('currentApiPreset');
+                if (currentPresetData?.value === presetName) {
+                    await db.dexiData.put({ key: 'currentApiPreset', value: '' });
+                }
+                
+                await loadApiPresetList();
+                alert(`预设"${presetName}"已删除`);
+            } catch (e) {
+                console.error('删除API预设失败:', e);
+                alert('删除预设失败：' + e.message);
+            }
         }
 
         // NovelAI 设置相关函数
@@ -5161,7 +5325,7 @@ async function showWechatRegisterPage() {
             const currentName = myChar.name || '';
             
             modal.innerHTML = `
-                <div style="background: #fff; padding: 12px 16px; display: flex; align-items: center; border-bottom: 1px solid #e8e8e8;">
+                <div style="background: #fff; height: 88px; padding-top: 44px; padding-left: 16px; padding-right: 16px; display: flex; align-items: center; border-bottom: 1px solid #e8e8e8; box-sizing: border-box;">
                     <svg onclick="closeProfileSettings()" viewBox="0 0 24 24" style="width: 24px; height: 24px; cursor: pointer; stroke: #333; fill: none; stroke-width: 2;">
                         <polyline points="15 18 9 12 15 6"></polyline>
                     </svg>
@@ -8948,6 +9112,26 @@ ${chatContext || '（没有聊天记录）'}
                 bgPreview.style.backgroundImage = '';
                 bgPreview.textContent = '暂无背景图';
             }
+            
+            // 9. 加载气泡样式选择
+            const bubbleStyle = char.bubble_style || 'default';
+            document.querySelectorAll('.bubble-style-option').forEach(el => {
+                el.classList.remove('selected');
+                if (el.dataset.style === bubbleStyle) {
+                    el.classList.add('selected');
+                }
+            });
+        }
+        
+        // 选择气泡样式
+        function selectBubbleStyle(style) {
+            document.querySelectorAll('.bubble-style-option').forEach(el => {
+                el.classList.remove('selected');
+                if (el.dataset.style === style) {
+                    el.classList.add('selected');
+                }
+            });
+            saveChatDetail();
         }
 
         function hideChatDetail() {
@@ -9013,6 +9197,10 @@ async function saveChatDetail() {
     char.custom_bubble_css = sanitizeCSS(bubbleCSS);
     char.custom_html = sanitizeHTML(customHTML);
     char.custom_css = sanitizeCSS(customCSS);
+    
+    // 保存气泡样式选择
+    const selectedBubbleOption = document.querySelector('.bubble-style-option.selected');
+    char.bubble_style = selectedBubbleOption ? selectedBubbleOption.dataset.style : 'default';
     
     await db.characters.put(char);
     
@@ -9308,7 +9496,15 @@ window.saveMountedStickers = saveMountedStickers;
             const chatContainer = document.getElementById('chat-body');
             if (!chatContainer) return;
             
-            // 应用气泡样式
+            // 应用气泡样式类名（默认/仿微信）
+            chatContainer.classList.remove('bubble-style-default', 'bubble-style-wechat');
+            if (char.bubble_style === 'wechat') {
+                chatContainer.classList.add('bubble-style-wechat');
+            } else {
+                chatContainer.classList.add('bubble-style-default');
+            }
+            
+            // 应用自定义气泡CSS
             if (char.custom_bubble_css) {
                 const bubbleStyleId = 'custom-bubble-style';
                 let styleTag = document.getElementById(bubbleStyleId);
@@ -9599,6 +9795,9 @@ ${loreContext}
 
 现在距离上次对话已经过去了一段时间。请根据角色性格，主动向 ${userName} 发起新的话题，或者延续之前未尽的话题。
 
+【可用特殊指令】
+- **撤回消息**：使用 ((RECALL)) 可以撤回你刚才发送的最后一条消息（适用于发错消息、说错话、后悔等场景）
+
 【重要指令 - 必须严格遵守】
 1. **必须**模拟微信连发消息的习惯：请生成 2 到 4 条短消息，不能只发一条！
 2. **必须**使用分隔符 "|||" 来隔开每一条消息。
@@ -9813,6 +10012,72 @@ ${loreContext}
                         }
                     }
                     return; // 转账处理完成，不再执行后续逻辑
+                }
+                
+                // 🎯 检测撤回指令 ((RECALL)) - AI角色可以撤回自己最后一条消息
+                const recallMatch = cleanReplyProcessed.match(/\(\(RECALL(?::\s*(\d+))?\)\)/i);
+                if (recallMatch) {
+                    const freshChar = await db.characters.get(char.id);
+                    if (freshChar) {
+                        let history = getChatHistory(freshChar, accountId);
+                        
+                        // 提取撤回指令前面的文字内容（如果有）
+                        const textBeforeRecall = cleanMessage(cleanReplyProcessed.substring(0, recallMatch.index).trim());
+                        
+                        // 找AI最后一条消息（非撤回状态）
+                        let targetIndex = -1;
+                        for (let i = history.length - 1; i >= 0; i--) {
+                            if (history[i].role === 'char' && !history[i].isRecalled) {
+                                targetIndex = i;
+                                break;
+                            }
+                        }
+                        
+                        if (targetIndex >= 0 && history[targetIndex].role === 'char') {
+                            // 保存原内容并标记为已撤回
+                            const originalContent = history[targetIndex].content;
+                            history[targetIndex].recalledContent = originalContent;
+                            history[targetIndex].isRecalled = true;
+                            history[targetIndex].content = "";
+                            
+                            await setChatHistory(freshChar, accountId, history);
+                            
+                            console.log(`[AutoChat] ${freshChar.name} 撤回了一条消息`);
+                            addLog('info', `角色撤回消息: ${freshChar.name}`, { originalContent: originalContent.substring(0, 50) });
+                            
+                            // 更新UI - 居中系统提示样式
+                            if (currentChatCharId === freshChar.id) {
+                                const chatBody = document.getElementById('chat-body');
+                                const messageRows = chatBody.querySelectorAll('.message-row');
+                                if (messageRows[targetIndex]) {
+                                    const msgRow = messageRows[targetIndex];
+                                    msgRow.className = 'message-row recalled-system-row';
+                                    msgRow.innerHTML = '';
+                                    
+                                    const systemTip = document.createElement('div');
+                                    systemTip.className = 'recalled-system-tip';
+                                    systemTip.innerHTML = `"${freshChar.name}"撤回了一条消息`;
+                                    systemTip.style.cursor = 'pointer';
+                                    systemTip.onclick = (e) => {
+                                        e.stopPropagation();
+                                        showRecalledContent(freshChar.name, originalContent);
+                                    };
+                                    msgRow.appendChild(systemTip);
+                                }
+                            }
+                            
+                            // 发送通知
+                            sendSystemNotification(freshChar.name, '撤回了一条消息');
+                        }
+                        
+                        // 如果撤回指令前有文字，继续处理这些文字
+                        if (textBeforeRecall && textBeforeRecall.trim()) {
+                            cleanReplyProcessed = textBeforeRecall;
+                            // 不return，继续处理前面的文字
+                        } else {
+                            return; // 只有撤回指令，处理完成
+                        }
+                    }
                 }
                 
                 // 🎯 检测亲属卡赠送指令 ((FAMILY_CARD: 额度))
@@ -10070,6 +10335,59 @@ ${loreContext}
                     
                     // ✅ 修复：清理每个分段末尾多余的 ]
                     seg = cleanMessage(seg);
+                    
+                    // 🎯 检测撤回指令 - 在分段中检测
+                    if (/^\s*\(\(RECALL\)\)\s*$/i.test(seg)) {
+                        console.log(`[AutoChat] 检测到撤回指令，执行撤回...`);
+                        const freshChar = await db.characters.get(char.id);
+                        let history = getChatHistory(freshChar, accountId);
+                        
+                        // 找AI最后一条消息（非撤回状态）
+                        let targetIndex = -1;
+                        for (let j = history.length - 1; j >= 0; j--) {
+                            if (history[j].role === 'char' && !history[j].isRecalled) {
+                                targetIndex = j;
+                                break;
+                            }
+                        }
+                        
+                        if (targetIndex >= 0) {
+                            const originalContent = history[targetIndex].content;
+                            history[targetIndex].recalledContent = originalContent;
+                            history[targetIndex].isRecalled = true;
+                            history[targetIndex].content = "";
+                            await setChatHistory(freshChar, accountId, history);
+                            
+                            console.log(`[AutoChat] ${freshChar.name} 撤回了消息: ${originalContent.substring(0, 30)}...`);
+                            addLog('info', `角色撤回消息: ${freshChar.name}`);
+                            
+                            // 更新UI - 居中系统提示样式
+                            if (currentChatCharId === freshChar.id) {
+                                const chatBody = document.getElementById('chat-body');
+                                const messageRows = chatBody.querySelectorAll('.message-row');
+                                if (messageRows[targetIndex]) {
+                                    const msgRow = messageRows[targetIndex];
+                                    msgRow.className = 'message-row recalled-system-row';
+                                    msgRow.innerHTML = '';
+                                    
+                                    const capturedContent = originalContent;
+                                    const capturedName = freshChar.name;
+                                    const systemTip = document.createElement('div');
+                                    systemTip.className = 'recalled-system-tip';
+                                    systemTip.innerHTML = `"${capturedName}"撤回了一条消息`;
+                                    systemTip.style.cursor = 'pointer';
+                                    systemTip.onclick = (e) => {
+                                        e.stopPropagation();
+                                        showRecalledContent(capturedName, capturedContent);
+                                    };
+                                    msgRow.appendChild(systemTip);
+                                }
+                            }
+                            
+                            sendSystemNotification(freshChar.name, '撤回了一条消息');
+                        }
+                        continue; // 跳过这个分段，不作为消息发送
+                    }
                     
                     // 延时：第一条稍快，后续模拟打字
                     if (i > 0) {
@@ -10397,26 +10715,30 @@ ${groupContextStr}
 5. **管理员权限**: 标记为[管理员]的角色可以使用 kick_member 和 mute_member 指令
 6. **禁止出戏**: 绝不能透露你是AI
 7. **消息风格**: 每条消息简短（1句话），可以用"|||"分隔多句话表示连发
+8. **群昵称功能**: 角色可以随时修改自己的群昵称，这很常见！角色们经常会改群昵称来玩梗、调侃、表达心情
 
 # 可用指令类型
 - **普通发言**: {"type": "text", "name": "角色名", "content": "发言内容"}
-- **修改群昵称**: {"type": "change_nickname", "name": "角色名", "nickname": "新群昵称"}
+- **修改群昵称**: {"type": "change_nickname", "name": "角色名", "nickname": "新群昵称"} ← 角色可以随时修改自己的群昵称！
 - **踢出成员** (仅管理员): {"type": "kick_member", "name": "操作者角色名", "target": "被踢者角色名"}
 - **禁言成员** (仅管理员): {"type": "mute_member", "name": "操作者角色名", "target": "被禁言者角色名", "mute": true}
 - **解除禁言** (仅管理员): {"type": "mute_member", "name": "操作者角色名", "target": "被解禁者角色名", "mute": false}
 
 注意：普通发言可以省略 type 字段，直接用 {"name": "角色名", "content": "内容"}
+提示：角色们可以根据聊天内容、心情、玩梗等原因修改自己的群昵称，这是很自然的行为
 
 # 示例输出格式（注意消息数量要多！）
 [
   {"name": "角色A", "content": "哇 你说的这个|||我也遇到过"},
   {"name": "角色B", "content": "真的吗？"},
   {"type": "change_nickname", "name": "角色A", "nickname": "话痨本痨"},
-  {"name": "角色A", "content": "对啊对啊|||我改个群昵称"},
+  {"name": "角色A", "content": "对啊对啊|||我改个群昵称玩"},
   {"name": "角色C", "content": "我也想说这个！|||之前就想吐槽了"},
   {"name": "角色B", "content": "哈哈哈哈"},
+  {"type": "change_nickname", "name": "角色B", "nickname": "笑到头掉"},
   {"name": "角色A", "content": "笑死"},
   {"name": "角色C", "content": "你们太好笑了|||不行了"},
+  {"type": "change_nickname", "name": "角色C", "nickname": "肚子疼"},
   {"name": "角色B", "content": "确实|||绷不住了"}
 ]
 
@@ -10531,12 +10853,13 @@ ${groupContextStr}
                             if (!senderId) continue;
                             
                             if (!updatedGroup.memberNicknames) updatedGroup.memberNicknames = {};
-                            const oldNickname = updatedGroup.memberNicknames[senderId] || memberMap[senderId]?.name || reply.name;
+                            // 使用角色本名（备注名或原名）
+                            const charRealName = memberMap[senderId]?.remark || memberMap[senderId]?.name || reply.name;
                             updatedGroup.memberNicknames[senderId] = reply.nickname;
                             
                             updatedGroup.chat_history.push({
                                 role: 'system',
-                                content: `"${oldNickname}" 将群昵称改为 "${reply.nickname}"`,
+                                content: `"${charRealName}"将自己的群昵称改为了"${reply.nickname}"`,
                                 time: Date.now() + msgIndex * 50
                             });
                             msgIndex++;
@@ -10879,7 +11202,7 @@ ${groupContextStr}
         }
 
         // 构造消息 DOM
-        function createMessageElement(msg, index, charAvatar, userAvatar, prevMsgTime) {
+        function createMessageElement(msg, index, charAvatar, userAvatar, prevMsgTime, charName = 'AI') {
             const row = document.createElement('div');
             row.className = `message-row ${msg.role === 'user' ? 'self' : 'other'}`;
             row.dataset.index = index;
@@ -10998,10 +11321,32 @@ ${groupContextStr}
                     </div>
                 `;
             }
-            // 处理撤回消息
+            // 处理撤回消息（居中系统提示样式，点击可查看原内容）
             else if (msg.isRecalled) {
-                content.innerHTML = "<span>已撤回</span>";
-                content.classList.add('recalled-msg');
+                const isUser = msg.role === 'user';
+                const recallerName = isUser ? '你' : charName;
+                
+                // 改为系统提示样式：居中灰色文字
+                row.className = 'message-row recalled-system-row';
+                row.innerHTML = ''; // 清空原有内容
+                
+                const systemTip = document.createElement('div');
+                systemTip.className = 'recalled-system-tip';
+                systemTip.innerHTML = `"${recallerName}"撤回了一条消息`;
+                systemTip.style.cursor = 'pointer';
+                
+                // 点击查看撤回的内容
+                systemTip.onclick = (e) => {
+                    e.stopPropagation();
+                    if (msg.recalledContent) {
+                        showRecalledContent(recallerName, msg.recalledContent);
+                    } else {
+                        showToast('原消息内容已不可用');
+                    }
+                };
+                
+                row.appendChild(systemTip);
+                return row; // 直接返回，不再添加头像和气泡
             } 
             // 处理语音消息
             else if (msg.content.startsWith('[voice:')) {
@@ -11263,6 +11608,14 @@ ${groupContextStr}
             const history = getChatHistory(char, accountId);
             if (!history || history.length === 0) return;
 
+            // 应用气泡样式类名
+            body.classList.remove('bubble-style-default', 'bubble-style-wechat');
+            if (char.bubble_style === 'wechat') {
+                body.classList.add('bubble-style-wechat');
+            } else {
+                body.classList.add('bubble-style-default');
+            }
+
             const userAvatarUrl = await getUserAvatarUrl(char.linked_user_id);
 
             history.forEach((msg, index) => {
@@ -11276,7 +11629,7 @@ ${groupContextStr}
                     body.appendChild(timeStamp);
                 }
                 
-                const row = createMessageElement(msg, index, char.avatar, userAvatarUrl, prevMsgTime);
+                const row = createMessageElement(msg, index, char.avatar, userAvatarUrl, prevMsgTime, char.name);
                 
                 // 如果在多选模式，恢复选中状态
                 if (isSelectionMode) {
@@ -11363,7 +11716,7 @@ ${groupContextStr}
                 body.appendChild(timeStamp);
             }
 
-            const row = createMessageElement(msg, index, charAvatar, userAvatarUrl, prevMsgTime);
+            const row = createMessageElement(msg, index, charAvatar, userAvatarUrl, prevMsgTime, char ? char.name : 'AI');
             if (elemId) row.id = elemId;
             
             body.appendChild(row);
@@ -11506,7 +11859,7 @@ ${groupContextStr}
             }
         }
 
-        // 2. 撤回
+        // 2. 撤回（保存原内容，点击可查看）
         async function handleMsgRecall() {
             hideContextMenu();
             if (activeMsgIndex === -1 || !currentChatCharId) return;
@@ -11516,27 +11869,98 @@ ${groupContextStr}
             const char = await db.characters.get(currentChatCharId);
             const accountId = getCurrentAccountId();
             let history = getChatHistory(char, accountId);
-            // 标记为已撤回，而不是物理删除（通常做法）
-            // 或者如果您想做成"删除但留痕"，可以修改内容
-            history[activeMsgIndex].isRecalled = true;
-            history[activeMsgIndex].content = ""; // 清空内容
+            const msg = history[activeMsgIndex];
+            const isUser = msg.role === 'user';
+            const recallerName = isUser ? '你' : char.name;
+            
+            // 保存原内容到 recalledContent，然后标记为已撤回
+            msg.recalledContent = msg.content;
+            msg.isRecalled = true;
+            msg.content = ""; // 清空显示内容
             
             await setChatHistory(char, accountId, history);
             
-            // ✅ 优化：直接更新 DOM 显示撤回状态，不重新渲染
+            // ✅ 优化：直接更新 DOM 显示撤回状态 - 居中系统提示样式
             const chatBody = document.getElementById('chat-body');
             const messageRows = chatBody.querySelectorAll('.message-row');
             if (messageRows[activeMsgIndex]) {
                 const msgRow = messageRows[activeMsgIndex];
-                const isUser = history[activeMsgIndex].role === 'user';
-                // 替换消息内容为撤回提示
-                const bubble = msgRow.querySelector('.msg-bubble');
-                if (bubble) {
-                    bubble.innerHTML = `<span style="color:#999;font-size:12px;">${isUser ? '你' : char.name}撤回了一条消息</span>`;
-                    bubble.style.background = 'transparent';
-                    bubble.style.padding = '5px 0';
-                }
+                msgRow.className = 'message-row recalled-system-row';
+                msgRow.innerHTML = '';
+                
+                const capturedContent = msg.recalledContent;
+                const capturedName = recallerName;
+                const systemTip = document.createElement('div');
+                systemTip.className = 'recalled-system-tip';
+                systemTip.innerHTML = `"${capturedName}"撤回了一条消息`;
+                systemTip.style.cursor = 'pointer';
+                systemTip.onclick = (e) => {
+                    e.stopPropagation();
+                    showRecalledContent(capturedName, capturedContent);
+                };
+                msgRow.appendChild(systemTip);
             }
+        }
+        
+        // 显示撤回消息的原内容
+        function showRecalledContent(recallerName, content) {
+            // 创建弹窗
+            const overlay = document.createElement('div');
+            overlay.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.5);
+                z-index: 9999;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+            `;
+            overlay.onclick = () => overlay.remove();
+            
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                background: white;
+                border-radius: 12px;
+                padding: 20px;
+                max-width: 320px;
+                width: 100%;
+                max-height: 60vh;
+                overflow-y: auto;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            `;
+            modal.onclick = (e) => e.stopPropagation();
+            
+            // 处理内容显示（支持图片等）
+            let displayContent = content;
+            if (content.startsWith('[img:')) {
+                const imgUrl = content.substring(5, content.length - 1).trim();
+                displayContent = `<img src="${imgUrl}" style="max-width:100%; border-radius:8px;">`;
+            } else if (content.startsWith('[voice:')) {
+                displayContent = `🎤 语音消息: ${content.substring(7, content.length - 1)}`;
+            }
+            
+            modal.innerHTML = `
+                <div style="font-size:14px; color:#999; margin-bottom:12px;">"${recallerName}"撤回的消息：</div>
+                <div style="font-size:15px; color:#333; line-height:1.6; word-break:break-all;">${displayContent}</div>
+                <button onclick="this.parentElement.parentElement.remove()" style="
+                    width: 100%;
+                    margin-top: 16px;
+                    padding: 10px;
+                    background: #f5f5f5;
+                    border: none;
+                    border-radius: 8px;
+                    font-size: 14px;
+                    color: #666;
+                    cursor: pointer;
+                ">关闭</button>
+            `;
+            
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
         }
 
         // 3. 删除 (单条)
@@ -12965,6 +13389,10 @@ ${loreContext}
   [MOMENTS]
   content: 今天天气真好啊，心情也跟着好起来了
   images: 3
+- **撤回消息**：使用格式 ((RECALL))，用于撤回你刚才发送的最后一条消息
+  **适用场景**：发错消息、说错话、后悔刚才说的话、想收回某句话
+  **示例**：如果你刚才说了"我讨厌你"然后后悔了，可以发送 "啊不是不是我不是那个意思！|||((RECALL))"
+  **效果**：会撤回你上一条消息，对方会看到"XX撤回了一条消息"（但点击可以查看原内容）
 
 【重要】消息类型选择原则：
 1. **普通文字消息**：默认选择，适用于日常对话、闲聊、问答等绝大多数场景（5-50字的短句）
@@ -12997,6 +13425,13 @@ ${loreContext}
    - 角色在对话中明确表示"我发个朋友圈"、"我要晒一下"等意图
    - 符合角色人设中喜欢晒朋友圈的习惯（但仍应谨慎使用，不要每次都发）
    **注意**：普通聊天中99%的情况都不需要发朋友圈！只有在真正有值得记录的重要时刻才发。
+7. **撤回消息**：适合以下场景：
+   - 发错消息、打错字后想撤回
+   - 说了后悔的话（如生气时说的气话、说错的话）
+   - 想收回刚才发送的内容
+   - 发送了不合适的消息想撤回
+   **使用方法**：发送 ((RECALL)) 会撤回你最后一条消息
+   **示例**：如果刚说了气话后悔了，可以发 "不是 我刚才说的不算|||((RECALL))"
    
 **转账备注规则**：
 - 备注必须简短，不超过10个字，只用于简单说明转账用途（如："零花钱"、"生日礼物"、"生活费"等）
@@ -13598,6 +14033,60 @@ ${loreContext}
 
                 for (let i = 0; i < segments.length; i++) {
                     let seg = segments[i];
+                    
+                    // 🎯 检测撤回指令 - 在分段中检测
+                    if (/^\s*\(\(RECALL\)\)\s*$/i.test(seg)) {
+                        console.log(`[AiReply] 检测到撤回指令，执行撤回...`);
+                        const freshChar = await db.characters.get(targetCharId);
+                        if (freshChar) {
+                            let history = getChatHistory(freshChar, accountId);
+                            
+                            // 找AI最后一条消息（非撤回状态）
+                            let targetIndex = -1;
+                            for (let j = history.length - 1; j >= 0; j--) {
+                                if (history[j].role === 'char' && !history[j].isRecalled) {
+                                    targetIndex = j;
+                                    break;
+                                }
+                            }
+                            
+                            if (targetIndex >= 0) {
+                                const originalContent = history[targetIndex].content;
+                                history[targetIndex].recalledContent = originalContent;
+                                history[targetIndex].isRecalled = true;
+                                history[targetIndex].content = "";
+                                await setChatHistory(freshChar, accountId, history);
+                                
+                                console.log(`[AiReply] ${freshChar.name} 撤回了消息`);
+                                
+                                // 更新UI - 居中系统提示样式
+                                if (currentChatCharId === targetCharId) {
+                                    const chatBody = document.getElementById('chat-body');
+                                    const messageRows = chatBody.querySelectorAll('.message-row');
+                                    if (messageRows[targetIndex]) {
+                                        const msgRow = messageRows[targetIndex];
+                                        msgRow.className = 'message-row recalled-system-row';
+                                        msgRow.innerHTML = '';
+                                        
+                                        const capturedContent = originalContent;
+                                        const capturedName = freshChar.name;
+                                        const systemTip = document.createElement('div');
+                                        systemTip.className = 'recalled-system-tip';
+                                        systemTip.innerHTML = `"${capturedName}"撤回了一条消息`;
+                                        systemTip.style.cursor = 'pointer';
+                                        systemTip.onclick = (e) => {
+                                            e.stopPropagation();
+                                            showRecalledContent(capturedName, capturedContent);
+                                        };
+                                        msgRow.appendChild(systemTip);
+                                    }
+                                }
+                                
+                                sendSystemNotification(freshChar.name, '撤回了一条消息');
+                            }
+                        }
+                        continue; // 跳过这个分段，不作为消息发送
+                    }
                     
                     // 延时：第一条直接发(前面loading已经是等待了)，后续模拟打字
                     if (i > 0) {
