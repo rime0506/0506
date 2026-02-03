@@ -490,6 +490,42 @@ async function migratePhoneAndSmsToIndexedDB() {
             }, 3000);
         }
 
+        // API 错误提示弹窗
+        let apiErrorTimer = null;
+        function showApiErrorToast(errorMessage) {
+            // 创建或获取弹窗元素
+            let toast = document.getElementById('api-error-toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'api-error-toast';
+                toast.className = 'api-error-toast';
+                document.body.appendChild(toast);
+            }
+            
+            // 清除之前的定时器
+            if (apiErrorTimer) clearTimeout(apiErrorTimer);
+            
+            // 构建错误提示内容
+            toast.innerHTML = `
+                <div class="error-icon">⚠️</div>
+                <div class="error-title">请求失败</div>
+                <div class="error-msg">${errorMessage}</div>
+            `;
+            toast.classList.add('show');
+            
+            // 4秒后自动隐藏
+            apiErrorTimer = setTimeout(() => {
+                toast.classList.remove('show');
+            }, 4000);
+            
+            // 点击关闭
+            toast.style.pointerEvents = 'auto';
+            toast.onclick = () => {
+                toast.classList.remove('show');
+                if (apiErrorTimer) clearTimeout(apiErrorTimer);
+            };
+        }
+
         // 全局日志系统
         const systemLogs = [];
         const MAX_LOGS = 100;
@@ -14711,10 +14747,8 @@ ${loreContext}
                 console.error("AI 回复失败", err);
                 if (chatTitleEl) chatTitleEl.innerText = originalTitle;
                 
-                // 显示错误消息
-                await appendMessageToUI('char', `[触发失败] ${err.message}`, char.avatar);
-                const lastContent = document.querySelector('#chat-body .message-row:last-child .message-content');
-                if (lastContent) lastContent.style.color = 'red';
+                // 使用弹窗显示错误信息，而不是在聊天界面添加消息
+                showApiErrorToast(err.message || 'API 请求失败，请检查网络或 API 配置');
             }
         }
 
@@ -17053,20 +17087,24 @@ async function renderMomentsList() {
         })
         .map(char => char.id);
     
-    // 包括自己和所有好友
-    const visibleUserIds = [currentAccountId, ...friendIds];
+    // 包括自己和所有好友（统一转为数字进行比较）
+    const visibleUserIds = [currentAccountId, ...friendIds].map(id => parseInt(id));
     
-    let moments = await db.moments
-        .filter(m => visibleUserIds.includes(m.userId))
-        .toArray();
+    // 获取所有朋友圈，然后过滤
+    let allMoments = await db.moments.toArray();
+    let moments = allMoments.filter(m => visibleUserIds.includes(parseInt(m.userId)));
     
-    // 按置顶和时间排序：置顶的在前，然后按时间倒序
+    // ✅ 按置顶和时间排序：置顶的在前，然后按时间倒序（最新的在上面）
     moments.sort((a, b) => {
         // 如果是自己发的且置顶了，排在最前面
-        if (a.userId === currentAccountId && a.pinned && !(b.userId === currentAccountId && b.pinned)) return -1;
-        if (b.userId === currentAccountId && b.pinned && !(a.userId === currentAccountId && a.pinned)) return 1;
-        // 都是置顶或都不是置顶，按时间排序
-        return b.time - a.time;
+        const aIsPinned = (parseInt(a.userId) === currentAccountId && a.pinned);
+        const bIsPinned = (parseInt(b.userId) === currentAccountId && b.pinned);
+        
+        if (aIsPinned && !bIsPinned) return -1;
+        if (bIsPinned && !aIsPinned) return 1;
+        
+        // 都是置顶或都不是置顶，按时间倒序（新的在前）
+        return (b.time || 0) - (a.time || 0);
     });
     
     if (moments.length === 0) {
@@ -17414,7 +17452,7 @@ async function doPublishMoment() {
         return;
     }
     
-    await db.moments.add({
+    const momentId = await db.moments.add({
         userId: parseInt(currentMyCharId),
         content: text,
         images: images,
@@ -17432,6 +17470,158 @@ async function doPublishMoment() {
     
     // 滚动到顶部
     document.getElementById('moments-page').scrollTop = 0;
+    
+    // ✅ 触发好友自动点赞评论（延迟执行，模拟真实场景）
+    setTimeout(() => {
+        generateFriendInteractions(momentId, currentMomentPrivacy, selectedPrivacyFriends.slice());
+    }, 2000);
+}
+
+// ✅ 生成好友自动点赞评论（调用AI）
+async function generateFriendInteractions(momentId, privacy, privacyList) {
+    try {
+        const moment = await db.moments.get(momentId);
+        if (!moment) return;
+        
+        const accountId = getCurrentAccountId();
+        const myChar = await db.characters.get(parseInt(currentMyCharId));
+        const myName = myChar?.name || '我';
+        
+        // 获取所有好友
+        const allChars = await db.characters.toArray();
+        let friends = allChars.filter(c => {
+            if (c.type === 'user') return false;
+            const status = getFriendStatus(c, accountId);
+            return status === 'friend';
+        });
+        
+        // ✅ 根据权限过滤好友
+        if (privacy === 'partial' && privacyList.length > 0) {
+            // 部分可见：只有 privacyList 中的好友可以看到
+            friends = friends.filter(f => privacyList.includes(f.id));
+        } else if (privacy === 'exclude' && privacyList.length > 0) {
+            // 不给谁看：排除 privacyList 中的好友
+            friends = friends.filter(f => !privacyList.includes(f.id));
+        } else if (privacy === 'private') {
+            // 私密：没有好友可以看到
+            friends = [];
+        }
+        
+        if (friends.length === 0) {
+            console.log('[朋友圈互动] 没有可见的好友，跳过生成互动');
+            return;
+        }
+        
+        console.log(`[朋友圈互动] 开始生成，可见好友: ${friends.length}人`);
+        
+        // 随机选择一些好友来点赞（30%-70%的可见好友）
+        const likeRatio = 0.3 + Math.random() * 0.4;
+        const shuffledForLikes = [...friends].sort(() => Math.random() - 0.5);
+        const likersCount = Math.max(1, Math.floor(shuffledForLikes.length * likeRatio));
+        const likers = shuffledForLikes.slice(0, likersCount);
+        
+        // 随机选择一些好友来评论（10%-40%的可见好友，最多5人）
+        const commentRatio = 0.1 + Math.random() * 0.3;
+        const shuffledForComments = [...friends].sort(() => Math.random() - 0.5);
+        const commentersCount = Math.min(5, Math.max(1, Math.floor(shuffledForComments.length * commentRatio)));
+        const commenters = shuffledForComments.slice(0, commentersCount);
+        
+        // 生成点赞
+        const likes = likers.map(f => ({
+            userId: f.id,
+            name: f.name
+        }));
+        
+        // ✅ 调用AI生成评论
+        const comments = [];
+        
+        if (commenters.length > 0) {
+            try {
+                // 构建角色信息
+                const commenterInfos = commenters.map(c => 
+                    `- ${c.name}：${c.description || c.personality || '普通朋友'}`
+                ).join('\n');
+                
+                const prompt = `${myName} 发了一条朋友圈：
+"${moment.content}"
+${moment.images?.length > 0 ? `（附带${moment.images.length}张图片）` : ''}
+
+以下好友看到了这条朋友圈，请为每个人生成一条符合其性格的评论：
+${commenterInfos}
+
+要求：
+1. 每条评论简短自然（3-20字）
+2. 可以用表情、语气词
+3. 符合每个角色的性格特点
+4. 可以互相@回复（格式：回复 某某：内容）
+
+请返回JSON数组格式：
+[{"name": "角色名", "content": "评论内容"}, ...]`;
+
+                const result = await callAI([
+                    { role: 'system', content: '你是一个社交媒体评论生成助手，只返回JSON数组，不要任何其他文字。' },
+                    { role: 'user', content: prompt }
+                ]);
+                
+                // 解析结果
+                let aiComments = [];
+                try {
+                    let cleanResult = result.trim();
+                    if (cleanResult.startsWith('```')) {
+                        cleanResult = cleanResult.replace(/```json?\n?/g, '').replace(/```$/g, '').trim();
+                    }
+                    aiComments = JSON.parse(cleanResult);
+                } catch (e) {
+                    console.warn('[朋友圈互动] AI评论解析失败，使用预设评论');
+                }
+                
+                // 将AI生成的评论添加到列表
+                for (const aiComment of aiComments) {
+                    const commenter = commenters.find(c => c.name === aiComment.name);
+                    if (commenter && aiComment.content) {
+                        comments.push({
+                            userId: commenter.id,
+                            name: commenter.name,
+                            content: aiComment.content,
+                            time: Date.now() + Math.random() * 60000
+                        });
+                    }
+                }
+                
+            } catch (apiError) {
+                console.warn('[朋友圈互动] AI调用失败，使用预设评论:', apiError);
+            }
+        }
+        
+        // 如果AI生成失败，使用预设评论
+        if (comments.length === 0 && commenters.length > 0) {
+            const presetComments = [
+                '👍', '❤️', '太棒了！', '真好看~', '哇！', '赞！',
+                '羡慕！', '厉害啊', '太美了', '🔥', '绝了', '爱了'
+            ];
+            for (const commenter of commenters) {
+                comments.push({
+                    userId: commenter.id,
+                    name: commenter.name,
+                    content: presetComments[Math.floor(Math.random() * presetComments.length)],
+                    time: Date.now() + Math.random() * 60000
+                });
+            }
+        }
+        
+        // 更新朋友圈
+        moment.likes = likes;
+        moment.comments = comments;
+        await db.moments.put(moment);
+        
+        console.log(`[朋友圈互动] 生成完成: ${likes.length}个点赞, ${comments.length}条评论`);
+        
+        // 刷新显示
+        renderMomentsList();
+        
+    } catch (error) {
+        console.error('[朋友圈互动] 生成失败:', error);
+    }
 }
 
 async function deleteMoment(id) {

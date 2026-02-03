@@ -994,6 +994,48 @@
             opacity: 1;
         }
 
+        /* API 错误提示弹窗 */
+        .api-error-toast {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.9);
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            padding: 16px 24px;
+            border-radius: 12px;
+            font-size: 14px;
+            z-index: 10000;
+            max-width: 85%;
+            word-wrap: break-word;
+            opacity: 0;
+            transition: all 0.3s ease;
+            pointer-events: none;
+            text-align: center;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .api-error-toast.show {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+        .api-error-toast .error-icon {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+        .api-error-toast .error-title {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #ff6b6b;
+        }
+        .api-error-toast .error-msg {
+            font-size: 13px;
+            color: #ddd;
+            line-height: 1.5;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
         /* 微信页面样式 */
         .wechat-page {
             position: fixed;
