@@ -10552,22 +10552,16 @@ window.saveMountedStickers = saveMountedStickers;
                                 <span style="color:#666;">微信号</span>
                                 <span style="color:#333;">${char.identity?.account || '未知'}</span>
                             </div>
-                            <div style="padding:16px; border-bottom:1px solid #f0f0f0; display:flex; justify-content:space-between;">
+                            <div style="padding:16px; display:flex; justify-content:space-between;">
                                 <span style="color:#666;">昵称</span>
                                 <span style="color:#333;">${char.name || '未知'}</span>
                             </div>
-                            ${char.description ? `
-                            <div style="padding:16px; display:flex; justify-content:space-between;">
-                                <span style="color:#666;">签名</span>
-                                <span style="color:#333; max-width:200px; text-align:right;">${char.description.substring(0, 50)}${char.description.length > 50 ? '...' : ''}</span>
-                            </div>
-                            ` : ''}
                         </div>
                         
                         <!-- 提示信息 -->
                         <div style="text-align:center; padding:20px; color:#999; font-size:13px;">
                             <div style="margin-bottom:8px;">🌐 这是一位联机好友</div>
-                            <div>对方的详细人设档案不可见</div>
+                            <div>对方的详细资料不可见</div>
                         </div>
                     </div>
                 </div>
@@ -12540,6 +12534,26 @@ ${groupContextStr}
                     </div>
                 `;
             }
+            // ✅ 处理音频/语音消息（联机好友真实录音）- 使用普通气泡样式
+            else if (msg.type === 'audio' && msg.content && msg.content.startsWith('data:audio')) {
+                const duration = msg.duration || 0;
+                const audioId = 'audio_' + (msg.time || Date.now());
+                
+                // 简单显示语音图标和时长，点击播放
+                content.textContent = `🎤 ${duration}"`;
+                content.style.cursor = 'pointer';
+                content.dataset.audioId = audioId;
+                content.onclick = function() { playOnlineAudio(this.dataset.audioId); };
+                
+                // 添加隐藏的 audio 元素到消息行
+                setTimeout(() => {
+                    const audioEl = document.createElement('audio');
+                    audioEl.id = audioId;
+                    audioEl.src = msg.content;
+                    audioEl.style.display = 'none';
+                    document.body.appendChild(audioEl);
+                }, 0);
+            }
             // 处理亲属卡消息
             else if (msg.type === 'familyCard') {
                 content.style.padding = '0';
@@ -13905,9 +13919,16 @@ ${groupContextStr}
         }
 
         // 语音输入功能
-        function showVoiceInputModal() {
+        async function showVoiceInputModal() {
             // 关闭更多面板
             closeChatPanel();
+            
+            // 检查是否是联机好友
+            let isOnlineFriend = false;
+            if (currentChatCharId) {
+                const char = await db.characters.get(currentChatCharId);
+                isOnlineFriend = char && char.isOnlineFriend === true;
+            }
             
             // 显示语音模式选择弹窗
             const modal = document.createElement('div');
@@ -13925,26 +13946,359 @@ ${groupContextStr}
                 z-index: 10000;
             `;
             
-            modal.innerHTML = `
-                <div style="background: white; border-radius: 12px; padding: 20px; width: 80%; max-width: 300px;">
-                    <h3 style="margin: 0 0 20px 0; text-align: center; color: #333;">选择语音模式</h3>
-                    <div style="display: flex; flex-direction: column; gap: 12px;">
-                        <button onclick="startRealVoiceInput()" style="padding: 15px; background: var(--ins-pink); color: white; border: none; border-radius: 8px; font-size: 16px; display:flex; align-items:center; justify-content:center; gap:8px;">
-                            <svg class="svg-icon" style="width:20px; height:20px; stroke:#fff;" viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
-                            <span>真实语音识别</span>
-                        </button>
-                        <button onclick="startTextToVoice()" style="padding: 15px; background: #34c759; color: white; border: none; border-radius: 8px; font-size: 16px; display:flex; align-items:center; justify-content:center; gap:8px;">
-                            <svg class="svg-icon" style="width:20px; height:20px; stroke:#fff;" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
-                            <span>文字转语音气泡</span>
-                        </button>
-                        <button onclick="closeVoiceModal()" style="padding: 12px; background: #f0f0f0; color: #666; border: none; border-radius: 8px; font-size: 14px;">
-                            取消
-                        </button>
+            if (isOnlineFriend) {
+                // 联机好友：显示真实录音+变声选项
+                modal.innerHTML = `
+                    <div style="background: white; border-radius: 16px; padding: 24px; width: 85%; max-width: 320px;">
+                        <h3 style="margin: 0 0 20px 0; text-align: center; color: #333; font-size: 18px;">🎤 语音录制</h3>
+                        
+                        <div style="margin-bottom: 20px;">
+                            <div style="font-size: 13px; color: #666; margin-bottom: 10px;">选择变声效果：</div>
+                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                                <label style="display: flex; align-items: center; padding: 12px; background: #f5f5f5; border-radius: 8px; cursor: pointer;">
+                                    <input type="radio" name="voice-effect" value="normal" checked style="margin-right: 8px;">
+                                    <span>🎙️ 原声</span>
+                                </label>
+                                <label style="display: flex; align-items: center; padding: 12px; background: #fff0f5; border-radius: 8px; cursor: pointer;">
+                                    <input type="radio" name="voice-effect" value="loli" style="margin-right: 8px;">
+                                    <span>🎀 萝莉音</span>
+                                </label>
+                                <label style="display: flex; align-items: center; padding: 12px; background: #f0f5ff; border-radius: 8px; cursor: pointer;">
+                                    <input type="radio" name="voice-effect" value="uncle" style="margin-right: 8px;">
+                                    <span>🧔 大叔音</span>
+                                </label>
+                                <label style="display: flex; align-items: center; padding: 12px; background: #f5fff0; border-radius: 8px; cursor: pointer;">
+                                    <input type="radio" name="voice-effect" value="robot" style="margin-right: 8px;">
+                                    <span>🤖 机器人</span>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div id="voice-record-status" style="text-align: center; padding: 20px; background: #f9f9f9; border-radius: 12px; margin-bottom: 16px;">
+                            <div style="font-size: 14px; color: #999;">点击下方按钮开始录音</div>
+                            <div id="voice-record-time" style="font-size: 24px; font-weight: 600; color: #333; margin-top: 8px; display: none;">00:00</div>
+                        </div>
+                        
+                        <div style="display: flex; flex-direction: column; gap: 10px;">
+                            <button id="btn-start-record" onclick="startOnlineVoiceRecord()" style="padding: 14px; background: var(--ins-pink); color: white; border: none; border-radius: 10px; font-size: 15px; font-weight: 500;">
+                                🎤 按住录音
+                            </button>
+                            <button onclick="closeVoiceModal()" style="padding: 12px; background: #f0f0f0; color: #666; border: none; border-radius: 8px; font-size: 14px;">
+                                取消
+                            </button>
+                        </div>
                     </div>
-                </div>
-            `;
+                `;
+            } else {
+                // 普通角色：显示原有选项
+                modal.innerHTML = `
+                    <div style="background: white; border-radius: 12px; padding: 20px; width: 80%; max-width: 300px;">
+                        <h3 style="margin: 0 0 20px 0; text-align: center; color: #333;">选择语音模式</h3>
+                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                            <button onclick="startRealVoiceInput()" style="padding: 15px; background: var(--ins-pink); color: white; border: none; border-radius: 8px; font-size: 16px; display:flex; align-items:center; justify-content:center; gap:8px;">
+                                <svg class="svg-icon" style="width:20px; height:20px; stroke:#fff;" viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                                <span>真实语音识别</span>
+                            </button>
+                            <button onclick="startTextToVoice()" style="padding: 15px; background: #34c759; color: white; border: none; border-radius: 8px; font-size: 16px; display:flex; align-items:center; justify-content:center; gap:8px;">
+                                <svg class="svg-icon" style="width:20px; height:20px; stroke:#fff;" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                                <span>文字转语音气泡</span>
+                            </button>
+                            <button onclick="closeVoiceModal()" style="padding: 12px; background: #f0f0f0; color: #666; border: none; border-radius: 8px; font-size: 14px;">
+                                取消
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
             
             document.body.appendChild(modal);
+        }
+        
+        // ✅ 联机好友语音录制变量
+        let onlineVoiceRecorder = null;
+        let onlineVoiceChunks = [];
+        let onlineVoiceStartTime = 0;
+        let onlineVoiceTimer = null;
+        
+        // 开始联机语音录制
+        async function startOnlineVoiceRecord() {
+            const btn = document.getElementById('btn-start-record');
+            const statusDiv = document.getElementById('voice-record-status');
+            const timeDiv = document.getElementById('voice-record-time');
+            
+            // 如果正在录音，则停止
+            if (onlineVoiceRecorder && onlineVoiceRecorder.state === 'recording') {
+                stopOnlineVoiceRecord();
+                return;
+            }
+            
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                onlineVoiceRecorder = new MediaRecorder(stream);
+                onlineVoiceChunks = [];
+                onlineVoiceStartTime = Date.now();
+                
+                onlineVoiceRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) {
+                        onlineVoiceChunks.push(e.data);
+                    }
+                };
+                
+                onlineVoiceRecorder.onstop = async () => {
+                    stream.getTracks().forEach(track => track.stop());
+                    clearInterval(onlineVoiceTimer);
+                    
+                    const duration = Math.round((Date.now() - onlineVoiceStartTime) / 1000);
+                    const blob = new Blob(onlineVoiceChunks, { type: 'audio/webm' });
+                    
+                    // 获取选择的变声效果
+                    const effectRadio = document.querySelector('input[name="voice-effect"]:checked');
+                    const effect = effectRadio ? effectRadio.value : 'normal';
+                    
+                    statusDiv.innerHTML = '<div style="color: var(--ins-pink);">⏳ 正在处理...</div>';
+                    
+                    // 处理变声并发送
+                    await processAndSendVoice(blob, effect, duration);
+                };
+                
+                onlineVoiceRecorder.start();
+                
+                // 更新UI
+                btn.textContent = '⏹️ 停止录音';
+                btn.style.background = '#ff3b30';
+                timeDiv.style.display = 'block';
+                statusDiv.querySelector('div').textContent = '🔴 正在录音...';
+                
+                // 计时器
+                onlineVoiceTimer = setInterval(() => {
+                    const elapsed = Math.round((Date.now() - onlineVoiceStartTime) / 1000);
+                    const min = Math.floor(elapsed / 60).toString().padStart(2, '0');
+                    const sec = (elapsed % 60).toString().padStart(2, '0');
+                    timeDiv.textContent = `${min}:${sec}`;
+                }, 1000);
+                
+            } catch (err) {
+                console.error('录音失败:', err);
+                alert('无法访问麦克风，请确保已授予权限');
+            }
+        }
+        
+        // 停止联机语音录制
+        function stopOnlineVoiceRecord() {
+            if (onlineVoiceRecorder && onlineVoiceRecorder.state === 'recording') {
+                onlineVoiceRecorder.stop();
+            }
+        }
+        
+        // 处理变声并发送语音
+        async function processAndSendVoice(blob, effect, duration) {
+            try {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const arrayBuffer = await blob.arrayBuffer();
+                const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                
+                // 根据效果设置参数
+                let pitchRate = 1.0;
+                switch (effect) {
+                    case 'loli':    pitchRate = 1.4; break;  // 萝莉音：提高音调
+                    case 'uncle':   pitchRate = 0.7; break;  // 大叔音：降低音调
+                    case 'robot':   pitchRate = 1.0; break;  // 机器人：特殊处理
+                    default:        pitchRate = 1.0; break;
+                }
+                
+                // 创建离线音频上下文进行处理
+                const offlineContext = new OfflineAudioContext(
+                    audioBuffer.numberOfChannels,
+                    Math.ceil(audioBuffer.length / pitchRate),
+                    audioBuffer.sampleRate
+                );
+                
+                const source = offlineContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.playbackRate.value = pitchRate;
+                
+                // 机器人效果：添加波形调制
+                if (effect === 'robot') {
+                    const oscillator = offlineContext.createOscillator();
+                    const gainNode = offlineContext.createGain();
+                    oscillator.frequency.value = 50;
+                    gainNode.gain.value = 0.3;
+                    oscillator.connect(gainNode);
+                    gainNode.connect(offlineContext.destination);
+                    oscillator.start();
+                }
+                
+                source.connect(offlineContext.destination);
+                source.start();
+                
+                const renderedBuffer = await offlineContext.startRendering();
+                
+                // 将处理后的音频转为 base64
+                const wavBlob = await audioBufferToWav(renderedBuffer);
+                const base64 = await blobToBase64(wavBlob);
+                
+                // 计算实际时长
+                const actualDuration = Math.ceil(duration / pitchRate);
+                
+                // 发送语音消息
+                await sendOnlineVoiceMessage(base64, actualDuration, effect);
+                
+                closeVoiceModal();
+                
+            } catch (err) {
+                console.error('语音处理失败:', err);
+                alert('语音处理失败: ' + err.message);
+            }
+        }
+        
+        // AudioBuffer 转 WAV
+        function audioBufferToWav(buffer) {
+            const numChannels = buffer.numberOfChannels;
+            const sampleRate = buffer.sampleRate;
+            const format = 1; // PCM
+            const bitDepth = 16;
+            
+            const bytesPerSample = bitDepth / 8;
+            const blockAlign = numChannels * bytesPerSample;
+            
+            const data = [];
+            for (let i = 0; i < buffer.length; i++) {
+                for (let ch = 0; ch < numChannels; ch++) {
+                    const sample = buffer.getChannelData(ch)[i];
+                    const intSample = Math.max(-1, Math.min(1, sample));
+                    data.push(intSample < 0 ? intSample * 0x8000 : intSample * 0x7FFF);
+                }
+            }
+            
+            const dataLength = data.length * bytesPerSample;
+            const headerLength = 44;
+            const totalLength = headerLength + dataLength;
+            
+            const arrayBuffer = new ArrayBuffer(totalLength);
+            const view = new DataView(arrayBuffer);
+            
+            // WAV header
+            const writeString = (offset, string) => {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            };
+            
+            writeString(0, 'RIFF');
+            view.setUint32(4, totalLength - 8, true);
+            writeString(8, 'WAVE');
+            writeString(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, format, true);
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * blockAlign, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, bitDepth, true);
+            writeString(36, 'data');
+            view.setUint32(40, dataLength, true);
+            
+            let offset = 44;
+            for (let i = 0; i < data.length; i++, offset += 2) {
+                view.setInt16(offset, data[i], true);
+            }
+            
+            return new Blob([arrayBuffer], { type: 'audio/wav' });
+        }
+        
+        // Blob 转 Base64
+        function blobToBase64(blob) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        }
+        
+        // 发送联机语音消息
+        async function sendOnlineVoiceMessage(audioBase64, duration, effect) {
+            if (!currentChatCharId) return;
+            
+            const char = await db.characters.get(currentChatCharId);
+            if (!char || !char.isOnlineFriend) return;
+            
+            const accountId = getCurrentAccountId();
+            
+            // 保存到本地聊天历史
+            let history = getChatHistory(char, accountId);
+            const msgObj = {
+                role: 'user',
+                type: 'audio',
+                content: audioBase64,
+                duration: duration,
+                effect: effect,
+                time: Date.now()
+            };
+            history.push(msgObj);
+            await setChatHistory(char, accountId, history);
+            
+            // 通过服务器发送给对方
+            if (char.onlineData?.wx_account && onlineConnected) {
+                const userChars = await db.characters.where('type').equals('user').toArray();
+                const onlineUserChar = userChars.find(c => 
+                    c.identity?.account && onlineCharacters.some(oc => oc.wx_account === c.identity.account)
+                );
+                
+                if (onlineUserChar) {
+                    const voiceMsg = JSON.stringify({
+                        __type: 'audio',
+                        audio: audioBase64,
+                        duration: duration,
+                        effect: effect
+                    });
+                    sendOnlineMessage(char.onlineData.wx_account, voiceMsg, onlineUserChar.identity.account);
+                    console.log('[Online] 语音消息已发送');
+                }
+            }
+            
+            // 刷新聊天界面
+            renderChatBody(char);
+            showToast('语音已发送');
+        }
+        
+        // 播放联机语音消息
+        let currentPlayingAudio = null;
+        function playOnlineAudio(audioId) {
+            const audio = document.getElementById(audioId);
+            const icon = document.getElementById('icon_' + audioId);
+            
+            if (!audio) return;
+            
+            // 如果有其他正在播放的，先停止
+            if (currentPlayingAudio && currentPlayingAudio !== audio) {
+                currentPlayingAudio.pause();
+                currentPlayingAudio.currentTime = 0;
+            }
+            
+            if (audio.paused) {
+                audio.play();
+                currentPlayingAudio = audio;
+                if (icon) icon.textContent = '⏸️';
+                
+                audio.onended = () => {
+                    if (icon) {
+                        // 恢复原来的图标
+                        const bubble = audio.closest('.online-audio-bubble');
+                        if (bubble) {
+                            const originalIcon = bubble.querySelector('.audio-play-icon');
+                            if (originalIcon) originalIcon.textContent = icon.dataset.original || '🎙️';
+                        }
+                    }
+                    currentPlayingAudio = null;
+                };
+            } else {
+                audio.pause();
+                audio.currentTime = 0;
+                currentPlayingAudio = null;
+                // 恢复图标
+            }
         }
 
         function closeVoiceModal() {
@@ -20800,8 +21154,13 @@ async function doTransfer() {
         if (onlineUserChar && onlineConnected) {
             const fromWxAccount = onlineUserChar.identity.account;
             const toWxAccount = chatChar.onlineData.wx_account;
-            // 发送转账消息（格式化为特殊格式，对方可以识别）
-            const transferContent = `[转账] ¥${amountVal.toFixed(2)} - ${noteVal}`;
+            // 发送转账消息（使用特殊JSON格式，对方可以识别并渲染为卡片）
+            const transferContent = JSON.stringify({
+                __type: 'transfer',
+                amount: amountVal.toFixed(2),
+                desc: noteVal,
+                status: 'sent'
+            });
             sendOnlineMessage(toWxAccount, transferContent, fromWxAccount);
             console.log('[Online] 转账消息已发送到服务器');
         }
@@ -26581,22 +26940,58 @@ async function handleOnlineIncomingMessage(data) {
         return;
     }
     
-    // 保存消息到聊天历史
-    let history = getChatHistory(targetChar, accountId);
-    history.push({
+    // 检查是否是特殊消息类型（如转账）
+    let msgObj = {
         role: 'char',
         content: data.content,
         time: data.timestamp || Date.now(),
         isOnlineMessage: true
-    });
+    };
+    
+    // 尝试解析 JSON 格式的特殊消息
+    try {
+        const parsed = JSON.parse(data.content);
+        if (parsed.__type === 'transfer') {
+            // 这是转账消息，转换为转账卡片格式
+            msgObj.type = 'transfer';
+            msgObj.content = JSON.stringify({
+                amount: parsed.amount,
+                desc: parsed.desc,
+                status: 'sent'  // 对于接收方来说是待接收状态
+            });
+            msgObj.id = 'trans_' + Date.now();
+            console.log('[Online] 收到转账消息:', parsed);
+        } else if (parsed.__type === 'audio') {
+            // 这是语音消息
+            msgObj.type = 'audio';
+            msgObj.content = parsed.audio;
+            msgObj.duration = parsed.duration;
+            msgObj.effect = parsed.effect;
+            console.log('[Online] 收到语音消息, 时长:', parsed.duration, '秒, 效果:', parsed.effect);
+        }
+    } catch (e) {
+        // 不是 JSON，普通文本消息
+    }
+    
+    // 保存消息到聊天历史
+    let history = getChatHistory(targetChar, accountId);
+    history.push(msgObj);
     await setChatHistory(targetChar, accountId, history);
     
     // 如果当前正在查看这个聊天，更新UI
     if (currentChatCharId === targetChar.id) {
-        appendMessageToUI('char', data.content, targetChar.avatar);
+        // 特殊消息类型需要重新渲染整个聊天
+        if (msgObj.type === 'transfer' || msgObj.type === 'audio') {
+            renderChatBody(targetChar);
+        } else {
+            appendMessageToUI('char', data.content, targetChar.avatar);
+        }
     } else {
         // 发送通知
-        sendSystemNotification(targetChar.name, data.content);
+        let notifyContent = data.content;
+        if (msgObj.type === 'transfer') notifyContent = '[转账]';
+        if (msgObj.type === 'audio') notifyContent = '[语音消息]';
+        sendSystemNotification(targetChar.name, notifyContent);
     }
 }
 
