@@ -1067,6 +1067,95 @@ async function migratePhoneAndSmsToIndexedDB() {
             }
         }
 
+        // 全局字体设置相关函数
+        let customFontStyleElement = null;
+        
+        // 预览自定义字体
+        function previewCustomFont() {
+            const fontUrl = document.getElementById('custom-font-input').value.trim();
+            const fontName = document.getElementById('custom-font-name-input').value.trim();
+            
+            if (!fontUrl || !fontName) {
+                alert('请填写字体链接和字体名称');
+                return;
+            }
+            
+            // 动态加载字体样式
+            loadCustomFont(fontUrl, fontName, true);
+        }
+        
+        // 加载并应用自定义字体
+        function loadCustomFont(fontUrl, fontName, previewOnly = false) {
+            // 移除旧的字体样式
+            const oldLink = document.getElementById('custom-font-link');
+            if (oldLink) oldLink.remove();
+            
+            // 创建新的 link 标签加载字体
+            const link = document.createElement('link');
+            link.id = 'custom-font-link';
+            link.rel = 'stylesheet';
+            link.href = fontUrl;
+            document.head.appendChild(link);
+            
+            // 等待字体加载完成后应用
+            link.onload = function() {
+                if (previewOnly) {
+                    // 仅预览：只应用到预览区域
+                    const previewText = document.getElementById('font-preview-text');
+                    previewText.style.fontFamily = `"${fontName}", sans-serif`;
+                    previewText.innerText = `这是字体预览效果 ABC 123\n${fontName}`;
+                } else {
+                    // 全局应用
+                    applyFontGlobal(fontName);
+                }
+            };
+            
+            link.onerror = function() {
+                alert('字体加载失败，请检查链接是否正确');
+            };
+        }
+        
+        // 应用字体到全局
+        function applyFontGlobal(fontName) {
+            // 移除旧的全局字体样式
+            if (customFontStyleElement) {
+                customFontStyleElement.remove();
+            }
+            
+            // 创建新的样式元素
+            customFontStyleElement = document.createElement('style');
+            customFontStyleElement.id = 'custom-font-global';
+            customFontStyleElement.textContent = `
+                * {
+                    font-family: "${fontName}", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+                }
+            `;
+            document.head.appendChild(customFontStyleElement);
+        }
+        
+        // 清除自定义字体，恢复默认
+        function clearCustomFont() {
+            // 清除输入框
+            document.getElementById('custom-font-input').value = '';
+            document.getElementById('custom-font-name-input').value = '';
+            
+            // 移除字体链接和全局样式
+            const fontLink = document.getElementById('custom-font-link');
+            if (fontLink) fontLink.remove();
+            
+            if (customFontStyleElement) {
+                customFontStyleElement.remove();
+                customFontStyleElement = null;
+            }
+            
+            // 重置预览区域
+            const previewText = document.getElementById('font-preview-text');
+            previewText.style.fontFamily = '';
+            previewText.innerText = '这是字体预览效果 ABC 123';
+            
+            alert('已恢复默认字体');
+        }
+
         // 同步预览区和输入框
         function syncPreview() {
             // 壁纸预览
@@ -1096,6 +1185,13 @@ async function migratePhoneAndSmsToIndexedDB() {
             const bubbleColor = getComputedStyle(document.documentElement).getPropertyValue('--bubble-bg').trim() || '#FFF7FA';
             document.getElementById('capsule-color-input').value = capsuleColor;
             document.getElementById('bubble-color-input').value = bubbleColor;
+            // 字体预览同步
+            const fontName = document.getElementById('custom-font-name-input').value.trim();
+            const previewText = document.getElementById('font-preview-text');
+            if (fontName && previewText) {
+                previewText.style.fontFamily = `"${fontName}", sans-serif`;
+                previewText.innerText = `这是字体预览效果 ABC 123\n${fontName}`;
+            }
         }
 
         // 页面切换
@@ -1745,6 +1841,12 @@ async function migratePhoneAndSmsToIndexedDB() {
             saveData.capsuleColor = capsuleColor;
             saveData.bubbleColor = bubbleColor;
 
+            // 保存自定义字体
+            const customFontUrl = document.getElementById('custom-font-input').value.trim();
+            const customFontName = document.getElementById('custom-font-name-input').value.trim();
+            saveData.customFontUrl = customFontUrl;
+            saveData.customFontName = customFontName;
+
             // 循环保存
             for (const [key, value] of Object.entries(saveData)) {
                 await db.dexiData.put({ key, value });
@@ -1762,6 +1864,11 @@ async function migratePhoneAndSmsToIndexedDB() {
             // 应用椭圆形颜色
             document.documentElement.style.setProperty('--capsule-bg', capsuleColor);
             document.documentElement.style.setProperty('--bubble-bg', bubbleColor);
+
+            // 应用自定义字体到全局
+            if (customFontUrl && customFontName) {
+                loadCustomFont(customFontUrl, customFontName, false);
+            }
 
             // 保存提示
             const tip = document.getElementById('save-tip');
@@ -4218,7 +4325,7 @@ async function renderMessageList() {
         if (!groupedChats[chatId]) {
             // 🎯 修复：显示接收者的名字（对于发送的消息，使用存储的接收者信息）
             let displayName = msg.sender;
-            let displayAvatar = 'https://img.icons8.com/color/96/user.png';
+            let displayAvatar = '';
             
             // 如果有 charId，从数据库获取角色头像
             if (msg.charId && !charAvatarCache[msg.charId]) {
@@ -4290,7 +4397,6 @@ async function renderMessageList() {
     chats.forEach(chat => {
         const unreadClass = chat.unread ? 'message-unread' : '';
         const unreadDot = chat.unread ? `<div class="message-unread-dot"></div>` : '';
-        const blockedBadge = chat.isBlocked ? `<span style="font-size:10px;background:#ff3b30;color:#fff;padding:2px 6px;border-radius:3px;margin-left:4px;">拉黑</span>` : '';
         const isSelected = selectedMessageChats.has(chat.id);
         const selectedClass = isSelected ? 'message-chat-selected' : '';
         
@@ -4311,15 +4417,20 @@ async function renderMessageList() {
                </div>`
             : '';
         
+        const defaultAvatarClass = chat.avatar ? '' : 'default-avatar';
+        const avatarImg = chat.avatar 
+            ? `<img src="${chat.avatar}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none';this.parentElement.classList.add('default-avatar');">`
+            : '';
+        
         const html = `
             <div class="message-chat-item ${unreadClass} ${selectedClass}" onclick="${onClickAction}">
                 ${checkbox}
-                <div class="message-avatar">
-                    <img src="${chat.avatar}" style="width:100%;height:100%;object-fit:cover;" onerror="this.src='https://img.icons8.com/color/96/user.png'">
+                <div class="message-avatar ${defaultAvatarClass}">
+                    ${avatarImg}
                 </div>
                 <div class="message-chat-info">
                     <div class="message-chat-top">
-                        <span class="message-chat-name">${chat.name}${blockedBadge}</span>
+                        <span class="message-chat-name">${chat.name}</span>
                         <div class="message-chat-time">
                             <span>${chat.time}</span>
                         </div>
@@ -4437,7 +4548,7 @@ async function openMessageChat(id) {
         
         // 确定显示的名字和头像（从角色数据库获取）
         let displayName = firstMsg.sender;
-        let displayAvatar = 'https://img.icons8.com/color/96/user.png';
+        let displayAvatar = '';
         
         // 如果有 charId，从数据库获取角色头像
         if (firstMsg.charId) {
@@ -4515,10 +4626,19 @@ async function openMessageChat(id) {
     document.getElementById('message-detail-name').innerText = chat.name;
     const avatarEl = document.getElementById('message-detail-avatar');
     if (avatarEl) {
-        avatarEl.src = chat.avatar;
-        avatarEl.onerror = function() {
-            this.src = 'https://img.icons8.com/color/96/user.png';
-        };
+        const avatarContainer = avatarEl.parentElement;
+        if (chat.avatar) {
+            avatarEl.src = chat.avatar;
+            avatarEl.style.display = '';
+            avatarContainer.classList.remove('default-avatar');
+            avatarEl.onerror = function() {
+                this.style.display = 'none';
+                avatarContainer.classList.add('default-avatar');
+            };
+        } else {
+            avatarEl.style.display = 'none';
+            avatarContainer.classList.add('default-avatar');
+        }
     }
     
     // 渲染消息
@@ -15808,6 +15928,15 @@ function showLorebookPage() {
         if (dataMap.bubbleColor) {
             document.documentElement.style.setProperty('--bubble-bg', dataMap.bubbleColor);
         }
+        
+        // 恢复自定义字体
+        if (dataMap.customFontUrl && dataMap.customFontName) {
+            // 填充输入框
+            document.getElementById('custom-font-input').value = dataMap.customFontUrl;
+            document.getElementById('custom-font-name-input').value = dataMap.customFontName;
+            // 加载并应用全局字体
+            loadCustomFont(dataMap.customFontUrl, dataMap.customFontName, false);
+        }
     }
 
 // --- 全局表情包管理逻辑 ---
@@ -15832,7 +15961,7 @@ function showStickerPage() {
     // 确保显示列表视图
     const listView = document.getElementById('sticker-list-view');
     const detailView = document.getElementById('sticker-detail-view');
-    if (listView) listView.style.display = 'block';
+    if (listView) listView.style.display = 'flex';
     if (detailView) detailView.style.display = 'none';
     currentStickerCategoryId = null;
     renderStickerCategories();
@@ -15909,7 +16038,7 @@ async function openStickerCategoryDetail(id) {
     const detailView = document.getElementById('sticker-detail-view');
     
     if (listView) listView.style.display = 'none';
-    if (detailView) detailView.style.display = 'block';
+    if (detailView) detailView.style.display = 'flex';
     
     await renderStickerCategoryDetail();
 }
@@ -15919,7 +16048,7 @@ function backToStickerList() {
     const listView = document.getElementById('sticker-list-view');
     const detailView = document.getElementById('sticker-detail-view');
     
-    if (listView) listView.style.display = 'block';
+    if (listView) listView.style.display = 'flex';
     if (detailView) detailView.style.display = 'none';
     
     currentStickerCategoryId = null;
@@ -16960,6 +17089,8 @@ function handleCoverChange(input) {
 }
 
 // 发布动态逻辑
+let currentMomentPrivacy = 'public'; // 默认公开
+
 function showMomentsPublish() {
     document.getElementById('moments-publish-page').style.display = 'block';
     // 清空
@@ -16972,10 +17103,145 @@ function showMomentsPublish() {
         }
     });
     window.tempPubImages = [];
+    // 重置权限为公开
+    currentMomentPrivacy = 'public';
+    selectedPrivacyFriends = [];
+    document.getElementById('privacy-selected-text').textContent = '公开';
 }
 
 function hideMomentsPublish() {
     document.getElementById('moments-publish-page').style.display = 'none';
+}
+
+// 权限选择相关
+function showPrivacySelector() {
+    document.getElementById('privacy-selector-page').style.display = 'block';
+    // 更新选中状态
+    updatePrivacyCheckmarks();
+}
+
+function hidePrivacySelector() {
+    document.getElementById('privacy-selector-page').style.display = 'none';
+}
+
+function selectPrivacy(value, text) {
+    currentMomentPrivacy = value;
+    document.getElementById('privacy-selected-text').textContent = text;
+    updatePrivacyCheckmarks();
+    hidePrivacySelector();
+}
+
+function updatePrivacyCheckmarks() {
+    const options = ['public', 'private'];
+    options.forEach(opt => {
+        const checkEl = document.getElementById(`privacy-check-${opt}`);
+        if (checkEl) {
+            checkEl.textContent = (opt === currentMomentPrivacy) ? '✓' : '';
+        }
+    });
+    // 更新部分可见和不给谁看的描述
+    const partialDesc = document.getElementById('partial-desc');
+    const excludeDesc = document.getElementById('exclude-desc');
+    if (partialDesc) {
+        if (currentMomentPrivacy === 'partial' && selectedPrivacyFriends.length > 0) {
+            partialDesc.textContent = `已选 ${selectedPrivacyFriends.length} 人`;
+        } else {
+            partialDesc.textContent = '选中的朋友可见';
+        }
+    }
+    if (excludeDesc) {
+        if (currentMomentPrivacy === 'exclude' && selectedPrivacyFriends.length > 0) {
+            excludeDesc.textContent = `已选 ${selectedPrivacyFriends.length} 人`;
+        } else {
+            excludeDesc.textContent = '选中的朋友不可见';
+        }
+    }
+}
+
+// 好友选择相关
+let selectedPrivacyFriends = []; // 选中的好友ID列表
+let currentPrivacyMode = ''; // 'partial' 或 'exclude'
+
+async function showFriendSelector(mode) {
+    currentPrivacyMode = mode;
+    const page = document.getElementById('friend-selector-page');
+    const list = document.getElementById('friend-selector-list');
+    const title = document.getElementById('friend-selector-title');
+    
+    title.textContent = mode === 'partial' ? '谁可以看' : '不给谁看';
+    
+    // 如果切换了模式，清空已选择的
+    if (currentMomentPrivacy !== mode) {
+        selectedPrivacyFriends = [];
+    }
+    
+    // 获取好友列表
+    const accountId = getCurrentAccountId();
+    const allChars = await db.characters.toArray();
+    const friends = allChars.filter(char => {
+        if (char.id == accountId) return false; // 排除自己
+        const status = getFriendStatus(char, accountId);
+        return status === 'friend';
+    });
+    
+    list.innerHTML = '';
+    
+    if (friends.length === 0) {
+        list.innerHTML = '<div style="padding:40px; text-align:center; color:#999;">暂无好友</div>';
+    } else {
+        for (const friend of friends) {
+            const isChecked = selectedPrivacyFriends.includes(friend.id);
+            const item = document.createElement('div');
+            item.className = 'friend-select-item';
+            item.onclick = () => toggleFriendSelection(friend.id);
+            item.innerHTML = `
+                <div class="friend-select-checkbox ${isChecked ? 'checked' : ''}" id="friend-check-${friend.id}">
+                    ${isChecked ? '✓' : ''}
+                </div>
+                <div class="friend-select-avatar" style="background-image:url(${friend.avatar || ''})"></div>
+                <div class="friend-select-name">${friend.remark || friend.name}</div>
+            `;
+            list.appendChild(item);
+        }
+    }
+    
+    page.style.display = 'block';
+}
+
+function hideFriendSelector() {
+    document.getElementById('friend-selector-page').style.display = 'none';
+}
+
+function toggleFriendSelection(friendId) {
+    const idx = selectedPrivacyFriends.indexOf(friendId);
+    if (idx > -1) {
+        selectedPrivacyFriends.splice(idx, 1);
+    } else {
+        selectedPrivacyFriends.push(friendId);
+    }
+    
+    // 更新UI
+    const checkEl = document.getElementById(`friend-check-${friendId}`);
+    if (checkEl) {
+        const isChecked = selectedPrivacyFriends.includes(friendId);
+        checkEl.className = `friend-select-checkbox ${isChecked ? 'checked' : ''}`;
+        checkEl.textContent = isChecked ? '✓' : '';
+    }
+}
+
+function confirmFriendSelection() {
+    if (selectedPrivacyFriends.length === 0) {
+        alert('请至少选择一位好友');
+        return;
+    }
+    
+    currentMomentPrivacy = currentPrivacyMode;
+    const text = currentPrivacyMode === 'partial' ? `部分可见(${selectedPrivacyFriends.length}人)` : `不给谁看(${selectedPrivacyFriends.length}人)`;
+    document.getElementById('privacy-selected-text').textContent = text;
+    
+    hideFriendSelector();
+    hidePrivacySelector();
+    updatePrivacyCheckmarks();
 }
 
 function handlePubImages(input) {
@@ -17032,12 +17298,15 @@ async function doPublishMoment() {
         images: images,
         time: Date.now(),
         ownerUserId: parseInt(currentMyCharId), // 标记所属账号
+        privacy: currentMomentPrivacy, // 保存权限设置
+        privacyList: selectedPrivacyFriends.slice(), // 保存选中的好友列表
         likes: [],
         comments: []
     });
     
     hideMomentsPublish();
     renderMomentsList();
+    renderMyMomentsList();
     
     // 滚动到顶部
     document.getElementById('moments-page').scrollTop = 0;
@@ -17297,7 +17566,7 @@ async function renderMyMomentsList() {
     const currentAccountId = currentMyCharId ? parseInt(currentMyCharId) : null;
     if (!currentAccountId) {
         container.innerHTML = `<div class="wechat-empty-state" style="margin-top:60px;"><div style="color:#999; font-size:14px;">请先登录账号</div></div>`;
-        pinnedSection.style.display = 'none';
+        pinnedSection.classList.remove('show');
         return;
     }
     
@@ -17316,17 +17585,24 @@ async function renderMyMomentsList() {
     // 获取用户信息
     const user = await db.characters.get(currentAccountId);
     
-    // 渲染置顶区域（只显示置顶的朋友圈，正方形卡片）
+    // 渲染置顶区域（只显示前3个）
     if (pinnedMoments.length > 0) {
-        pinnedSection.style.display = 'block';
+        pinnedSection.classList.add('show');
         
-        // 只添加置顶卡片
-        for (const moment of pinnedMoments) {
+        // 只显示前3个置顶卡片
+        const displayMoments = pinnedMoments.slice(0, 3);
+        for (const moment of displayMoments) {
             const card = createPinnedMomentCard(moment, user);
             pinnedContainer.appendChild(card);
         }
+        
+        // 设置箭头点击事件（查看所有置顶）
+        const arrow = pinnedSection.querySelector('.moments-pinned-arrow');
+        if (arrow) {
+            arrow.onclick = () => showAllPinnedMoments(pinnedMoments, user);
+        }
     } else {
-        pinnedSection.style.display = 'none';
+        pinnedSection.classList.remove('show');
     }
     
     // 渲染普通朋友圈（保持原来的完整样式）
@@ -17341,57 +17617,122 @@ async function renderMyMomentsList() {
     }
 }
 
-// 创建置顶朋友圈卡片（横向滚动）
+// 创建置顶朋友圈卡片（仿真实微信样式）
 function createPinnedMomentCard(moment, user) {
     const card = document.createElement('div');
-    // 正方形卡片：宽度和高度相等
-    card.style.cssText = `
-        width: 120px;
-        height: 120px;
-        flex-shrink: 0;
-        background: #f5f5f5;
-        border-radius: 6px;
-        padding: 8px;
-        cursor: pointer;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        box-sizing: border-box;
-    `;
+    card.className = 'pinned-moment-card';
     card.onclick = () => showMomentDetail(moment.id);
     
-    // 图片预览（如果有图片，占满整个卡片）
-    let imagePreview = '';
+    // 如果有图片，设置为背景
     if (moment.images && moment.images.length > 0) {
-        const firstImage = moment.images[0];
-        imagePreview = `
-            <div style="width:100%; height:100%; position:absolute; top:0; left:0; background-image:url(${firstImage}); background-size:cover; background-position:center; border-radius:6px;"></div>
-        `;
+        card.style.backgroundImage = `url(${moment.images[0]})`;
     }
     
-    // 权限标识
-    let privacyBadge = '';
-    if (moment.privacy === 'private') privacyBadge = `<span style="color:#999; font-size:10px;">私密</span>`;
-    else if (moment.privacy === 'friends') privacyBadge = `<span style="color:#999; font-size:10px;">好友</span>`;
-    
-    // 文字内容（正方形布局，文字居中显示）
+    // 文字内容预览（显示在卡片中央）
     const contentText = moment.content || '';
-    const shortText = contentText.length > 20 ? contentText.substring(0, 20) + '...' : contentText;
+    const shortText = contentText.length > 30 ? contentText.substring(0, 30) + '...' : contentText;
     
-    card.innerHTML = `
-        <div style="position:relative; width:100%; height:100%; border-radius:6px; overflow:hidden;">
-            ${imagePreview}
-            <div style="position:relative; z-index:1; width:100%; height:100%; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:4px; box-sizing:border-box;">
-                <div style="font-size:12px; color:#333; text-align:center; line-height:1.4; word-break:break-all; overflow:hidden; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; ${imagePreview ? 'color:#fff; text-shadow:0 1px 2px rgba(0,0,0,0.3);' : ''}">${shortText}</div>
-            </div>
+    card.innerHTML = `<div class="pinned-moment-text">${shortText}</div>`;
+    
+    return card;
+}
+
+// 显示所有置顶朋友圈页面（时间线格式）
+function showAllPinnedMoments(pinnedMoments, user) {
+    const page = document.getElementById('all-pinned-moments-page');
+    const list = document.getElementById('all-pinned-list');
+    
+    list.innerHTML = '';
+    
+    // 按年份和日期分组
+    const groupedByYear = {};
+    for (const moment of pinnedMoments) {
+        const date = new Date(moment.time);
+        const year = date.getFullYear();
+        const dateKey = `${date.getMonth() + 1}-${date.getDate()}`; // 月-日
+        
+        if (!groupedByYear[year]) groupedByYear[year] = {};
+        if (!groupedByYear[year][dateKey]) groupedByYear[year][dateKey] = [];
+        groupedByYear[year][dateKey].push(moment);
+    }
+    
+    // 按年份倒序渲染
+    const years = Object.keys(groupedByYear).sort((a, b) => b - a);
+    for (const year of years) {
+        // 年份标题
+        const yearTitle = document.createElement('div');
+        yearTitle.style.cssText = 'font-size:20px; font-weight:700; color:#333; padding:20px 16px 10px;';
+        yearTitle.textContent = year + '年';
+        list.appendChild(yearTitle);
+        
+        // 按日期倒序
+        const dates = Object.keys(groupedByYear[year]).sort((a, b) => {
+            const [am, ad] = a.split('-').map(Number);
+            const [bm, bd] = b.split('-').map(Number);
+            return (bm * 100 + bd) - (am * 100 + ad);
+        });
+        
+        for (const dateKey of dates) {
+            const dayMoments = groupedByYear[year][dateKey];
+            const item = createPinnedTimelineGroup(dateKey, dayMoments);
+            list.appendChild(item);
+        }
+    }
+    
+    page.style.display = 'block';
+}
+
+// 创建置顶页面的时间线条目（同一天的合并显示）
+function createPinnedTimelineGroup(dateKey, moments) {
+    const div = document.createElement('div');
+    div.style.cssText = 'display:flex; padding:16px; border-bottom:1px solid #f5f5f5;';
+    
+    const [month, day] = dateKey.split('-');
+    
+    // 收集所有图片和文字
+    let allImages = [];
+    let allTexts = [];
+    for (const moment of moments) {
+        if (moment.images && moment.images.length > 0) {
+            allImages = allImages.concat(moment.images);
+        }
+        if (moment.content) {
+            allTexts.push({ id: moment.id, text: moment.content });
+        }
+    }
+    
+    // 图片网格（一行三个）
+    let imagesHtml = '';
+    if (allImages.length > 0) {
+        imagesHtml = `<div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:4px; margin-bottom:8px;">
+            ${allImages.map(img => `<div style="aspect-ratio:1; background-image:url(${img}); background-size:cover; background-position:center; cursor:pointer;" onclick="event.stopPropagation(); previewImage('${img}')"></div>`).join('')}
+        </div>`;
+    }
+    
+    // 文字内容列表
+    let textsHtml = '';
+    for (const item of allTexts) {
+        const shortText = item.text.length > 40 ? item.text.substring(0, 40) + '...' : item.text;
+        textsHtml += `<div style="font-size:14px; color:#666; line-height:1.6; padding:6px 12px; background:#f8f8f8; border-radius:4px; margin-bottom:6px; cursor:pointer;" onclick="showMomentDetail(${item.id})">${shortText}</div>`;
+    }
+    
+    div.innerHTML = `
+        <div style="width:70px; flex-shrink:0; text-align:left;">
+            <div style="font-size:28px; font-weight:700; color:#333; line-height:1;">${day.padStart(2, '0')}</div>
+            <div style="font-size:12px; color:#999;">${month}月</div>
         </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px; font-size:10px; color:#999;">
-            <span>${formatMomentTime(moment.time)}</span>
-            ${privacyBadge}
+        <div style="flex:1; min-width:0;">
+            ${imagesHtml}
+            ${textsHtml}
         </div>
     `;
     
-    return card;
+    return div;
+}
+
+// 隐藏所有置顶朋友圈页面
+function hideAllPinnedMoments() {
+    document.getElementById('all-pinned-moments-page').style.display = 'none';
 }
 
 // 创建朋友圈条目

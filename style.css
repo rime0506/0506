@@ -484,6 +484,20 @@
             font-size: 12px;
             color: #999;
         }
+        /* 字体预览样式 */
+        .font-preview-box {
+            width: 100%;
+            padding: 20px;
+            background: linear-gradient(135deg, #f9f9f9 0%, #fff 100%);
+            border-radius: 1rem;
+            text-align: center;
+            border: 1px dashed #e0e0e0;
+        }
+        .font-preview-text {
+            font-size: 18px;
+            color: #333;
+            line-height: 1.6;
+        }
         .icon-select-list {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
@@ -1258,17 +1272,21 @@
             width: 100vw;
             height: 100vh;
             padding: 0;
-            overflow: hidden; /* 禁止页面级滚动 */
-            display: none; /* 默认隐藏，通过JS控制显示 */
+            overflow: hidden;
+            display: none;
             flex-direction: column;
             background: #fff;
-            z-index: 200; /* 确保在微信页面(150)之上 */
+            z-index: 200;
+        }
+        #sticker-page[style*="flex"] {
+            display: flex !important;
         }
         #sticker-list-view,
         #sticker-detail-view {
             display: flex;
             flex-direction: column;
             height: 100%;
+            width: 100%;
             overflow: hidden;
         }
         #sticker-list-view .custom-page-header,
@@ -1339,8 +1357,11 @@
         .sticker-content {
             flex: 1;
             overflow-y: auto;
+            overflow-x: hidden;
             background: #fff;
             padding: 0;
+            -webkit-overflow-scrolling: touch;
+            min-height: 0; /* 重要：让flex子元素可以滚动 */
         }
         .sticker-content-container {
             padding: 16px;
@@ -4363,6 +4384,37 @@
     flex-shrink: 0;
     overflow: hidden;
     background: #ddd;
+    position: relative;
+}
+
+/* CSS绘制的默认头像 */
+.message-avatar.default-avatar {
+    background: #a0a0a0;
+}
+.message-avatar.default-avatar::before {
+    content: '';
+    position: absolute;
+    width: 36%;
+    height: 36%;
+    background: #e8e8e8;
+    border-radius: 50%;
+    top: 18%;
+    left: 50%;
+    transform: translateX(-50%);
+}
+.message-avatar.default-avatar::after {
+    content: '';
+    position: absolute;
+    width: 64%;
+    height: 50%;
+    background: #e8e8e8;
+    border-radius: 50% 50% 0 0;
+    bottom: -10%;
+    left: 50%;
+    transform: translateX(-50%);
+}
+.message-avatar.default-avatar img {
+    display: none;
 }
 
 .message-chat-info {
@@ -4527,6 +4579,37 @@
     overflow: hidden;
     margin-bottom: 2px;
     background: #ccc;
+    position: relative;
+}
+
+/* 详情页CSS默认头像 */
+.message-header-avatar-small.default-avatar {
+    background: #a0a0a0;
+}
+.message-header-avatar-small.default-avatar::before {
+    content: '';
+    position: absolute;
+    width: 36%;
+    height: 36%;
+    background: #e8e8e8;
+    border-radius: 50%;
+    top: 18%;
+    left: 50%;
+    transform: translateX(-50%);
+}
+.message-header-avatar-small.default-avatar::after {
+    content: '';
+    position: absolute;
+    width: 64%;
+    height: 50%;
+    background: #e8e8e8;
+    border-radius: 50% 50% 0 0;
+    bottom: -10%;
+    left: 50%;
+    transform: translateX(-50%);
+}
+.message-header-avatar-small.default-avatar img {
+    display: none;
 }
 
 .message-header-name {
@@ -4855,6 +4938,74 @@
     background-position: center;
 }
 
+/* 置顶区域样式 - 仿真实微信 */
+.moments-pinned-section {
+    display: none;
+    background: #fff;
+    padding: 16px 0;
+    border-bottom: 1px solid #e5e5e5;
+    align-items: stretch;
+}
+.moments-pinned-section.show {
+    display: flex;
+}
+.moments-pinned-label {
+    font-size: 22px;
+    font-weight: 700;
+    color: #333;
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    writing-mode: horizontal-tb;
+}
+.moments-pinned-scroll {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    position: relative;
+}
+.moments-pinned-list {
+    display: flex;
+    gap: 6px;
+    overflow: hidden;
+}
+.moments-pinned-arrow {
+    font-size: 28px;
+    color: #ccc;
+    font-weight: 300;
+    padding: 0 12px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+/* 置顶卡片样式 */
+.pinned-moment-card {
+    width: 105px;
+    height: 105px;
+    flex-shrink: 0;
+    cursor: pointer;
+    position: relative;
+    background-color: #f5f5f5;
+    background-size: cover;
+    background-position: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.pinned-moment-text {
+    font-size: 13px;
+    color: #999;
+    line-height: 1.4;
+    text-align: center;
+    padding: 8px;
+    word-break: break-all;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
 /* 列表容器 */
 .moments-list {
     padding-bottom: 40px;
@@ -4900,6 +5051,7 @@
     display: grid;
     gap: 4px;
     max-width: 280px; /* 限制最大宽度 */
+    margin-top: 8px;
 }
 /* 1张图：大图模式 */
 .moment-grid.cols-1 {
@@ -4907,9 +5059,8 @@
 }
 .moment-grid.cols-1 .moment-img {
     width: 200px; /* 限制单图最大宽度 */
-    height: auto;
+    height: 200px;
     max-height: 280px;
-    aspect-ratio: auto; /* 保持原比例 */
 }
 /* 4张图：2x2 */
 .moment-grid.cols-2 {
@@ -4928,6 +5079,7 @@
     background-size: cover;
     background-position: center;
     cursor: zoom-in;
+    min-height: 80px;
 }
 
 /* 底部信息栏 */
@@ -5103,6 +5255,85 @@
     justify-content: center;
     border-radius: 4px;
     cursor: pointer;
+}
+
+/* 朋友圈权限选择样式 */
+.privacy-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    background: #fff;
+    border-bottom: 1px solid #f5f5f5;
+    cursor: pointer;
+}
+.privacy-option:active {
+    background: #f8f8f8;
+}
+.privacy-option-content {
+    flex: 1;
+}
+.privacy-option-title {
+    font-size: 16px;
+    color: #333;
+    margin-bottom: 4px;
+}
+.privacy-option-desc {
+    font-size: 12px;
+    color: #999;
+}
+.privacy-option-check {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #07c160;
+    font-size: 18px;
+    font-weight: bold;
+}
+
+/* 好友选择列表样式 */
+.friend-select-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid #f5f5f5;
+    cursor: pointer;
+}
+.friend-select-item:active {
+    background: #f8f8f8;
+}
+.friend-select-checkbox {
+    width: 22px;
+    height: 22px;
+    border: 2px solid #ddd;
+    border-radius: 50%;
+    margin-right: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all 0.2s;
+}
+.friend-select-checkbox.checked {
+    background: #07c160;
+    border-color: #07c160;
+    color: #fff;
+}
+.friend-select-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 4px;
+    background-size: cover;
+    background-position: center;
+    background-color: #f5f5f5;
+    margin-right: 12px;
+    flex-shrink: 0;
+}
+.friend-select-name {
+    font-size: 16px;
+    color: #333;
 }
 
 /* =================

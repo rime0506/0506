@@ -339,6 +339,29 @@
             <div class="custom-edit-tip" style="margin-top: 16px;">头像气泡背景色</div>
             <input type="color" class="custom-edit-input" id="bubble-color-input" value="#FFF7FA" style="height: 50px; cursor: pointer;">
         </div>
+
+        <!-- 折叠项8：全局字体设置 -->
+        <div class="custom-item" onclick="toggleExpand('expand8')">
+            <div class="custom-item-text">全局字体设置</div>
+            <div class="custom-item-arrow" id="arrow8">→</div>
+        </div>
+        <div class="custom-expand" id="expand8">
+            <div class="custom-edit-tip">粘贴在线字体链接（如 Google Fonts）</div>
+            <input type="text" class="custom-edit-input" id="custom-font-input" placeholder="如：https://fonts.googleapis.com/css2?family=...">
+            <div class="custom-edit-tip" style="margin-top: 12px;">输入字体名称（family name）</div>
+            <input type="text" class="custom-edit-input" id="custom-font-name-input" placeholder="如：Noto Sans SC、Ma Shan Zheng">
+            <div class="custom-item" onclick="previewCustomFont()" style="margin-top: 12px; background: #FFF7FA;">
+                <div class="custom-item-text">预览字体效果</div>
+                <div class="custom-item-arrow">👁</div>
+            </div>
+            <div class="font-preview-box" id="font-preview-box">
+                <div class="font-preview-text" id="font-preview-text">这是字体预览效果 ABC 123</div>
+            </div>
+            <div class="custom-item" onclick="clearCustomFont()" style="margin-top: 8px; background: #fff0f0;">
+                <div class="custom-item-text" style="color: #e57373;">恢复默认字体</div>
+                <div class="custom-item-arrow" style="color: #e57373;">↺</div>
+            </div>
+        </div>
     </div>
 
     <!-- 系统设置页面 -->
@@ -2095,12 +2118,14 @@
         </div>
 
         <!-- 置顶区域 -->
-        <div id="my-moments-pinned-section" style="display:none;">
-            <div style="padding:12px 16px; font-size:14px; color:#333; font-weight:600; background:#fff;">置顶</div>
-            <div id="my-moments-pinned-list" style="display:flex; overflow-x:auto; padding:12px 16px; gap:12px; background:#fff; -webkit-overflow-scrolling:touch;">
-                <!-- 置顶的朋友圈卡片 -->
+        <div id="my-moments-pinned-section" class="moments-pinned-section">
+            <div class="moments-pinned-label">置顶</div>
+            <div class="moments-pinned-scroll">
+                <div id="my-moments-pinned-list" class="moments-pinned-list">
+                    <!-- 置顶的朋友圈卡片 -->
+                </div>
+                <div class="moments-pinned-arrow">›</div>
             </div>
-            <div style="height:8px; background:#f5f5f5; border-top:1px solid #f0f0f0; width:90%; margin:0 auto;"></div>
         </div>
 
         <!-- 普通内容列表 -->
@@ -2108,6 +2133,19 @@
             <div class="wechat-empty-state" style="margin-top:60px;">
                 <div style="color:#999; font-size:14px;">加载中...</div>
             </div>
+        </div>
+    </div>
+
+    <!-- 所有置顶朋友圈页面 -->
+    <div class="wechat-page" id="all-pinned-moments-page" style="display:none; z-index:205;">
+        <div class="wechat-header">
+            <div class="back-btn" onclick="hideAllPinnedMoments()" style="margin:0; background:none; font-size:16px; color:#333; width:60px;">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:24px; height:24px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="wechat-title">置顶</div>
+            <div style="width:60px;"></div>
+        </div>
+        <div class="moments-list" id="all-pinned-list" style="padding-top:60px;">
         </div>
     </div>
 
@@ -2182,13 +2220,76 @@
                     <div class="wechat-cell-text">所在位置</div>
                     <div class="wechat-cell-arrow">›</div>
                 </div>
-                <div class="wechat-cell" style="padding:12px 0; border:none;">
+                <div class="wechat-cell" style="padding:12px 0; border:none;" onclick="showPrivacySelector()">
                     <div class="wechat-cell-icon" style="margin-right:10px;">
                         <svg class="svg-icon" viewBox="0 0 24 24" style="width:20px; height:20px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
                     </div>
                     <div class="wechat-cell-text">谁可以看</div>
-                    <div class="wechat-cell-arrow">›</div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span id="privacy-selected-text" style="font-size:14px; color:#999;">公开</span>
+                        <div class="wechat-cell-arrow">›</div>
+                    </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 朋友圈权限选择页面 -->
+    <div class="wechat-page" id="privacy-selector-page" style="display:none; z-index:220;">
+        <div class="wechat-header">
+            <div class="back-btn" onclick="hidePrivacySelector()" style="margin:0; background:none; font-size:16px; color:#333; width:60px;">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:24px; height:24px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="wechat-title">谁可以看</div>
+            <div style="width:60px;"></div>
+        </div>
+        <div style="padding-top:60px;">
+            <div class="privacy-option" data-value="public" onclick="selectPrivacy('public', '公开')">
+                <div class="privacy-option-content">
+                    <div class="privacy-option-title">公开</div>
+                    <div class="privacy-option-desc">所有朋友可见</div>
+                </div>
+                <div class="privacy-option-check" id="privacy-check-public">✓</div>
+            </div>
+            <div class="privacy-option" data-value="private" onclick="selectPrivacy('private', '私密')">
+                <div class="privacy-option-content">
+                    <div class="privacy-option-title">私密</div>
+                    <div class="privacy-option-desc">仅自己可见</div>
+                </div>
+                <div class="privacy-option-check" id="privacy-check-private"></div>
+            </div>
+            <div class="privacy-option" data-value="partial" onclick="showFriendSelector('partial')">
+                <div class="privacy-option-content">
+                    <div class="privacy-option-title">部分可见</div>
+                    <div class="privacy-option-desc" id="partial-desc">选中的朋友可见</div>
+                </div>
+                <div class="wechat-cell-arrow">›</div>
+            </div>
+            <div class="privacy-option" data-value="exclude" onclick="showFriendSelector('exclude')">
+                <div class="privacy-option-content">
+                    <div class="privacy-option-title">不给谁看</div>
+                    <div class="privacy-option-desc" id="exclude-desc">选中的朋友不可见</div>
+                </div>
+                <div class="wechat-cell-arrow">›</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 好友选择页面 -->
+    <div class="wechat-page" id="friend-selector-page" style="display:none; z-index:230;">
+        <div class="wechat-header">
+            <div class="back-btn" onclick="hideFriendSelector()" style="margin:0; background:none; font-size:16px; color:#333; width:60px;">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:24px; height:24px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="wechat-title" id="friend-selector-title">选择好友</div>
+            <div class="wechat-add" onclick="confirmFriendSelection()" style="width:60px; justify-content:flex-end;">
+                <span style="color:#07c160; font-size:16px; font-weight:600;">完成</span>
+            </div>
+        </div>
+        <div style="padding:60px 0 20px;">
+            <div style="padding:12px 16px; background:#f8f8f8; font-size:12px; color:#999;">选择好友</div>
+            <div id="friend-selector-list" style="background:#fff;">
+                <!-- 好友列表 -->
             </div>
         </div>
     </div>
