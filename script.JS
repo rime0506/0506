@@ -5628,6 +5628,14 @@ async function showWechatRegisterPage() {
                 await renderMePage(container);
             }
             
+            // ✅ 如果当前有打开的聊天窗口，刷新聊天界面以更新头像
+            if (currentChatCharId) {
+                const chatChar = await db.characters.get(currentChatCharId);
+                if (chatChar) {
+                    await renderChatBody(chatChar);
+                }
+            }
+            
             showToast('保存成功');
         }
 
@@ -6587,6 +6595,15 @@ ${loreContext}
             
             closeModal('switch-account-modal');
             
+            // ✅ 检查切换到的账号是否已注册微信号
+            const targetUser = await db.characters.get(parseInt(id));
+            if (targetUser && (!targetUser.identity || !targetUser.identity.wechat_registered)) {
+                // 该账号未注册微信号，显示注册页面
+                console.log('[切换账号] 目标账号未注册微信号，显示注册页面');
+                await showWechatRegisterPageForUser(id);
+                return;
+            }
+            
             // 刷新所有相关页面
             const content = document.getElementById('wechat-content');
             if (content) {
@@ -6603,6 +6620,24 @@ ${loreContext}
             // 刷新钱包余额显示
             updateWalletBalanceDisplay();
             updateBalancePageDisplay();
+        }
+        
+        // 为指定用户显示微信注册页面
+        async function showWechatRegisterPageForUser(userId) {
+            const registerPage = document.getElementById('wechat-register-page');
+            const userSelect = document.getElementById('register-user-select');
+            
+            // 清空下拉框并设置为指定用户
+            const user = await db.characters.get(parseInt(userId));
+            if (!user) {
+                showToast('用户不存在');
+                return;
+            }
+            
+            userSelect.innerHTML = `<option value="${user.id}" selected>${user.name}</option>`;
+            
+            // 显示注册页面
+            registerPage.style.display = 'flex';
         }
 
         // 渲染微信聊天列表
@@ -11465,17 +11500,25 @@ ${groupContextStr}
 
         // 辅助：获取 User 头像 URL
         async function getUserAvatarUrl(userId) {
-            if (!userId) {
-                // 默认头像 (提取 avatar-img-1 的背景图)
-                const dom = document.getElementById('avatar-img-1');
-                if (dom) {
-                    const bg = dom.style.backgroundImage;
-                    if (bg && bg !== 'none') return bg.replace(/url\(|\)|"/g, '');
-                }
-                return '';
+            // ✅ 优先使用传入的 userId
+            if (userId) {
+                const user = await db.characters.get(userId);
+                if (user && user.avatar) return user.avatar;
             }
-            const user = await db.characters.get(userId);
-            return (user && user.avatar) ? user.avatar : '';
+            
+            // ✅ 其次使用当前登录用户（个人中心"我"的角色）的头像
+            if (currentMyCharId) {
+                const myChar = await db.characters.get(parseInt(currentMyCharId));
+                if (myChar && myChar.avatar) return myChar.avatar;
+            }
+            
+            // 最后回退：从桌面头像小组件获取
+            const dom = document.getElementById('avatar-img-1');
+            if (dom) {
+                const bg = dom.style.backgroundImage;
+                if (bg && bg !== 'none') return bg.replace(/url\(|\)|"/g, '');
+            }
+            return '';
         }
 
         // ✅ 核心函数1：判断是否是图片URL
@@ -11917,8 +11960,46 @@ ${groupContextStr}
             else {
                 // 先清理消息内容
                 const cleanedContent = sanitizeMessage(msg.content);
-                // 使用统一的渲染函数
-                content.innerHTML = renderMessageContent(cleanedContent);
+                
+                // 检查AI消息是否包含外语+中文翻译组合
+                const translationParsed = msg.role === 'char' ? parseForeignWithTranslation(cleanedContent) : null;
+                
+                if (translationParsed) {
+                    // 有外语+中文组合，默认显示外语，点击显示翻译
+                    content.innerHTML = renderMessageContent(translationParsed.foreign);
+                    content.dataset.chinese = translationParsed.chinese;
+                    content.dataset.expanded = 'false';
+                    
+                    // 点击显示/隐藏翻译
+                    content.onclick = (e) => {
+                        if (isLongPress || isSelectionMode) return;
+                        if (e.target.tagName === 'A' || e.target.tagName === 'IMG') return;
+                        e.stopPropagation();
+                        
+                        const isExpanded = content.dataset.expanded === 'true';
+                        let transEl = content.querySelector('.msg-translation');
+                        
+                        if (isExpanded) {
+                            // 收起翻译
+                            if (transEl) transEl.style.display = 'none';
+                            content.dataset.expanded = 'false';
+                        } else {
+                            // 显示翻译
+                            if (!transEl) {
+                                transEl = document.createElement('div');
+                                transEl.className = 'msg-translation';
+                                transEl.innerHTML = renderMessageContent(content.dataset.chinese);
+                                content.appendChild(transEl);
+                            } else {
+                                transEl.style.display = 'block';
+                            }
+                            content.dataset.expanded = 'true';
+                        }
+                    };
+                } else {
+                    // 普通消息，使用统一的渲染函数
+                    content.innerHTML = renderMessageContent(cleanedContent);
+                }
             }
 
             // 事件绑定
@@ -15138,6 +15219,47 @@ ${loreContext}
             }
         }
 
+        // ========== 外语+中文翻译识别功能 ==========
+        // 解析AI返回的外语+中文组合消息
+        // 支持格式：
+        // 1. "外语（中文翻译）" 或 "外语(中文翻译)"
+        // 2. "外语「中文翻译」"
+        function parseForeignWithTranslation(text) {
+            if (!text) return null;
+            
+            // 模式1: 任意内容（中文翻译）或 任意内容(中文翻译) - 括号在末尾
+            const pattern1 = /^(.+?)[（(]([^）)]+)[）)]$/s;
+            let match = text.match(pattern1);
+            if (match) {
+                const foreign = match[1].trim();
+                const chinese = match[2].trim();
+                // 验证：括号内应该包含中文，且外语部分不为空
+                if (foreign && containsChinese(chinese)) {
+                    return { foreign, chinese };
+                }
+            }
+            
+            // 模式2: 任意内容「中文翻译」
+            const pattern2 = /^(.+?)「([^」]+)」$/s;
+            match = text.match(pattern2);
+            if (match) {
+                const foreign = match[1].trim();
+                const chinese = match[2].trim();
+                if (foreign && containsChinese(chinese)) {
+                    return { foreign, chinese };
+                }
+            }
+            
+            return null;
+        }
+        
+        // 检查文本是否包含中文
+        function containsChinese(text) {
+            if (!text) return false;
+            const chineseRegex = /[\u4e00-\u9fff]/;
+            return chineseRegex.test(text);
+        }
+        
         // 通用 AI 调用函数
         async function callAI(messages) {
             const url = await db.dexiData.get('aiBaseUrl');

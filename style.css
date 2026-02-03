@@ -2611,6 +2611,15 @@
             transform: scale(0.98);
             filter: brightness(0.9);
         }
+        
+        /* ========== 消息翻译样式 ========== */
+        .msg-translation {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px dashed rgba(0,0,0,0.1);
+            font-size: 13px;
+            color: #666;
+        }
 
         /* 撤回消息 - 居中系统提示样式（与群聊系统消息一致） */
         .recalled-system-row {
