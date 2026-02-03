@@ -304,6 +304,9 @@ async function migratePhoneAndSmsToIndexedDB() {
             
             // 启动主动聊天检测 (每分钟一次)
             startAutoChatLoop();
+            
+            // ✅ 自动初始化联机系统（不需要手动打开设置）
+            initOnlineSystem();
         }
 
         // --- 纯前端模式：所有数据存储在本地 ---
@@ -11475,6 +11478,31 @@ ${loreContext}
             
             // 重新渲染以显示引用（因为 appendMessageToUI 不支持引用显示）
             renderChatBody(char);
+            
+            // ✅ 如果是联机好友，发送消息到服务器
+            if (char.isOnlineFriend && char.onlineData?.wx_account) {
+                // 获取当前用户的 wx_account（需要找到已上线的角色）
+                const userChars = await db.characters.where('type').equals('user').toArray();
+                // 找到一个已上线的角色作为发送方
+                const onlineUserChar = userChars.find(c => 
+                    c.identity?.account && onlineCharacters.some(oc => oc.wx_account === c.identity.account)
+                );
+                
+                if (onlineUserChar && onlineConnected) {
+                    const fromWxAccount = onlineUserChar.identity.account;
+                    const toWxAccount = char.onlineData.wx_account;
+                    const sent = sendOnlineMessage(toWxAccount, text, fromWxAccount);
+                    if (sent) {
+                        console.log('[Online] 消息已发送到服务器:', text);
+                    } else {
+                        console.warn('[Online] 消息发送失败，可能未连接服务器');
+                        showToast('消息发送失败，请检查服务器连接');
+                    }
+                } else {
+                    console.warn('[Online] 无法发送联机消息：未找到已上线的角色或未连接服务器');
+                    showToast('请先上线角色并连接服务器');
+                }
+            }
             
             // ✅ 不再自动触发 AI 回复，需要用户点击"接受回复"按钮
             // triggerAiReply(); 
@@ -25874,10 +25902,9 @@ function toggleOnlineSettings() {
     }
 }
 
-// 加载联机设置
-function loadOnlineSettings() {
+// ✅ 自动初始化联机系统（页面加载时调用）
+async function initOnlineSystem() {
     const serverUrl = localStorage.getItem('online_server_url') || '';
-    document.getElementById('online-server-url').value = serverUrl;
     
     // 加载已保存的token
     onlineToken = localStorage.getItem('online_token');
@@ -25890,12 +25917,27 @@ function loadOnlineSettings() {
         }
     }
     
-    updateOnlineStatus();
-    
-    // 如果有token，尝试自动连接
-    if (serverUrl && onlineToken) {
-        connectToOnlineServer();
+    // 如果有服务器地址，自动连接
+    if (serverUrl) {
+        console.log('[Online] 自动连接服务器:', serverUrl);
+        try {
+            await connectToOnlineServer();
+            console.log('[Online] 服务器连接成功');
+        } catch (e) {
+            console.warn('[Online] 自动连接失败:', e.message);
+        }
     }
+}
+
+// 加载联机设置（打开设置面板时调用）
+function loadOnlineSettings() {
+    const serverUrl = localStorage.getItem('online_server_url') || '';
+    const serverUrlInput = document.getElementById('online-server-url');
+    if (serverUrlInput) {
+        serverUrlInput.value = serverUrl;
+    }
+    
+    updateOnlineStatus();
 }
 
 // 保存联机设置
@@ -26036,9 +26078,11 @@ function handleOnlineMessage(data) {
             onlineUserData = data.user;
             localStorage.setItem('online_user_data', JSON.stringify(data.user));
             updateOnlineStatus();
-            showToast('联机登录成功');
-            // 获取已上线的角色
+            console.log('[Online] 认证成功，自动上线角色...');
+            // 获取已上线的角色，然后自动上线本地角色
             requestOnlineCharacters();
+            // ✅ 自动上线所有 User 类型的角色
+            autoGoOnlineAllUserCharacters();
             break;
             
         case 'auth_failed':
@@ -26059,6 +26103,8 @@ function handleOnlineMessage(data) {
             closeModal('online-login-modal');
             showToast('登录成功');
             requestOnlineCharacters();
+            // ✅ 自动上线所有 User 类型的角色
+            autoGoOnlineAllUserCharacters();
             break;
             
         case 'register_success':
@@ -26478,6 +26524,52 @@ function goOfflineWithCharacter(wxAccount) {
         type: 'go_offline',
         wx_account: wxAccount
     }));
+}
+
+// ✅ 自动上线所有 User 类型的角色
+async function autoGoOnlineAllUserCharacters() {
+    if (!onlineConnected || !onlineUserData) {
+        console.log('[Online] 未连接或未登录，跳过自动上线');
+        return;
+    }
+    
+    try {
+        // 获取所有 User 类型的角色
+        const userChars = await db.characters.where('type').equals('user').toArray();
+        
+        let onlineCount = 0;
+        for (const char of userChars) {
+            const wxAccount = char.identity?.account;
+            if (!wxAccount) {
+                console.log(`[Online] 角色 ${char.name} 没有微信号，跳过`);
+                continue;
+            }
+            
+            // 检查是否已经上线
+            if (isCharacterOnline(wxAccount)) {
+                console.log(`[Online] 角色 ${char.name} 已上线，跳过`);
+                continue;
+            }
+            
+            // 上线角色
+            console.log(`[Online] 自动上线角色: ${char.name} (${wxAccount})`);
+            onlineSocket.send(JSON.stringify({
+                type: 'go_online',
+                wx_account: wxAccount,
+                nickname: char.remark || char.name,
+                avatar: char.avatar || '',
+                bio: char.description?.substring(0, 100) || '',
+                local_char_id: char.id
+            }));
+            onlineCount++;
+        }
+        
+        if (onlineCount > 0) {
+            console.log(`[Online] 已自动上线 ${onlineCount} 个角色`);
+        }
+    } catch (e) {
+        console.error('[Online] 自动上线角色失败:', e);
+    }
 }
 
 // 发送联机消息
