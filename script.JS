@@ -26823,7 +26823,9 @@ async function handleOnlineMessage(data) {
             onlineUserData = data.user;
             localStorage.setItem('online_user_data', JSON.stringify(data.user));
             updateOnlineStatus();
-            console.log('[Online] 认证成功，自动上线角色...');
+            console.log('[Online] 认证成功，自动注册所有角色到服务器...');
+            // 先注册所有角色到服务器（不上线，仅用于搜索）
+            await autoRegisterAllUserCharacters();
             // 获取已上线的角色，然后自动上线本地角色
             requestOnlineCharacters();
             // ✅ 自动上线所有 User 类型的角色（角色上线后会通过 character_online 事件自动获取群聊列表）
@@ -26855,6 +26857,9 @@ async function handleOnlineMessage(data) {
             updateOnlineStatus();
             closeModal('online-login-modal');
             showToast('登录成功');
+            console.log('[Online] 登录成功，自动注册所有角色到服务器...');
+            // 先注册所有角色到服务器（不上线，仅用于搜索）
+            await autoRegisterAllUserCharacters();
             requestOnlineCharacters();
             // ✅ 自动上线所有 User 类型的角色
             autoGoOnlineAllUserCharacters();
@@ -27148,50 +27153,97 @@ function doOnlineSearch() {
     }
     
     if (!onlineConnected) {
-        alert('服务器未连接');
+        alert('服务器未连接，请先连接服务器');
         return;
     }
     
-    onlineSocket.send(JSON.stringify({
-        type: 'search_user',
-        wx_account: wxAccount
-    }));
+    if (!onlineSocket || onlineSocket.readyState !== WebSocket.OPEN) {
+        alert('WebSocket 连接未建立，请检查服务器连接');
+        return;
+    }
+    
+    console.log('[Online] 搜索微信号:', wxAccount);
+    
+    // 显示搜索中状态
+    const resultEl = document.getElementById('online-search-result');
+    const emptyEl = document.getElementById('online-search-empty');
+    if (resultEl) resultEl.style.display = 'none';
+    if (emptyEl) {
+        emptyEl.style.display = 'block';
+        emptyEl.innerHTML = '<div style="text-align:center; padding:20px; color:#999;">搜索中...</div>';
+    }
+    
+    try {
+        onlineSocket.send(JSON.stringify({
+            type: 'search_user',
+            wx_account: wxAccount
+        }));
+        console.log('[Online] 搜索请求已发送');
+    } catch (e) {
+        console.error('[Online] 发送搜索请求失败:', e);
+        alert('搜索失败: ' + e.message);
+    }
 }
 
 // 显示搜索结果
 function displayOnlineSearchResult(result) {
+    console.log('[Online] 收到搜索结果:', result);
+    
     const resultEl = document.getElementById('online-search-result');
     const emptyEl = document.getElementById('online-search-empty');
     
     if (!result) {
-        resultEl.style.display = 'none';
-        emptyEl.style.display = 'block';
+        console.log('[Online] 搜索结果为空');
+        if (resultEl) resultEl.style.display = 'none';
+        if (emptyEl) {
+            emptyEl.style.display = 'block';
+            emptyEl.innerHTML = '<div style="text-align:center; padding:20px; color:#999;">未找到该微信号<br><span style="font-size:12px; color:#ccc;">提示：只有角色上线后才能被搜索到</span></div>';
+        }
         return;
     }
     
-    emptyEl.style.display = 'none';
-    resultEl.style.display = 'block';
+    console.log('[Online] 显示搜索结果:', result.nickname);
     
-    // 填充结果
-    document.getElementById('online-search-avatar').style.backgroundImage = result.avatar ? `url(${result.avatar})` : '';
-    document.getElementById('online-search-nickname').textContent = result.nickname || '未设置昵称';
-    document.getElementById('online-search-wxid').textContent = result.wx_account;
-    // 隐藏 bio（人设），保护隐私
-    document.getElementById('online-search-bio').style.display = 'none';
-    
-    const statusEl = document.getElementById('online-search-online-status');
-    if (result.is_online) {
-        statusEl.textContent = '在线';
-        statusEl.style.background = '#e8f5e9';
-        statusEl.style.color = '#4caf50';
-    } else {
-        statusEl.textContent = '离线';
-        statusEl.style.background = '#f5f5f5';
-        statusEl.style.color = '#999';
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (resultEl) {
+        resultEl.style.display = 'block';
+        
+        // 填充结果
+        const avatarEl = document.getElementById('online-search-avatar');
+        const nicknameEl = document.getElementById('online-search-nickname');
+        const wxidEl = document.getElementById('online-search-wxid');
+        const bioEl = document.getElementById('online-search-bio');
+        const statusEl = document.getElementById('online-search-online-status');
+        
+        if (avatarEl) {
+            avatarEl.style.backgroundImage = result.avatar ? `url(${result.avatar})` : '';
+        }
+        if (nicknameEl) {
+            nicknameEl.textContent = result.nickname || '未设置昵称';
+        }
+        if (wxidEl) {
+            wxidEl.textContent = result.wx_account;
+        }
+        // 隐藏 bio（人设），保护隐私
+        if (bioEl) {
+            bioEl.style.display = 'none';
+        }
+        
+        if (statusEl) {
+            if (result.is_online) {
+                statusEl.textContent = '在线';
+                statusEl.style.background = '#e8f5e9';
+                statusEl.style.color = '#4caf50';
+            } else {
+                statusEl.textContent = '离线';
+                statusEl.style.background = '#f5f5f5';
+                statusEl.style.color = '#999';
+            }
+        }
+        
+        // 保存搜索结果供发送申请使用
+        resultEl.dataset.wxAccount = result.wx_account;
     }
-    
-    // 保存搜索结果供发送申请使用
-    resultEl.dataset.wxAccount = result.wx_account;
 }
 
 // 发送联机好友申请
@@ -27413,6 +27465,47 @@ function goOfflineWithCharacter(wxAccount) {
 }
 
 // ✅ 自动上线所有 User 类型的角色
+// 自动注册所有 User 类型角色到服务器（不上线，仅用于搜索）
+async function autoRegisterAllUserCharacters() {
+    if (!onlineConnected || !onlineUserData) {
+        console.log('[Online] 未连接或未登录，跳过自动注册');
+        return;
+    }
+    
+    try {
+        // 获取所有 User 类型的角色
+        const userChars = await db.characters.where('type').equals('user').toArray();
+        
+        let registerCount = 0;
+        for (const char of userChars) {
+            const wxAccount = char.identity?.account;
+            if (!wxAccount) {
+                console.log(`[Online] 角色 ${char.name} 没有微信号，跳过注册`);
+                continue;
+            }
+            
+            // 注册角色到服务器（不上线，is_online = 0）
+            console.log(`[Online] 注册角色到服务器: ${char.name} (${wxAccount})`);
+            onlineSocket.send(JSON.stringify({
+                type: 'register_character',
+                wx_account: wxAccount,
+                nickname: char.remark || char.name,
+                avatar: char.avatar || '',
+                bio: char.description?.substring(0, 100) || ''
+            }));
+            registerCount++;
+        }
+        
+        if (registerCount > 0) {
+            console.log(`[Online] 已注册 ${registerCount} 个角色到服务器（可被搜索）`);
+        } else {
+            console.log('[Online] 没有可注册的角色（请确保 User 角色设置了微信号）');
+        }
+    } catch (e) {
+        console.error('[Online] 自动注册角色失败:', e);
+    }
+}
+
 async function autoGoOnlineAllUserCharacters() {
     if (!onlineConnected || !onlineUserData) {
         console.log('[Online] 未连接或未登录，跳过自动上线');
