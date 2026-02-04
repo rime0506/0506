@@ -26524,6 +26524,16 @@ function connectToOnlineServer() {
                     }));
                 }
                 
+                // 启动心跳定时器，每25秒发送一次心跳
+                if (window.onlineHeartbeatTimer) {
+                    clearInterval(window.onlineHeartbeatTimer);
+                }
+                window.onlineHeartbeatTimer = setInterval(() => {
+                    if (onlineConnected && onlineSocket && onlineSocket.readyState === WebSocket.OPEN) {
+                        onlineSocket.send(JSON.stringify({ type: 'ping' }));
+                    }
+                }, 25000);
+                
                 resolve();
             };
             
@@ -26536,6 +26546,12 @@ function connectToOnlineServer() {
                 onlineConnected = false;
                 onlineCharacters = []; // 清空在线角色列表
                 updateOnlineStatus();
+                
+                // 清除心跳定时器
+                if (window.onlineHeartbeatTimer) {
+                    clearInterval(window.onlineHeartbeatTimer);
+                    window.onlineHeartbeatTimer = null;
+                }
             };
             
             onlineSocket.onerror = (error) => {
@@ -26561,6 +26577,9 @@ function connectToOnlineServer() {
 
 // 处理服务器消息
 function handleOnlineMessage(data) {
+    // 心跳响应不需要打印日志
+    if (data.type === 'pong') return;
+    
     console.log('[Online] Received:', data);
     
     switch (data.type) {
@@ -26887,7 +26906,8 @@ function displayOnlineSearchResult(result) {
     document.getElementById('online-search-avatar').style.backgroundImage = result.avatar ? `url(${result.avatar})` : '';
     document.getElementById('online-search-nickname').textContent = result.nickname || '未设置昵称';
     document.getElementById('online-search-wxid').textContent = result.wx_account;
-    document.getElementById('online-search-bio').textContent = result.bio || '这个人很懒，什么都没写~';
+    // 隐藏 bio（人设），保护隐私
+    document.getElementById('online-search-bio').style.display = 'none';
     
     const statusEl = document.getElementById('online-search-online-status');
     if (result.is_online) {

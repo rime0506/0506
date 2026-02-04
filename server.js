@@ -234,9 +234,20 @@ wss.on('connection', (ws, req) => {
     // 初始化客户端状态
     clients.set(ws, { userId: null, wxAccounts: new Set() });
     
+    // 心跳检测：标记连接为活跃
+    ws.isAlive = true;
+    ws.on('pong', () => {
+        ws.isAlive = true;
+    });
+    
     ws.on('message', (message) => {
         try {
             const data = JSON.parse(message);
+            // 处理客户端发来的心跳
+            if (data.type === 'ping') {
+                send(ws, { type: 'pong' });
+                return;
+            }
             handleMessage(ws, data);
         } catch (e) {
             console.error('[WS] 消息解析错误:', e);
@@ -253,6 +264,18 @@ wss.on('connection', (ws, req) => {
         console.error('[WS] 错误:', error);
     });
 });
+
+// 心跳检测：每30秒检查一次所有连接
+const heartbeatInterval = setInterval(() => {
+    wss.clients.forEach((ws) => {
+        if (ws.isAlive === false) {
+            console.log('[WS] 心跳超时，关闭连接');
+            return ws.terminate();
+        }
+        ws.isAlive = false;
+        ws.ping(); // 发送 ping，等待 pong 响应
+    });
+}, 30000);
 
 // 处理消息
 function handleMessage(ws, data) {
@@ -607,7 +630,7 @@ function handleSearchUser(ws, data) {
             wx_account: char.wx_account,
             nickname: char.nickname,
             avatar: char.avatar,
-            bio: char.bio,
+            // 不返回 bio（人设），保护隐私
             is_online: !!char.is_online
         }
     });
