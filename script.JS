@@ -26901,6 +26901,16 @@ async function handleOnlineMessage(data) {
             handleOnlineGroupMessage(data);
             break;
             
+        case 'group_typing_start':
+            // 收到群成员正在输入的通知
+            handleGroupTypingStart(data);
+            break;
+            
+        case 'group_typing_stop':
+            // 收到群成员停止输入的通知
+            handleGroupTypingStop(data);
+            break;
+            
         case 'group_members':
             // 收到群成员列表
             handleOnlineGroupMembers(data);
@@ -28108,6 +28118,29 @@ async function handleOnlineGroupMessage(data) {
     renderOnlineGroupMessages();
 }
 
+// 处理群成员开始输入
+function handleGroupTypingStart(data) {
+    // 只在当前打开的群聊中显示
+    if (data.group_id !== currentOnlineGroupId) return;
+    
+    const chatTitleEl = document.getElementById('online-group-chat-title');
+    if (chatTitleEl) {
+        chatTitleEl.innerText = `${data.character_name} 正在输入中...`;
+    }
+}
+
+// 处理群成员停止输入
+function handleGroupTypingStop(data) {
+    // 只在当前打开的群聊中显示
+    if (data.group_id !== currentOnlineGroupId) return;
+    
+    const chatTitleEl = document.getElementById('online-group-chat-title');
+    const group = onlineGroups.find(g => g.id === currentOnlineGroupId);
+    if (chatTitleEl && group) {
+        chatTitleEl.innerText = group.name;
+    }
+}
+
 // 渲染群聊消息
 function renderOnlineGroupMessages() {
     const container = document.getElementById('online-group-messages');
@@ -28133,8 +28166,36 @@ function renderOnlineGroupMessages() {
         let messageContent = '';
         let isSpecialMsg = false;
         
+        // 尝试解析JSON消息（语音、转账等特殊消息）
+        let parsedContent = null;
+        try {
+            if (msg.content && msg.content.startsWith('{') && msg.content.includes('__type')) {
+                parsedContent = JSON.parse(msg.content);
+            }
+        } catch(e) {}
+        
+        // 处理语音消息
+        if (parsedContent && parsedContent.__type === 'audio') {
+            isSpecialMsg = true;
+            const audioId = 'online_group_audio_' + (msg.id || msg.created_at);
+            const effectIcon = parsedContent.effect === 'loli' ? '🎀' : 
+                              parsedContent.effect === 'uncle' ? '🧔' :
+                              parsedContent.effect === 'robot' ? '🤖' : '🎙️';
+            messageContent = `
+                <div class="online-audio-bubble" style="min-width:120px; max-width:200px; padding:10px 14px; background:${isMe ? '#ffe4e8' : '#f2f2f7'}; border-radius:18px; display:flex; align-items:center; gap:10px; cursor:pointer;" onclick="playOnlineGroupAudio('${audioId}')">
+                    <div class="audio-play-icon" id="icon_${audioId}" data-original="${effectIcon}" style="font-size:20px;">${effectIcon}</div>
+                    <div style="flex:1; display:flex; flex-direction:column;">
+                        <div style="height:20px; background:#fff; border-radius:10px; position:relative; overflow:hidden;">
+                            <div style="height:100%; background:var(--ins-pink); width:0%; transition:width 0.1s;" id="progress_${audioId}"></div>
+                        </div>
+                        <div style="font-size:11px; color:#999; margin-top:2px;">${parsedContent.duration}"</div>
+                    </div>
+                    <audio id="${audioId}" src="${parsedContent.audio}" style="display:none;"></audio>
+                </div>
+            `;
+        }
         // 处理转账消息
-        if (msg.msg_type === 'transfer') {
+        else if (msg.msg_type === 'transfer') {
             isSpecialMsg = true;
             try {
                 const data = JSON.parse(msg.content);
@@ -28237,6 +28298,59 @@ function renderOnlineGroupMessages() {
 // 收取联机群聊转账
 function receiveOnlineGroupTransfer(msgId) {
     showToast('转账功能暂不支持收取，仅用于展示');
+}
+
+// 播放联机群聊语音消息
+let currentPlayingOnlineGroupAudio = null;
+function playOnlineGroupAudio(audioId) {
+    const audio = document.getElementById(audioId);
+    const icon = document.getElementById('icon_' + audioId);
+    const progress = document.getElementById('progress_' + audioId);
+    
+    if (!audio) return;
+    
+    // 如果有其他正在播放的，先停止
+    if (currentPlayingOnlineGroupAudio && currentPlayingOnlineGroupAudio !== audio) {
+        currentPlayingOnlineGroupAudio.pause();
+        currentPlayingOnlineGroupAudio.currentTime = 0;
+        // 重置之前音频的图标和进度条
+        const prevIcon = document.getElementById('icon_' + currentPlayingOnlineGroupAudio.id);
+        const prevProgress = document.getElementById('progress_' + currentPlayingOnlineGroupAudio.id);
+        if (prevIcon) {
+            const bubble = currentPlayingOnlineGroupAudio.closest('.online-audio-bubble');
+            if (bubble) {
+                const originalIcon = bubble.querySelector('.audio-play-icon');
+                if (originalIcon) prevIcon.textContent = prevIcon.dataset.original || '🎙️';
+            }
+        }
+        if (prevProgress) prevProgress.style.width = '0%';
+    }
+    
+    if (audio.paused) {
+        audio.play();
+        currentPlayingOnlineGroupAudio = audio;
+        if (icon) icon.textContent = '⏸️';
+        
+        // 更新进度条
+        audio.ontimeupdate = () => {
+            if (progress && audio.duration) {
+                const percent = (audio.currentTime / audio.duration) * 100;
+                progress.style.width = percent + '%';
+            }
+        };
+        
+        audio.onended = () => {
+            if (icon) icon.textContent = icon.dataset.original || '🎙️';
+            if (progress) progress.style.width = '0%';
+            currentPlayingOnlineGroupAudio = null;
+        };
+    } else {
+        audio.pause();
+        audio.currentTime = 0;
+        if (icon) icon.textContent = icon.dataset.original || '🎙️';
+        if (progress) progress.style.width = '0%';
+        currentPlayingOnlineGroupAudio = null;
+    }
 }
 
 // 处理群成员列表
@@ -28435,7 +28549,7 @@ function insertOnlineGroupEmoji(emoji) {
 async function onlineGroupVoiceInput() {
     closeOnlineGroupPanel();
     
-    // 显示语音模式选择弹窗
+    // 显示语音录制+变声弹窗（完全参照联机私聊）
     const modal = document.createElement('div');
     modal.id = 'online-group-voice-modal';
     modal.style.cssText = `
@@ -28445,43 +28559,292 @@ async function onlineGroupVoiceInput() {
         width: 100%;
         height: 100%;
         background: rgba(0,0,0,0.5);
-        z-index: 10000;
         display: flex;
         align-items: center;
         justify-content: center;
+        z-index: 10000;
     `;
     
     modal.innerHTML = `
-        <div style="background:#fff; border-radius:16px; padding:24px; width:85%; max-width:360px;">
-            <h3 style="margin:0 0 16px 0; text-align:center; font-size:18px;">语音输入模式</h3>
+        <div style="background: white; border-radius: 16px; padding: 24px; width: 85%; max-width: 320px;">
+            <h3 style="margin: 0 0 20px 0; text-align: center; color: #333; font-size: 18px;">🎤 语音录制</h3>
             
-            <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:20px;">
-                <button onclick="startOnlineGroupVoiceCapture('text')" style="padding:16px; background:#f5f5f5; border:none; border-radius:12px; font-size:15px; cursor:pointer; text-align:left;">
-                    <div style="font-weight:600; margin-bottom:4px;">📝 转为文字</div>
-                    <div style="font-size:13px; color:#999;">语音转文字后发送</div>
-                </button>
-                <button onclick="startOnlineGroupVoiceCapture('audio')" style="padding:16px; background:#f5f5f5; border:none; border-radius:12px; font-size:15px; cursor:pointer; text-align:left;">
-                    <div style="font-weight:600; margin-bottom:4px;">🎤 语音消息</div>
-                    <div style="font-size:13px; color:#999;">发送语音消息</div>
-                </button>
+            <div style="margin-bottom: 20px;">
+                <div style="font-size: 13px; color: #666; margin-bottom: 10px;">选择变声效果：</div>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                    <label style="display: flex; align-items: center; padding: 12px; background: #f5f5f5; border-radius: 8px; cursor: pointer;">
+                        <input type="radio" name="online-group-voice-effect" value="normal" checked style="margin-right: 8px;">
+                        <span>🎙️ 原声</span>
+                    </label>
+                    <label style="display: flex; align-items: center; padding: 12px; background: #fff0f5; border-radius: 8px; cursor: pointer;">
+                        <input type="radio" name="online-group-voice-effect" value="loli" style="margin-right: 8px;">
+                        <span>🎀 萝莉音</span>
+                    </label>
+                    <label style="display: flex; align-items: center; padding: 12px; background: #f0f5ff; border-radius: 8px; cursor: pointer;">
+                        <input type="radio" name="online-group-voice-effect" value="uncle" style="margin-right: 8px;">
+                        <span>🧔 大叔音</span>
+                    </label>
+                    <label style="display: flex; align-items: center; padding: 12px; background: #f5fff0; border-radius: 8px; cursor: pointer;">
+                        <input type="radio" name="online-group-voice-effect" value="robot" style="margin-right: 8px;">
+                        <span>🤖 机器人</span>
+                    </label>
+                </div>
             </div>
             
-            <button onclick="document.getElementById('online-group-voice-modal').remove()" style="width:100%; padding:12px; background:#e0e0e0; color:#666; border:none; border-radius:8px; font-size:15px;">取消</button>
+            <div id="online-group-voice-record-status" style="text-align: center; padding: 20px; background: #f9f9f9; border-radius: 12px; margin-bottom: 16px;">
+                <div style="font-size: 14px; color: #999;">点击下方按钮开始录音</div>
+                <div id="online-group-voice-record-time" style="font-size: 24px; font-weight: 600; color: #333; margin-top: 8px; display: none;">00:00</div>
+            </div>
+            
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <button id="btn-start-online-group-record" onclick="startOnlineGroupVoiceRecord()" style="padding: 14px; background: var(--ins-pink); color: white; border: none; border-radius: 10px; font-size: 15px; font-weight: 500; cursor: pointer;">
+                    🎤 按住录音
+                </button>
+                <button onclick="closeOnlineGroupVoiceModal()" style="padding: 12px; background: #f0f0f0; color: #666; border: none; border-radius: 8px; font-size: 14px; cursor: pointer;">
+                    取消
+                </button>
+            </div>
         </div>
     `;
     
     document.body.appendChild(modal);
 }
 
-// 开始联机群聊语音捕获
-function startOnlineGroupVoiceCapture(mode) {
+// 关闭联机群聊语音弹窗
+function closeOnlineGroupVoiceModal() {
     document.getElementById('online-group-voice-modal')?.remove();
+}
+
+// ✅ 联机群聊语音录制变量
+let onlineGroupVoiceRecorder = null;
+let onlineGroupVoiceChunks = [];
+let onlineGroupVoiceStartTime = 0;
+let onlineGroupVoiceTimer = null;
+
+// 开始联机群聊语音录制
+async function startOnlineGroupVoiceRecord() {
+    const btn = document.getElementById('btn-start-online-group-record');
+    const statusDiv = document.getElementById('online-group-voice-record-status');
+    const timeDiv = document.getElementById('online-group-voice-record-time');
     
-    if (mode === 'text') {
-        showToast('语音转文字功能开发中...');
-    } else {
-        showToast('语音消息功能开发中...');
+    // 如果正在录音，则停止
+    if (onlineGroupVoiceRecorder && onlineGroupVoiceRecorder.state === 'recording') {
+        stopOnlineGroupVoiceRecord();
+        return;
     }
+    
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        onlineGroupVoiceRecorder = new MediaRecorder(stream);
+        onlineGroupVoiceChunks = [];
+        onlineGroupVoiceStartTime = Date.now();
+        
+        onlineGroupVoiceRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) {
+                onlineGroupVoiceChunks.push(e.data);
+            }
+        };
+        
+        onlineGroupVoiceRecorder.onstop = async () => {
+            stream.getTracks().forEach(track => track.stop());
+            clearInterval(onlineGroupVoiceTimer);
+            
+            const duration = Math.round((Date.now() - onlineGroupVoiceStartTime) / 1000);
+            const blob = new Blob(onlineGroupVoiceChunks, { type: 'audio/webm' });
+            
+            // 获取选择的变声效果
+            const effectRadio = document.querySelector('input[name="online-group-voice-effect"]:checked');
+            const effect = effectRadio ? effectRadio.value : 'normal';
+            
+            statusDiv.innerHTML = '<div style="color: var(--ins-pink);">⏳ 正在处理...</div>';
+            
+            // 处理变声并发送
+            await processAndSendOnlineGroupVoice(blob, effect, duration);
+        };
+        
+        onlineGroupVoiceRecorder.start();
+        
+        // 更新UI
+        btn.textContent = '⏹️ 停止录音';
+        btn.style.background = '#ff3b30';
+        timeDiv.style.display = 'block';
+        statusDiv.querySelector('div').textContent = '🔴 正在录音...';
+        
+        // 计时器
+        onlineGroupVoiceTimer = setInterval(() => {
+            const elapsed = Math.round((Date.now() - onlineGroupVoiceStartTime) / 1000);
+            const min = Math.floor(elapsed / 60).toString().padStart(2, '0');
+            const sec = (elapsed % 60).toString().padStart(2, '0');
+            timeDiv.textContent = `${min}:${sec}`;
+        }, 1000);
+        
+    } catch (err) {
+        console.error('录音失败:', err);
+        alert('无法访问麦克风，请确保已授予权限');
+    }
+}
+
+// 停止联机群聊语音录制
+function stopOnlineGroupVoiceRecord() {
+    if (onlineGroupVoiceRecorder && onlineGroupVoiceRecorder.state === 'recording') {
+        onlineGroupVoiceRecorder.stop();
+    }
+}
+
+// 处理变声并发送联机群聊语音
+async function processAndSendOnlineGroupVoice(blob, effect, duration) {
+    try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const arrayBuffer = await blob.arrayBuffer();
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        
+        // 根据效果设置参数
+        let pitchRate = 1.0;
+        switch (effect) {
+            case 'loli':    pitchRate = 1.4; break;  // 萝莉音：提高音调
+            case 'uncle':   pitchRate = 0.7; break;  // 大叔音：降低音调
+            case 'robot':   pitchRate = 1.0; break;  // 机器人：特殊处理
+            default:        pitchRate = 1.0; break;
+        }
+        
+        // 创建离线音频上下文进行处理
+        const offlineContext = new OfflineAudioContext(
+            audioBuffer.numberOfChannels,
+            Math.ceil(audioBuffer.length / pitchRate),
+            audioBuffer.sampleRate
+        );
+        
+        const source = offlineContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.playbackRate.value = pitchRate;
+        
+        // 机器人效果：添加波形调制
+        if (effect === 'robot') {
+            const oscillator = offlineContext.createOscillator();
+            const gainNode = offlineContext.createGain();
+            oscillator.frequency.value = 50;
+            gainNode.gain.value = 0.3;
+            oscillator.connect(gainNode);
+            gainNode.connect(offlineContext.destination);
+            oscillator.start();
+        }
+        
+        source.connect(offlineContext.destination);
+        source.start();
+        
+        const renderedBuffer = await offlineContext.startRendering();
+        
+        // 将处理后的音频转为 base64
+        const wavBlob = await audioBufferToWavForOnlineGroup(renderedBuffer);
+        const base64 = await blobToBase64ForOnlineGroup(wavBlob);
+        
+        // 计算实际时长
+        const actualDuration = Math.ceil(duration / pitchRate);
+        
+        // 发送语音消息到群聊
+        await sendOnlineGroupVoiceMessage(base64, actualDuration, effect);
+        
+        closeOnlineGroupVoiceModal();
+        
+    } catch (err) {
+        console.error('语音处理失败:', err);
+        alert('语音处理失败: ' + err.message);
+    }
+}
+
+// AudioBuffer 转 WAV（联机群聊）
+function audioBufferToWavForOnlineGroup(buffer) {
+    const numChannels = buffer.numberOfChannels;
+    const sampleRate = buffer.sampleRate;
+    const format = 1; // PCM
+    const bitDepth = 16;
+    
+    const bytesPerSample = bitDepth / 8;
+    const blockAlign = numChannels * bytesPerSample;
+    
+    const data = [];
+    for (let i = 0; i < buffer.length; i++) {
+        for (let ch = 0; ch < numChannels; ch++) {
+            const sample = buffer.getChannelData(ch)[i];
+            const intSample = Math.max(-1, Math.min(1, sample));
+            data.push(intSample < 0 ? intSample * 0x8000 : intSample * 0x7FFF);
+        }
+    }
+    
+    const dataLength = data.length * bytesPerSample;
+    const headerLength = 44;
+    const totalLength = headerLength + dataLength;
+    
+    const arrayBuffer = new ArrayBuffer(totalLength);
+    const view = new DataView(arrayBuffer);
+    
+    // WAV header
+    const writeString = (offset, string) => {
+        for (let i = 0; i < string.length; i++) {
+            view.setUint8(offset + i, string.charCodeAt(i));
+        }
+    };
+    
+    writeString(0, 'RIFF');
+    view.setUint32(4, totalLength - 8, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, format, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * blockAlign, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitDepth, true);
+    writeString(36, 'data');
+    view.setUint32(40, dataLength, true);
+    
+    let offset = 44;
+    for (let i = 0; i < data.length; i++, offset += 2) {
+        view.setInt16(offset, data[i], true);
+    }
+    
+    return new Blob([arrayBuffer], { type: 'audio/wav' });
+}
+
+// Blob 转 Base64（联机群聊）
+function blobToBase64ForOnlineGroup(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+}
+
+// 发送联机群聊语音消息
+async function sendOnlineGroupVoiceMessage(audioBase64, duration, effect) {
+    if (!currentOnlineGroupId) return;
+    
+    const myWx = getMyOnlineWxAccount();
+    const myChar = onlineCharacters.find(c => c.wx_account === myWx);
+    
+    // 构建语音消息JSON
+    const voiceMsg = JSON.stringify({
+        __type: 'audio',
+        audio: audioBase64,
+        duration: duration,
+        effect: effect
+    });
+    
+    // 发送到服务器
+    onlineSocket.send(JSON.stringify({
+        type: 'send_group_message',
+        group_id: currentOnlineGroupId,
+        my_wx_account: myWx,
+        sender_type: 'user',
+        sender_name: myChar?.nickname || myWx,
+        content: voiceMsg
+    }));
+    
+    console.log('[联机群聊] 语音消息已发送，时长:', duration, '秒，效果:', effect);
+    showToast('语音已发送');
 }
 
 // 联机群聊发送图片
@@ -28793,6 +29156,14 @@ async function letMyCharacterSpeak() {
         console.log('[联机群聊] 修改标题为:', `${myOnlineGroupCharacter.name} 正在输入中...`);
     }
     
+    // 通知群里其他人：我的角色正在输入
+    onlineSocket.send(JSON.stringify({
+        type: 'group_typing_start',
+        group_id: currentOnlineGroupId,
+        my_wx_account: myWx,
+        character_name: myOnlineGroupCharacter.name
+    }));
+    
     showToast('正在生成回复...');
     
     try {
@@ -28937,6 +29308,13 @@ ${myOnlineGroupCharacter.desc || '（无特定人设）'}
             chatTitleEl.innerText = originalTitle;
             console.log('[联机群聊] 恢复标题为:', originalTitle);
         }
+        
+        // 通知群里其他人：输入结束
+        onlineSocket.send(JSON.stringify({
+            type: 'group_typing_stop',
+            group_id: currentOnlineGroupId,
+            my_wx_account: myWx
+        }));
     } catch (e) {
         console.error('[联机群聊] ❌ 角色回复失败:', e);
         console.error('[联机群聊] 错误堆栈:', e.stack);
@@ -28947,6 +29325,13 @@ ${myOnlineGroupCharacter.desc || '（无特定人设）'}
             chatTitleEl.innerText = originalTitle;
             console.log('[联机群聊] （出错）恢复标题为:', originalTitle);
         }
+        
+        // 通知群里其他人：输入结束
+        onlineSocket.send(JSON.stringify({
+            type: 'group_typing_stop',
+            group_id: currentOnlineGroupId,
+            my_wx_account: myWx
+        }));
     }
 }
 
@@ -29146,4 +29531,9 @@ window.showChangeGroupCharacterModal = showChangeGroupCharacterModal;
 window.doChangeGroupCharacter = doChangeGroupCharacter;
 window.inviteFriendToGroup = inviteFriendToGroup;
 window.doInviteFriend = doInviteFriend;
+window.onlineGroupVoiceInput = onlineGroupVoiceInput;
+window.closeOnlineGroupVoiceModal = closeOnlineGroupVoiceModal;
+window.startOnlineGroupVoiceRecord = startOnlineGroupVoiceRecord;
+window.playOnlineGroupAudio = playOnlineGroupAudio;
+window.receiveOnlineGroupTransfer = receiveOnlineGroupTransfer;
 window.doJoinOnlineGroup = doJoinOnlineGroup;
