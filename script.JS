@@ -16962,7 +16962,7 @@ ${loreContext}
         }
         
         // 通用 AI 调用函数
-        async function callAI(messages) {
+        async function callAI(messages, options = {}) {
             const url = await db.dexiData.get('aiBaseUrl');
             const key = await db.dexiData.get('aiApiKey');
             const model = await db.dexiData.get('aiCurrentModel');
@@ -16997,6 +16997,9 @@ ${loreContext}
                 console.warn('[callAI] 温度值无效:', temperature, '，使用默认值 0.7');
                 temperature = 0.7;
             }
+            
+            // 获取 max_tokens 配置（如果提供）
+            const maxTokens = options.max_tokens || options.maxTokens;
 
             const requestUrl = getSmartUrl(url.value, '/chat/completions');
             
@@ -20451,7 +20454,25 @@ async function generateUserBalance() {
     }
 
     const user = await db.characters.get(parseInt(currentMyCharId));
-    if (!user) return;
+    if (!user) {
+        alert("未找到该角色信息");
+        return;
+    }
+    
+    // 调试日志：确认读取到的用户信息（读取完整的角色档案）
+    console.log('[generateUserBalance] 读取到的完整角色档案:', user);
+    
+    // 读取角色描述（使用 description 字段，而不是 desc）
+    const characterDescription = user.description || user.desc || '';
+    
+    // 检查人设描述是否存在
+    if (!characterDescription || characterDescription.trim() === '' || characterDescription === '暂无描述') {
+        console.warn('[generateUserBalance] 警告：角色描述为空或未设置');
+        const confirmContinue = confirm("⚠️ 该角色的人设描述为空或未设置，生成的余额可能不准确。\n\n是否继续生成？\n（建议先完善角色人设描述）");
+        if (!confirmContinue) {
+            return;
+        }
+    }
     
     const btn = document.querySelector('.btn-generate');
     const originalText = btn.innerHTML;
@@ -20459,20 +20480,65 @@ async function generateUserBalance() {
     btn.disabled = true;
 
     try {
-        const systemPrompt = `你是一个辅助生成角色详细设定的AI。当前角色是：${user.name}。
-        角色描述：${user.desc || '暂无描述'}。
-        请根据角色的背景、职业、性格，合理推断TA微信钱包里的"零钱"余额。
+        // 构建完整的人设信息（读取完整的角色档案）
+        const characterInfo = [];
+        characterInfo.push(`角色名称：${user.name || '未命名'}`);
         
-        要求：
-        1. 只返回一个具体的数字金额，保留两位小数。
-        2. 不要返回任何其他文字。
-        3. 金额要符合人设（例如学生可能几百几千，富二代可能几万，普通打工人可能几千）。
-        4. 如果是古代/架空背景，请自动换算成合理的现代货币数值。`;
+        if (user.nick) {
+            characterInfo.push(`角色昵称：${user.nick}`);
+        }
+        
+        // 读取角色描述（优先使用 description，兼容 desc）
+        if (characterDescription && characterDescription.trim() && characterDescription !== '暂无描述') {
+            characterInfo.push(`角色人设描述：${characterDescription.trim()}`);
+        } else {
+            characterInfo.push(`角色人设描述：暂无详细描述`);
+        }
+        
+        if (user.type) {
+            characterInfo.push(`角色类型：${user.type}`);
+        }
+        
+        // 读取完整的身份信息
+        if (user.identity) {
+            if (user.identity.address) {
+                characterInfo.push(`家庭住址：${user.identity.address}`);
+            }
+            if (user.identity.bank_card) {
+                characterInfo.push(`银行卡号：${user.identity.bank_card}`);
+            }
+        }
+        
+        const fullCharacterInfo = characterInfo.join('\n');
+        
+        const systemPrompt = `你是一个辅助生成角色详细设定的AI助手。
 
+以下是当前角色的完整信息：
+${fullCharacterInfo}
+
+请仔细分析上述角色的人设信息（特别是角色描述中的背景、职业、经济状况、社会地位等），然后合理推断该角色微信钱包里的"零钱"余额。
+
+重要提示：
+1. 必须严格根据角色人设来生成余额，不要使用默认值或随机值
+2. 如果角色描述中提到"富二代"、"富裕"、"有钱"、"家境优渥"等关键词，余额应该较高（几万到几十万）
+3. 如果角色描述中提到"学生"、"普通"、"工薪"等关键词，余额应该适中（几百到几千）
+4. 如果角色描述中提到"贫困"、"拮据"等关键词，余额应该较低（几十到几百）
+5. 只返回一个具体的数字金额，保留两位小数，不要包含任何其他文字、符号或说明
+6. 如果是古代/架空背景，请自动换算成合理的现代货币数值
+
+示例：
+- 富二代角色：应返回 50000.00 或更高
+- 普通学生：应返回 1500.00 左右
+- 普通打工人：应返回 3000.00 左右`;
+
+        console.log('[generateUserBalance] 发送给AI的Prompt:', systemPrompt);
+        
         const amountStr = await callAI([
             { role: "system", content: systemPrompt },
-            { role: "user", content: "请生成余额" }
+            { role: "user", content: "请根据上述角色人设信息，生成符合该角色经济状况的微信零钱余额。只返回数字金额，保留两位小数。" }
         ]);
+        
+        console.log('[generateUserBalance] AI返回的原始内容:', amountStr);
 
         // 提取数字
         const match = amountStr.match(/[\d,]+\.\d{2}/) || amountStr.match(/\d+/);
