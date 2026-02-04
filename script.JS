@@ -6809,15 +6809,21 @@ ${loreContext}
 
         // 获取角色的聊天记录（按账号隔离）
         function getChatHistory(char, accountId) {
-            if (!accountId) return char.chat_history || [];
-            if (!char.chat_history_by_user) {
-                // 如果新结构不存在，尝试从旧结构迁移
-                if (char.chat_history && char.chat_history.length > 0) {
-                    if (!char.chat_history_by_user) char.chat_history_by_user = {};
-                    char.chat_history_by_user[accountId] = [...char.chat_history];
+            let history;
+            if (!accountId) {
+                history = char.chat_history || [];
+            } else {
+                if (!char.chat_history_by_user) {
+                    // 如果新结构不存在，尝试从旧结构迁移
+                    if (char.chat_history && char.chat_history.length > 0) {
+                        if (!char.chat_history_by_user) char.chat_history_by_user = {};
+                        char.chat_history_by_user[accountId] = [...char.chat_history];
+                    }
                 }
+                history = char.chat_history_by_user?.[accountId] || [];
             }
-            return char.chat_history_by_user?.[accountId] || [];
+            // 按时间戳排序，确保消息顺序正确
+            return [...history].sort((a, b) => (a.time || 0) - (b.time || 0));
         }
 
         // 设置角色的聊天记录（按账号隔离）
@@ -8046,6 +8052,46 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             
             // 渲染群成员列表
             await renderGroupMemberList(group);
+            
+            // 加载世界书列表（多选）
+            const lorebooks = await db.lorebooks.toArray();
+            const lbList = document.getElementById('group-detail-lorebook-list');
+            lbList.innerHTML = '';
+            
+            // 兼容旧数据：如果lorebookId存在但lorebookIds不存在，转换为数组
+            const selectedIds = group.lorebookIds || (group.lorebookId ? [group.lorebookId] : []);
+            
+            if (lorebooks.length === 0) {
+                lbList.innerHTML = '<div style="padding:8px; color:#999; font-size:12px; text-align:center;">暂无世界书</div>';
+            } else {
+                lorebooks.forEach(lb => {
+                    const label = document.createElement('label');
+                    label.style.cssText = 'display:flex; align-items:center; padding:8px; cursor:pointer; border-radius:6px; margin-bottom:4px;';
+                    label.style.background = selectedIds.includes(lb.id) ? '#f0f0f5' : 'transparent';
+                    
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.value = lb.id;
+                    checkbox.checked = selectedIds.includes(lb.id);
+                    checkbox.style.marginRight = '8px';
+                    checkbox.onchange = () => {
+                        label.style.background = checkbox.checked ? '#f0f0f5' : 'transparent';
+                        updateGroupLorebookCount();
+                        saveGroupDetail();
+                    };
+                    
+                    const name = document.createElement('span');
+                    name.textContent = lb.name;
+                    name.style.fontSize = '14px';
+                    name.style.color = '#333';
+                    
+                    label.appendChild(checkbox);
+                    label.appendChild(name);
+                    lbList.appendChild(label);
+                });
+            }
+            
+            updateGroupLorebookCount();
         }
         
         // 渲染群成员列表预览（详情页）
@@ -8463,6 +8509,26 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             document.getElementById('group-detail-page').style.display = 'none';
         }
         
+        // 切换群聊世界书列表
+        function toggleGroupLorebookList() {
+            const list = document.getElementById('group-detail-lorebook-list');
+            const toggle = document.getElementById('group-detail-lorebook-toggle');
+            if (list.style.display === 'none' || !list.style.display) {
+                list.style.display = 'block';
+                toggle.textContent = '∨';
+            } else {
+                list.style.display = 'none';
+                toggle.textContent = '›';
+            }
+        }
+        
+        // 更新群聊世界书计数
+        function updateGroupLorebookCount() {
+            const checkboxes = document.querySelectorAll('#group-detail-lorebook-list input[type="checkbox"]:checked');
+            const count = checkboxes.length;
+            document.getElementById('group-detail-lorebook-count').textContent = `${count}个`;
+        }
+        
         // 保存群聊详情
         async function saveGroupDetail() {
             if (!window.currentGroupChatId) return;
@@ -8474,6 +8540,11 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             group.myNickname = document.getElementById('group-detail-nickname').value.trim();
             group.is_muted = document.getElementById('group-detail-mute').checked;
             group.is_pinned = document.getElementById('group-detail-pin').checked;
+            
+            // 获取选中的世界书ID数组
+            const checkboxes = document.querySelectorAll('#group-detail-lorebook-list input[type="checkbox"]:checked');
+            const lorebookIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+            group.lorebookIds = lorebookIds.length > 0 ? lorebookIds : null;
             
             // 自动总结设置
             group.auto_summary_enabled = document.getElementById('group-detail-auto-summary-switch').checked;
@@ -8653,7 +8724,10 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             const body = document.getElementById('chat-body');
             body.innerHTML = '';
             
-            const history = group.chat_history || [];
+            let history = group.chat_history || [];
+            // 按时间戳排序，确保消息顺序正确
+            history = [...history].sort((a, b) => (a.time || 0) - (b.time || 0));
+            
             const accountId = getCurrentAccountId();
             const myChar = currentMyCharId ? await db.characters.get(parseInt(currentMyCharId)) : null;
             
@@ -12085,9 +12159,15 @@ ${loreContext}
                     return `- ${char.remark || char.name}${nicknameText}${roleText}: ${char.description || '无特别设定'}`;
                 }).filter(Boolean).join('\n');
                 
-                // 获取世界书上下文（合并所有成员的世界书）
+                // 获取世界书上下文（合并群聊的世界书和所有成员的世界书）
                 let loreContext = "";
                 const allLorebookIds = new Set();
+                
+                // 添加群聊自己的世界书
+                const groupLorebookIds = group.lorebookIds || (group.lorebookId ? [group.lorebookId] : []);
+                groupLorebookIds.forEach(id => allLorebookIds.add(id));
+                
+                // 添加所有成员的世界书
                 for (const memberId of availableMembers) {
                     const char = memberMap[memberId];
                     if (char) {
@@ -12095,6 +12175,7 @@ ${loreContext}
                         ids.forEach(id => allLorebookIds.add(id));
                     }
                 }
+                
                 if (allLorebookIds.size > 0) {
                     const recentText = (group.chat_history || []).slice(-10).map(m => m.content).join(' ');
                     loreContext = await getLorebookContext([...allLorebookIds], recentText);
@@ -12194,6 +12275,14 @@ ${groupContextStr}
 # 可用指令类型
 - **普通发言**: {"type": "text", "name": "角色名", "content": "发言内容"}
 - **修改群昵称**: {"type": "change_nickname", "name": "角色名", "nickname": "新群昵称"} ← 角色可以随时修改自己的群昵称！
+- **发送红包**: {"type": "send_redpacket", "name": "角色名", "redpacketType": "普通红包类型", "totalAmount": 总金额数字, "count": 红包个数, "wish": "祝福语", "targetName": "指定接收者角色名(可选)"} ← 角色可以发送红包活跃气氛！
+  - redpacketType可选值: "lucky"(拼手气红包), "normal"(普通红包), "single"(专属红包-指定某人)
+  - 拼手气红包：每个人领到的金额随机，增加趣味性
+  - 普通红包：每个人领到的金额相同，公平分配
+  - 专属红包：只有指定的targetName角色可以领取，count必须为1
+  - 示例1: {"type": "send_redpacket", "name": "角色A", "redpacketType": "lucky", "totalAmount": 10, "count": 5, "wish": "大家周末快乐！"}
+  - 示例2: {"type": "send_redpacket", "name": "角色B", "redpacketType": "normal", "totalAmount": 20, "count": 10, "wish": "恭喜发财"}
+  - 示例3: {"type": "send_redpacket", "name": "角色C", "redpacketType": "single", "totalAmount": 5.20, "count": 1, "wish": "生日快乐~", "targetName": "角色D"}
 - **领取红包**: {"type": "claim_redpacket", "name": "角色名", "redpacketId": "红包ID"} ← 看到红包时角色可以抢红包！
 - **踢出成员** (仅管理员): {"type": "kick_member", "name": "操作者角色名", "target": "被踢者角色名"}
 - **禁言成员** (仅管理员): {"type": "mute_member", "name": "操作者角色名", "target": "被禁言者角色名", "mute": true}
@@ -12202,6 +12291,7 @@ ${groupContextStr}
 注意：普通发言可以省略 type 字段，直接用 {"name": "角色名", "content": "内容"}
 提示：角色们可以根据聊天内容、心情、玩梗等原因修改自己的群昵称，这是很自然的行为
 提示：如果聊天记录中有未领完的红包，角色们会积极抢红包！
+提示：角色们可以在适当的场合发红包，比如：过节、生日、表达感谢、活跃气氛、玩梗等场景。发红包是群聊互动的重要方式！
 
 # 示例输出格式（注意消息数量要多！）
 [
@@ -12210,13 +12300,16 @@ ${groupContextStr}
   {"type": "change_nickname", "name": "角色A", "nickname": "话痨本痨"},
   {"name": "角色A", "content": "对啊对啊|||我改个群昵称玩"},
   {"name": "角色C", "content": "我也想说这个！|||之前就想吐槽了"},
-  {"name": "角色B", "content": "哈哈哈哈"},
-  {"type": "change_nickname", "name": "角色B", "nickname": "笑到头掉"},
+  {"type": "send_redpacket", "name": "角色A", "redpacketType": "lucky", "totalAmount": 8.88, "count": 3, "wish": "大家开心一下~"},
+  {"name": "角色B", "content": "哇！有红包！"},
+  {"type": "claim_redpacket", "name": "角色B", "redpacketId": "需要等红包发送后才知道ID"},
+  {"name": "角色C", "content": "抢到了吗哈哈"},
+  {"type": "change_nickname", "name": "角色B", "nickname": "手速第一"},
   {"name": "角色A", "content": "笑死"},
-  {"name": "角色C", "content": "你们太好笑了|||不行了"},
-  {"type": "change_nickname", "name": "角色C", "nickname": "肚子疼"},
-  {"name": "角色B", "content": "确实|||绷不住了"}
+  {"name": "角色C", "content": "你们太好笑了|||不行了"}
 ]
+
+注意：发送红包后，红包会立即出现在群聊中，其他角色就可以用 claim_redpacket 指令抢红包了！
 
 现在，请根据以上信息，生成群聊中多个角色的【大量】回复。记住要生成 ${minReplies}-${maxReplies} 条消息！只输出JSON数组，不要有其他内容。`;
 
@@ -12433,16 +12526,110 @@ ${groupContextStr}
                             continue;
                         }
                         
+                        // 处理发送红包指令
+                        if (reply.type === 'send_redpacket' && reply.totalAmount && reply.count && reply.redpacketType) {
+                            if (!senderId) continue;
+                            
+                            const sender = memberMap[senderId];
+                            if (!sender) continue;
+                            
+                            const totalAmount = parseFloat(reply.totalAmount);
+                            const count = parseInt(reply.count);
+                            const wish = reply.wish || '恭喜发财';
+                            const redpacketType = reply.redpacketType;
+                            
+                            // 验证金额和数量
+                            if (totalAmount <= 0 || count <= 0) continue;
+                            if (totalAmount > 200) continue; // 限制最大金额
+                            if (count > 100) continue; // 限制最大个数
+                            
+                            // 检查余额（可选：如果需要检查角色余额）
+                            if (!sender.identity) sender.identity = {};
+                            const balance = parseFloat(sender.identity.balance || 0);
+                            if (balance < totalAmount) {
+                                // 余额不足，跳过发红包，可以添加一条吐槽消息
+                                const senderName = sender.remark || sender.name;
+                                updatedGroup.chat_history.push({
+                                    role: 'char',
+                                    senderId: senderId,
+                                    content: '啊...余额不足，发不了红包了😅',
+                                    time: Date.now() + msgIndex * 50
+                                });
+                                msgIndex++;
+                                continue;
+                            }
+                            
+                            // 生成红包ID
+                            const redpacketId = 'rp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                            
+                            // 构建红包数据
+                            const redpacketData = {
+                                id: redpacketId,
+                                senderId: senderId,
+                                senderName: sender.remark || sender.name,
+                                totalAmount: totalAmount.toFixed(2),
+                                count: count,
+                                wish: wish,
+                                redpacketType: redpacketType,
+                                claimed: [],
+                                claimedAmounts: {},
+                                targetName: reply.targetName || null // 专属红包的目标角色
+                            };
+                            
+                            // 扣除发送者余额
+                            sender.identity.balance = (balance - totalAmount).toFixed(2);
+                            await db.characters.put(sender);
+                            
+                            // 添加红包消息
+                            updatedGroup.chat_history.push({
+                                role: 'char',
+                                senderId: senderId,
+                                type: 'redpacket',
+                                content: JSON.stringify(redpacketData),
+                                time: Date.now() + msgIndex * 50
+                            });
+                            msgIndex++;
+                            
+                            // 记录红包ID供后续领取使用
+                            if (!window._lastRedpacketId) window._lastRedpacketId = {};
+                            window._lastRedpacketId[senderId] = redpacketId;
+                            
+                            continue;
+                        }
+                        
                         // 处理领取红包指令
                         if (reply.type === 'claim_redpacket' && reply.redpacketId) {
                             if (!senderId) continue;
+                            
+                            // 如果redpacketId是"auto"或空，尝试获取最近的红包
+                            let targetRedpacketId = reply.redpacketId;
+                            if (!targetRedpacketId || targetRedpacketId === 'auto' || targetRedpacketId.includes('需要等')) {
+                                // 查找最近未领完的红包
+                                for (let i = updatedGroup.chat_history.length - 1; i >= 0; i--) {
+                                    const m = updatedGroup.chat_history[i];
+                                    if (m.type === 'redpacket') {
+                                        try {
+                                            const data = JSON.parse(m.content);
+                                            const isAllClaimed = (data.claimed?.length || 0) >= data.count;
+                                            const alreadyClaimed = data.claimed?.includes(senderId);
+                                            if (!isAllClaimed && !alreadyClaimed) {
+                                                targetRedpacketId = data.id;
+                                                break;
+                                            }
+                                        } catch(e) {}
+                                    }
+                                }
+                                if (!targetRedpacketId || targetRedpacketId === 'auto' || targetRedpacketId.includes('需要等')) {
+                                    continue; // 没有找到可领取的红包
+                                }
+                            }
                             
                             // 找到红包消息
                             const rpMsgIndex = updatedGroup.chat_history.findIndex(m => {
                                 if (m.type !== 'redpacket') return false;
                                 try {
                                     const data = JSON.parse(m.content);
-                                    return data.id === reply.redpacketId;
+                                    return data.id === targetRedpacketId;
                                 } catch(e) {
                                     return false;
                                 }
@@ -12458,6 +12645,16 @@ ${groupContextStr}
                             
                             // 检查是否已领取过
                             if (rpData.claimed?.includes(senderId)) continue;
+                            
+                            // 检查是否是专属红包
+                            if (rpData.redpacketType === 'single' && rpData.targetName) {
+                                const claimer = memberMap[senderId];
+                                const claimerName = claimer?.remark || claimer?.name || reply.name;
+                                // 只有目标角色可以领取
+                                if (claimerName !== rpData.targetName && claimer?.name !== rpData.targetName) {
+                                    continue; // 不是目标角色，跳过
+                                }
+                            }
                             
                             // 领取红包
                             if (!rpData.claimed) rpData.claimed = [];
@@ -27227,6 +27424,11 @@ async function handleOnlineMessage(data) {
             // 角色更新成功
             showToast('群内角色已更新');
             break;
+            
+        case 'redpacket_claimed':
+            // 红包被领取，更新红包状态
+            handleRedPacketClaimed(data);
+            break;
     }
 }
 
@@ -28503,6 +28705,8 @@ function hideOnlineGroupChat() {
 function handleOnlineGroupMessages(data) {
     if (data.group_id !== currentOnlineGroupId) return;
     currentOnlineGroupMessages = data.messages || [];
+    // 按时间戳排序，确保消息顺序正确
+    currentOnlineGroupMessages.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
     renderOnlineGroupMessages();
 }
 
@@ -28526,6 +28730,8 @@ async function handleOnlineGroupMessage(data) {
     }
     
     currentOnlineGroupMessages.push(data.message);
+    // 按时间戳排序，确保消息顺序正确
+    currentOnlineGroupMessages.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
     renderOnlineGroupMessages();
 }
 
@@ -28572,7 +28778,8 @@ function renderOnlineGroupMessages() {
         const isMe = msg.sender_wx === myWx && !isCharacter;
         const avatar = isCharacter ? (msg.character_avatar || '') : (msg.sender_avatar || '');
         const name = isCharacter ? `${msg.character_name} (${msg.sender_name})` : msg.sender_name;
-        const avatarStyle = avatar ? `background-image:url(${avatar})` : 'background:#ccc';
+        // 确保头像URL不为空字符串才设置背景图
+        const avatarStyle = (avatar && avatar.trim()) ? `background-image:url(${avatar})` : 'background:#ccc';
         
         let messageContent = '';
         let isSpecialMsg = false;
@@ -29700,120 +29907,67 @@ function hideOnlineGroupRedPacketDetail() {
 
 // 领取联机群聊红包（用户或角色都可以）
 async function claimOnlineGroupRedPacket(msgId, claimerWx, characterName) {
-    if (!currentOnlineGroupId) return;
-    
-    // 在消息列表中找到红包消息
-    const msgIndex = currentOnlineGroupMessages.findIndex(m => {
-        if (m.msg_type !== 'redpacket') return false;
-        return (m.id || ('rp_' + m.created_at)) === msgId;
-    });
-    
-    if (msgIndex === -1) {
-        showToast('红包不存在');
+    if (!currentOnlineGroupId || !onlineSocket || onlineSocket.readyState !== WebSocket.OPEN) {
+        showToast('未连接到服务器');
         return;
     }
     
-    const msg = currentOnlineGroupMessages[msgIndex];
-    let data;
-    try {
-        data = JSON.parse(msg.content);
-    } catch(e) {
-        showToast('红包数据错误');
-        return;
-    }
-    
-    // 检查是否已领取完
-    const claimedCount = (data.claimed || []).length;
-    if (claimedCount >= data.count) {
-        showToast('红包已被领完');
-        return;
-    }
-    
-    // 检查是否已领取过
-    if (data.claimed?.includes(claimerWx)) {
-        showToast('你已领取过该红包');
-        return;
-    }
-    
-    // 计算领取金额
-    let claimAmount = 0;
-    const totalAmount = parseFloat(data.totalAmount);
-    const remaining = data.count - claimedCount;
-    const alreadyClaimed = Object.values(data.claimedAmounts || {}).reduce((a, b) => a + parseFloat(b), 0);
-    const remainingAmount = totalAmount - alreadyClaimed;
-    
-    if (data.redpacketType === 'lucky') {
-        // 拼手气红包：随机金额
-        if (remaining === 1) {
-            claimAmount = remainingAmount;
-        } else {
-            // 随机金额，确保每人至少0.01
-            const maxAmount = remainingAmount - (remaining - 1) * 0.01;
-            claimAmount = Math.random() * maxAmount * 0.8 + 0.01; // 保守随机
-            claimAmount = Math.min(claimAmount, maxAmount);
-        }
-    } else {
-        // 普通红包：平均分配
-        claimAmount = totalAmount / data.count;
-    }
-    
-    claimAmount = parseFloat(claimAmount.toFixed(2));
-    
-    // 更新红包数据
-    if (!data.claimed) data.claimed = [];
-    if (!data.claimedAmounts) data.claimedAmounts = {};
-    data.claimed.push(claimerWx);
-    data.claimedAmounts[claimerWx] = claimAmount.toFixed(2);
-    
-    // 发送系统消息通知红包领取
     const myWx = getMyOnlineWxAccount();
-    const claimerName = characterName || (onlineCharacters.find(c => c.wx_account === claimerWx)?.nickname || claimerWx);
+    const claimerName = characterName || (onlineCharacters.find(c => c.wx_account === myWx)?.nickname || myWx);
     
-    // 发送系统消息
+    // 发送领取请求到服务器
     onlineSocket.send(JSON.stringify({
-        type: 'send_group_message',
+        type: 'claim_group_redpacket',
         group_id: currentOnlineGroupId,
         my_wx_account: myWx,
-        sender_type: 'system',
-        sender_name: '系统',
-        content: `${claimerName} 领取了红包，获得 ¥${claimAmount.toFixed(2)}`,
-        msg_type: 'system'
+        message_id: msgId,
+        claimer_name: claimerName
     }));
+}
+
+// 处理红包被领取的通知
+async function handleRedPacketClaimed(data) {
+    const { group_id, message_id, claimer_wx, claim_amount, redpacket_data } = data;
+    
+    if (group_id !== currentOnlineGroupId) return;
     
     // 更新本地消息中的红包数据
-    currentOnlineGroupMessages[msgIndex].content = JSON.stringify(data);
-    renderOnlineGroupMessages();
+    const msgIndex = currentOnlineGroupMessages.findIndex(m => m.id === message_id);
+    if (msgIndex !== -1) {
+        currentOnlineGroupMessages[msgIndex].content = JSON.stringify(redpacket_data);
+        renderOnlineGroupMessages();
+    }
     
-    // 如果是用户领取，更新钱包
-    if (!characterName) {
-        // 用户领取
+    // 如果是自己领取的，更新钱包
+    const myWx = getMyOnlineWxAccount();
+    if (claimer_wx === myWx) {
+        const claimAmountNum = parseFloat(claim_amount);
+        
         if (!currentMyCharId) {
-            showToast('请先设置User身份');
+            showToast(`成功领取 ¥${claim_amount}`);
             return;
         }
+        
         const user = await db.characters.get(parseInt(currentMyCharId));
         if (user) {
             if (!user.identity) user.identity = {};
             let balance = parseFloat(user.identity.balance || 0);
-            balance += claimAmount;
+            balance += claimAmountNum;
             user.identity.balance = balance.toFixed(2);
             await db.characters.put(user);
             
             // 记录账单
             const group = onlineGroups.find(g => g.id === currentOnlineGroupId);
-            await addTransaction('income', claimAmount, '红包', group?.name || '联机群聊');
+            await addTransaction('income', claimAmountNum, '红包', group?.name || '联机群聊');
             
-            showToast(`成功领取 ¥${claimAmount.toFixed(2)}`);
+            showToast(`成功领取 ¥${claim_amount}`);
         }
-    } else {
-        // 角色领取 - 这里可以记录到角色的钱包（如果有的话）
-        showToast(`${characterName} 领取了红包，获得 ¥${claimAmount.toFixed(2)}`);
     }
     
     // 刷新红包详情页面（如果已打开）
     const detailPage = document.getElementById('online-group-redpacket-detail-page');
     if (detailPage && detailPage.style.display !== 'none') {
-        showOnlineGroupRedPacketDetail(msgId);
+        showOnlineGroupRedPacketDetail(message_id);
     }
 }
 
