@@ -11578,12 +11578,8 @@ ${loreContext}
             
             // ✅ 如果是联机好友，发送消息到服务器
             if (char.isOnlineFriend && char.onlineData?.wx_account) {
-                // 获取当前用户的 wx_account（需要找到已上线的角色）
-                const userChars = await db.characters.where('type').equals('user').toArray();
-                // 找到一个已上线的角色作为发送方
-                const onlineUserChar = userChars.find(c => 
-                    c.identity?.account && onlineCharacters.some(oc => oc.wx_account === c.identity.account)
-                );
+                // 获取当前可用的在线角色（如果没有则自动上线）
+                const onlineUserChar = await getOrCreateOnlineUserChar();
                 
                 if (onlineUserChar && onlineConnected) {
                     const fromWxAccount = onlineUserChar.identity.account;
@@ -11596,8 +11592,8 @@ ${loreContext}
                         showToast('消息发送失败，请检查服务器连接');
                     }
                 } else {
-                    console.warn('[Online] 无法发送联机消息：未找到已上线的角色或未连接服务器');
-                    showToast('请先上线角色并连接服务器');
+                    console.warn('[Online] 无法发送联机消息：未找到有微信号的角色或未连接服务器');
+                    showToast('请确保 User 角色设置了微信号并连接服务器');
                 }
             }
             
@@ -14241,10 +14237,8 @@ ${groupContextStr}
             
             // 通过服务器发送给对方
             if (char.onlineData?.wx_account && onlineConnected) {
-                const userChars = await db.characters.where('type').equals('user').toArray();
-                const onlineUserChar = userChars.find(c => 
-                    c.identity?.account && onlineCharacters.some(oc => oc.wx_account === c.identity.account)
-                );
+                // 获取当前可用的在线角色（如果没有则自动上线）
+                const onlineUserChar = await getOrCreateOnlineUserChar();
                 
                 if (onlineUserChar) {
                     const voiceMsg = JSON.stringify({
@@ -21145,11 +21139,8 @@ async function doTransfer() {
     
     // ✅ 联机好友：通过服务器发送转账消息
     if (chatChar.isOnlineFriend && chatChar.onlineData?.wx_account) {
-        // 获取当前用户的 wx_account
-        const userChars = await db.characters.where('type').equals('user').toArray();
-        const onlineUserChar = userChars.find(c => 
-            c.identity?.account && onlineCharacters.some(oc => oc.wx_account === c.identity.account)
-        );
+        // 获取当前可用的在线角色（如果没有则自动上线）
+        const onlineUserChar = await getOrCreateOnlineUserChar();
         
         if (onlineUserChar && onlineConnected) {
             const fromWxAccount = onlineUserChar.identity.account;
@@ -26531,7 +26522,26 @@ function connectToOnlineServer() {
             onlineSocket.onclose = () => {
                 console.log('[Online] WebSocket disconnected');
                 onlineConnected = false;
+                onlineCharacters = []; // 清空在线角色列表
                 updateOnlineStatus();
+                
+                // ✅ 自动重连（如果有保存的 token）
+                const savedToken = localStorage.getItem('online_token');
+                if (savedToken) {
+                    console.log('[Online] 5秒后尝试自动重连...');
+                    setTimeout(async () => {
+                        try {
+                            const serverUrl = document.getElementById('online-server-url')?.value?.trim();
+                            if (serverUrl) {
+                                console.log('[Online] 正在重连...');
+                                await connectToOnlineServer();
+                                showToast('已重新连接服务器');
+                            }
+                        } catch (e) {
+                            console.error('[Online] 自动重连失败:', e);
+                        }
+                    }, 5000);
+                }
             };
             
             onlineSocket.onerror = (error) => {
@@ -27135,11 +27145,8 @@ async function autoGoOnlineAllUserCharacters() {
                 continue;
             }
             
-            // 检查是否已经上线
-            if (isCharacterOnline(wxAccount)) {
-                console.log(`[Online] 角色 ${char.name} 已上线，跳过`);
-                continue;
-            }
+            // 不再检查 isCharacterOnline，直接尝试上线（服务器会处理重复上线）
+            // 因为 onlineCharacters 可能还没更新
             
             // 上线角色
             console.log(`[Online] 自动上线角色: ${char.name} (${wxAccount})`);
@@ -27155,11 +27162,53 @@ async function autoGoOnlineAllUserCharacters() {
         }
         
         if (onlineCount > 0) {
-            console.log(`[Online] 已自动上线 ${onlineCount} 个角色`);
+            console.log(`[Online] 已发送 ${onlineCount} 个角色的上线请求`);
+            // ✅ 延迟后请求在线角色列表，确保服务器已处理上线请求
+            setTimeout(() => {
+                if (onlineConnected) {
+                    requestOnlineCharacters();
+                }
+            }, 500);
+        } else {
+            console.log('[Online] 没有可上线的角色（请确保 User 角色设置了微信号）');
         }
     } catch (e) {
         console.error('[Online] 自动上线角色失败:', e);
     }
+}
+
+// ✅ 获取当前可用的在线角色（如果没有则自动上线一个）
+async function getOrCreateOnlineUserChar() {
+    if (!onlineConnected || !onlineUserData) {
+        return null;
+    }
+    
+    const userChars = await db.characters.where('type').equals('user').toArray();
+    
+    // 1. 先找已上线的角色
+    let onlineUserChar = userChars.find(c => 
+        c.identity?.account && onlineCharacters.some(oc => oc.wx_account === c.identity.account)
+    );
+    
+    // 2. 如果没有，找一个有微信号的角色并自动上线
+    if (!onlineUserChar) {
+        const charWithAccount = userChars.find(c => c.identity?.account);
+        if (charWithAccount) {
+            console.log('[Online] 自动上线角色:', charWithAccount.name);
+            const wxAccount = charWithAccount.identity.account;
+            onlineSocket.send(JSON.stringify({
+                type: 'go_online',
+                wx_account: wxAccount,
+                nickname: charWithAccount.remark || charWithAccount.name,
+                avatar: charWithAccount.avatar || '',
+                bio: charWithAccount.description?.substring(0, 100) || '',
+                local_char_id: charWithAccount.id
+            }));
+            onlineUserChar = charWithAccount;
+        }
+    }
+    
+    return onlineUserChar;
 }
 
 // 发送联机消息
