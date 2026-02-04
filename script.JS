@@ -26368,6 +26368,11 @@ let onlineConnected = false;
 let onlineUserData = null;
 let onlineToken = null;
 let onlineCharacters = []; // 已上线的角色列表
+let onlineGroups = []; // 联机群聊列表
+let currentOnlineGroupId = null; // 当前打开的联机群聊ID
+let currentOnlineGroupMessages = []; // 当前群聊消息
+let currentOnlineGroupMembers = []; // 当前群聊成员
+let myOnlineGroupCharacter = null; // 我在当前群聊中的角色
 
 // 切换联机设置面板
 function toggleOnlineSettings() {
@@ -26638,6 +26643,62 @@ function handleOnlineMessage(data) {
             requestOnlineCharacters();
             // 刷新联机状态页面（如果打开的话）
             refreshOnlineStatusPageContent();
+            break;
+        
+        // ==================== 联机群聊消息 ====================
+        case 'online_group_created':
+            // 群聊创建成功
+            showToast(`群聊"${data.group.name}"创建成功`);
+            onlineGroups.push(data.group);
+            refreshOnlineGroupList();
+            break;
+            
+        case 'group_invite':
+            // 收到群聊邀请
+            handleOnlineGroupInvite(data);
+            break;
+            
+        case 'online_group_joined':
+            // 加入群聊成功
+            showToast(`已加入群聊"${data.group.name}"`);
+            if (!onlineGroups.find(g => g.id === data.group.id)) {
+                onlineGroups.push(data.group);
+            }
+            refreshOnlineGroupList();
+            break;
+            
+        case 'group_member_joined':
+            // 有新成员加入群聊
+            if (currentOnlineGroupId === data.group_id) {
+                showToast(`${data.member.user_name} 加入了群聊`);
+                refreshOnlineGroupMembers();
+            }
+            break;
+            
+        case 'online_groups_list':
+            // 收到群聊列表
+            onlineGroups = data.groups || [];
+            refreshOnlineGroupList();
+            break;
+            
+        case 'group_messages':
+            // 收到群聊消息记录
+            handleOnlineGroupMessages(data);
+            break;
+            
+        case 'group_message':
+            // 收到实时群消息
+            handleOnlineGroupMessage(data);
+            break;
+            
+        case 'group_members':
+            // 收到群成员列表
+            handleOnlineGroupMembers(data);
+            break;
+            
+        case 'group_character_updated':
+            // 角色更新成功
+            showToast('群内角色已更新');
             break;
     }
 }
@@ -26940,6 +27001,18 @@ async function handleOnlineIncomingMessage(data) {
         return;
     }
     
+    // ✅ 确保联机好友在当前账号下的好友状态是 'friend'
+    // 这样切换账号后消息也能正常显示
+    const currentFriendStatus = getFriendStatus(targetChar, accountId);
+    if (currentFriendStatus !== 'friend') {
+        console.log('[Online] 为当前账号设置联机好友状态为 friend');
+        if (!targetChar.wechat_status_by_user) targetChar.wechat_status_by_user = {};
+        targetChar.wechat_status_by_user[accountId] = 'friend';
+        // 更新后重新获取，确保后续逻辑使用最新数据
+        await db.characters.put(targetChar);
+        targetChar = await db.characters.get(targetChar.id);
+    }
+    
     // 检查是否是特殊消息类型（如转账）
     let msgObj = {
         role: 'char',
@@ -27153,6 +27226,21 @@ async function showOnlineStatusPage() {
     
     // 更新角色列表
     await renderOnlineCharList();
+    
+    // 获取联机群聊列表
+    const myWx = getMyOnlineWxAccount();
+    if (myWx && onlineSocket && onlineSocket.readyState === WebSocket.OPEN) {
+        onlineSocket.send(JSON.stringify({
+            type: 'get_online_groups',
+            my_wx_account: myWx
+        }));
+    }
+    
+    // 初始渲染群聊列表
+    const groupContainer = document.getElementById('online-group-list');
+    if (groupContainer) {
+        renderOnlineGroupList(groupContainer);
+    }
 }
 
 // 隐藏联机状态页面
@@ -27239,6 +27327,679 @@ async function refreshOnlineStatusPageContent() {
     await renderOnlineCharList();
 }
 
+// ==================== 联机群聊功能 ====================
+
+// 刷新联机群聊列表
+function refreshOnlineGroupList() {
+    // 如果群聊页面打开了，刷新显示
+    const container = document.getElementById('online-group-list');
+    if (container) {
+        renderOnlineGroupList(container);
+    }
+}
+
+// 渲染联机群聊列表
+function renderOnlineGroupList(container) {
+    if (onlineGroups.length === 0) {
+        container.innerHTML = `<div style="text-align:center; padding:40px; color:#999;">暂无联机群聊</div>`;
+        return;
+    }
+    
+    container.innerHTML = onlineGroups.map(g => `
+        <div onclick="openOnlineGroup('${g.id}')" style="padding:14px 16px; background:#fff; display:flex; align-items:center; gap:12px; border-bottom:1px solid #f0f0f0; cursor:pointer;">
+            <div style="width:48px; height:48px; border-radius:8px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); display:flex; align-items:center; justify-content:center; color:#fff; font-size:18px;">👥</div>
+            <div style="flex:1;">
+                <div style="font-size:15px; font-weight:500; color:#333;">${g.name}</div>
+                <div style="font-size:12px; color:#999; margin-top:2px;">联机群聊</div>
+            </div>
+            <svg viewBox="0 0 24 24" style="width:20px; height:20px; stroke:#ccc; fill:none;"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </div>
+    `).join('');
+}
+
+// 处理群聊邀请
+function handleOnlineGroupInvite(data) {
+    const accept = confirm(`${data.inviter_name} 邀请你加入群聊"${data.group_name}"，是否接受？`);
+    if (accept) {
+        showJoinOnlineGroupModal(data.group_id, data.group_name);
+    }
+}
+
+// 显示加入群聊弹窗（选择要带入的角色）
+async function showJoinOnlineGroupModal(groupId, groupName) {
+    // 获取所有可用的角色（非User类型）
+    const chars = await db.characters.toArray();
+    const availableChars = chars.filter(c => c.type !== 'user' && c.type !== 'online_friend');
+    
+    const modal = document.createElement('div');
+    modal.id = 'join-group-modal';
+    modal.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;`;
+    
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:16px; padding:24px; width:85%; max-width:360px;">
+            <h3 style="margin:0 0 16px 0; text-align:center; font-size:18px;">加入「${groupName}」</h3>
+            
+            <div style="margin-bottom:16px;">
+                <div style="font-size:13px; color:#666; margin-bottom:8px;">选择要带入群聊的角色（可选）：</div>
+                <select id="join-group-char-select" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px;">
+                    <option value="">不带角色</option>
+                    ${availableChars.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+                </select>
+            </div>
+            
+            <div style="font-size:12px; color:#999; margin-bottom:20px; line-height:1.5;">
+                带入角色后，你可以在群聊中让该角色发言（调用AI）
+            </div>
+            
+            <div style="display:flex; gap:12px;">
+                <button onclick="this.closest('#join-group-modal').remove()" style="flex:1; padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:15px;">取消</button>
+                <button onclick="doJoinOnlineGroup('${groupId}')" style="flex:1; padding:12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:15px;">加入</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 执行加入群聊
+async function doJoinOnlineGroup(groupId) {
+    const charSelect = document.getElementById('join-group-char-select');
+    const charId = charSelect?.value;
+    
+    let myChar = null;
+    if (charId) {
+        const char = await db.characters.get(parseInt(charId));
+        if (char) {
+            myChar = {
+                name: char.name,
+                avatar: char.avatar || '',
+                desc: char.description?.substring(0, 200) || ''
+            };
+        }
+    }
+    
+    // 获取我的上线微信号
+    const myWx = getMyOnlineWxAccount();
+    if (!myWx) {
+        alert('请先上线一个角色');
+        return;
+    }
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'join_online_group',
+        group_id: groupId,
+        my_wx_account: myWx,
+        my_character: myChar
+    }));
+    
+    document.getElementById('join-group-modal')?.remove();
+}
+
+// 获取我当前上线的微信号
+function getMyOnlineWxAccount() {
+    if (!onlineCharacters || onlineCharacters.length === 0) return null;
+    return onlineCharacters[0]?.wx_account;
+}
+
+// 显示创建联机群聊弹窗
+async function showCreateOnlineGroupModal() {
+    if (!onlineConnected || !onlineUserData) {
+        alert('请先连接服务器并登录');
+        return;
+    }
+    
+    // 获取联机好友列表
+    const friends = await db.characters.where('type').equals('online_friend').toArray();
+    
+    // 获取可选的角色（非User类型）
+    const chars = await db.characters.toArray();
+    const availableChars = chars.filter(c => c.type !== 'user' && c.type !== 'online_friend');
+    
+    const modal = document.createElement('div');
+    modal.id = 'create-online-group-modal';
+    modal.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;`;
+    
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:16px; width:90%; max-width:400px; max-height:80vh; display:flex; flex-direction:column;">
+            <div style="padding:16px 20px; border-bottom:1px solid #f0f0f0; display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:17px; font-weight:600;">创建联机群聊</span>
+                <button onclick="this.closest('#create-online-group-modal').remove()" style="background:none; border:none; font-size:20px; color:#999; cursor:pointer;">×</button>
+            </div>
+            
+            <div style="flex:1; overflow-y:auto; padding:20px;">
+                <div style="margin-bottom:16px;">
+                    <label style="font-size:13px; color:#666; display:block; margin-bottom:6px;">群名称</label>
+                    <input type="text" id="og-name" placeholder="输入群聊名称" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px; box-sizing:border-box;">
+                </div>
+                
+                <div style="margin-bottom:16px;">
+                    <label style="font-size:13px; color:#666; display:block; margin-bottom:6px;">选择我要带入的角色（可选）</label>
+                    <select id="og-my-char" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px;">
+                        <option value="">不带角色</option>
+                        ${availableChars.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+                    </select>
+                </div>
+                
+                <div style="margin-bottom:16px;">
+                    <label style="font-size:13px; color:#666; display:block; margin-bottom:6px;">邀请联机好友（可多选）</label>
+                    <div id="og-friends-list" style="max-height:200px; overflow-y:auto; border:1px solid #ddd; border-radius:8px;">
+                        ${friends.length === 0 ? 
+                            `<div style="padding:20px; text-align:center; color:#999;">暂无联机好友</div>` :
+                            friends.map(f => `
+                                <label style="display:flex; align-items:center; padding:10px 12px; border-bottom:1px solid #f5f5f5; cursor:pointer;">
+                                    <input type="checkbox" value="${f.onlineData?.wx_account || ''}" style="margin-right:10px;">
+                                    <div style="width:36px; height:36px; border-radius:6px; background-image:url(${f.avatar}); background-size:cover; background-color:#e0e0e0; margin-right:10px;"></div>
+                                    <span style="font-size:14px;">${f.name}</span>
+                                </label>
+                            `).join('')
+                        }
+                    </div>
+                </div>
+            </div>
+            
+            <div style="padding:16px 20px; border-top:1px solid #f0f0f0;">
+                <button onclick="doCreateOnlineGroup()" style="width:100%; padding:14px; background:var(--ins-pink); color:#fff; border:none; border-radius:10px; font-size:16px; font-weight:500;">创建群聊</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 执行创建联机群聊
+async function doCreateOnlineGroup() {
+    const name = document.getElementById('og-name').value.trim();
+    if (!name) {
+        alert('请输入群名称');
+        return;
+    }
+    
+    const myWx = getMyOnlineWxAccount();
+    if (!myWx) {
+        alert('请先上线一个角色');
+        return;
+    }
+    
+    // 获取选择的角色
+    let myChar = null;
+    const charId = document.getElementById('og-my-char').value;
+    if (charId) {
+        const char = await db.characters.get(parseInt(charId));
+        if (char) {
+            myChar = {
+                name: char.name,
+                avatar: char.avatar || '',
+                desc: char.description?.substring(0, 200) || ''
+            };
+        }
+    }
+    
+    // 获取邀请的好友
+    const checkboxes = document.querySelectorAll('#og-friends-list input[type="checkbox"]:checked');
+    const inviteWxs = Array.from(checkboxes).map(cb => cb.value).filter(v => v);
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'create_online_group',
+        name: name,
+        my_wx_account: myWx,
+        invite_wx_accounts: inviteWxs,
+        my_character: myChar
+    }));
+    
+    document.getElementById('create-online-group-modal')?.remove();
+}
+
+// 打开联机群聊
+function openOnlineGroup(groupId) {
+    currentOnlineGroupId = groupId;
+    currentOnlineGroupMessages = [];
+    currentOnlineGroupMembers = [];
+    
+    const group = onlineGroups.find(g => g.id === groupId);
+    if (!group) return;
+    
+    // 显示群聊页面
+    showOnlineGroupChatPage(group);
+    
+    // 请求群成员
+    const myWx = getMyOnlineWxAccount();
+    if (myWx) {
+        onlineSocket.send(JSON.stringify({
+            type: 'get_group_members',
+            group_id: groupId,
+            my_wx_account: myWx
+        }));
+        
+        // 请求消息记录
+        onlineSocket.send(JSON.stringify({
+            type: 'get_group_messages',
+            group_id: groupId,
+            my_wx_account: myWx,
+            limit: 100
+        }));
+    }
+}
+
+// 显示联机群聊页面
+function showOnlineGroupChatPage(group) {
+    // 创建或显示群聊页面
+    let page = document.getElementById('online-group-chat-page');
+    if (!page) {
+        page = document.createElement('div');
+        page.id = 'online-group-chat-page';
+        page.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:#f5f5f5; z-index:300; display:flex; flex-direction:column;`;
+        document.body.appendChild(page);
+    }
+    
+    page.innerHTML = `
+        <div class="wechat-header" style="background:#fff; border-bottom:1px solid #f0f0f0;">
+            <div class="back-btn" onclick="hideOnlineGroupChat()" style="margin:0; background:none; width:40px; justify-content:flex-start; color:#333;">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:24px; height:24px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="wechat-title" style="flex:1; text-align:center;">${group.name}</div>
+            <div onclick="showOnlineGroupInfo('${group.id}')" style="width:40px; display:flex; justify-content:flex-end; cursor:pointer;">
+                <svg viewBox="0 0 24 24" style="width:20px; height:20px; stroke:#333; fill:none;"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg>
+            </div>
+        </div>
+        
+        <div id="online-group-messages" style="flex:1; overflow-y:auto; padding:16px;">
+            <div style="text-align:center; padding:20px; color:#999;">加载中...</div>
+        </div>
+        
+        <div style="background:#fff; border-top:1px solid #f0f0f0; padding:10px 12px; display:flex; align-items:center; gap:10px;">
+            <input type="text" id="online-group-input" placeholder="发送消息..." style="flex:1; padding:10px 14px; border:1px solid #e0e0e0; border-radius:20px; font-size:14px; outline:none;">
+            <button onclick="sendOnlineGroupMsg()" style="padding:10px 16px; background:var(--ins-pink); color:#fff; border:none; border-radius:20px; font-size:14px;">发送</button>
+            <button onclick="letMyCharacterSpeak()" style="padding:10px 12px; background:#f0f0f0; color:#666; border:none; border-radius:20px; font-size:13px;" title="让角色说话">🎭</button>
+        </div>
+    `;
+    
+    page.style.display = 'flex';
+    
+    // 绑定回车发送
+    document.getElementById('online-group-input').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') sendOnlineGroupMsg();
+    });
+}
+
+// 隐藏联机群聊页面
+function hideOnlineGroupChat() {
+    const page = document.getElementById('online-group-chat-page');
+    if (page) page.style.display = 'none';
+    currentOnlineGroupId = null;
+}
+
+// 处理群聊消息记录
+function handleOnlineGroupMessages(data) {
+    if (data.group_id !== currentOnlineGroupId) return;
+    currentOnlineGroupMessages = data.messages || [];
+    renderOnlineGroupMessages();
+}
+
+// 处理实时群消息
+function handleOnlineGroupMessage(data) {
+    if (data.group_id !== currentOnlineGroupId) {
+        // 不是当前群，显示通知
+        showToast(`[${data.message.sender_name}] ${data.message.content.substring(0, 20)}...`);
+        return;
+    }
+    
+    currentOnlineGroupMessages.push(data.message);
+    renderOnlineGroupMessages();
+}
+
+// 渲染群聊消息
+function renderOnlineGroupMessages() {
+    const container = document.getElementById('online-group-messages');
+    if (!container) return;
+    
+    const myWx = getMyOnlineWxAccount();
+    
+    container.innerHTML = currentOnlineGroupMessages.map(msg => {
+        const isMe = msg.sender_wx === myWx;
+        const isCharacter = msg.sender_type === 'character';
+        const avatar = isCharacter ? (msg.character_avatar || '') : (msg.sender_avatar || '');
+        const name = isCharacter ? `${msg.character_name} (${msg.sender_name})` : msg.sender_name;
+        const avatarStyle = avatar ? `background-image:url(${avatar})` : 'background:#e0e0e0';
+        
+        return `
+            <div style="display:flex; ${isMe ? 'flex-direction:row-reverse' : ''}; margin-bottom:16px; gap:10px;">
+                <div style="width:40px; height:40px; border-radius:8px; ${avatarStyle}; background-size:cover; flex-shrink:0;"></div>
+                <div style="max-width:70%; ${isMe ? 'text-align:right' : ''}">
+                    <div style="font-size:12px; color:#999; margin-bottom:4px;">${name}${isCharacter ? ' 🎭' : ''}</div>
+                    <div style="display:inline-block; padding:10px 14px; border-radius:12px; font-size:14px; line-height:1.5; word-break:break-word;
+                        ${isMe ? 'background:var(--ins-pink-light);' : 'background:#fff;'}
+                        ${isCharacter ? 'border:2px solid #667eea;' : ''}">${msg.content}</div>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    container.scrollTop = container.scrollHeight;
+}
+
+// 处理群成员列表
+function handleOnlineGroupMembers(data) {
+    if (data.group_id !== currentOnlineGroupId) return;
+    currentOnlineGroupMembers = data.members || [];
+    
+    // 找到我的角色
+    const myWx = getMyOnlineWxAccount();
+    const myMember = currentOnlineGroupMembers.find(m => m.user_wx === myWx);
+    if (myMember && myMember.character_name) {
+        myOnlineGroupCharacter = {
+            name: myMember.character_name,
+            avatar: myMember.character_avatar,
+            desc: myMember.character_desc
+        };
+    } else {
+        myOnlineGroupCharacter = null;
+    }
+}
+
+// 刷新群成员列表
+function refreshOnlineGroupMembers() {
+    const myWx = getMyOnlineWxAccount();
+    if (myWx && currentOnlineGroupId) {
+        onlineSocket.send(JSON.stringify({
+            type: 'get_group_members',
+            group_id: currentOnlineGroupId,
+            my_wx_account: myWx
+        }));
+    }
+}
+
+// 发送群消息
+function sendOnlineGroupMsg() {
+    const input = document.getElementById('online-group-input');
+    const content = input.value.trim();
+    if (!content || !currentOnlineGroupId) return;
+    
+    const myWx = getMyOnlineWxAccount();
+    const myChar = onlineCharacters.find(c => c.wx_account === myWx);
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'send_group_message',
+        group_id: currentOnlineGroupId,
+        my_wx_account: myWx,
+        sender_type: 'user',
+        sender_name: myChar?.nickname || myWx,
+        content: content
+    }));
+    
+    input.value = '';
+}
+
+// 让我的角色说话（调用API）
+async function letMyCharacterSpeak() {
+    if (!myOnlineGroupCharacter) {
+        alert('你没有在这个群聊中设置角色。请在群聊设置中选择要带入的角色。');
+        return;
+    }
+    
+    if (currentOnlineGroupMessages.length === 0) {
+        alert('群聊中还没有消息，角色无法回复');
+        return;
+    }
+    
+    showToast('正在生成回复...');
+    
+    try {
+        const myWx = getMyOnlineWxAccount();
+        const myUserName = onlineCharacters.find(c => c.wx_account === myWx)?.nickname || myWx;
+        
+        // 构建群成员信息（只有名字，没有人设）
+        let membersInfo = '群聊成员：\n';
+        currentOnlineGroupMembers.forEach(m => {
+            if (m.character_name) {
+                membersInfo += `- ${m.user_name}（带着角色"${m.character_name}"）\n`;
+            } else {
+                membersInfo += `- ${m.user_name}\n`;
+            }
+        });
+        
+        // 构建上下文
+        const context = currentOnlineGroupMessages.map(msg => {
+            const isChar = msg.sender_type === 'character';
+            if (isChar) {
+                // 角色消息：显示角色名和主人名
+                return `[${msg.character_name}（${msg.sender_name}的角色）]: ${msg.content}`;
+            } else {
+                // 真人消息
+                return `[${msg.sender_name}]: ${msg.content}`;
+            }
+        }).join('\n');
+        
+        // 构建提示词
+        const systemPrompt = `你是"${myOnlineGroupCharacter.name}"，是"${myUserName}"带入群聊的AI角色。
+
+【你的人设】
+${myOnlineGroupCharacter.desc || '（无特定人设）'}
+
+【${membersInfo}】
+
+【重要规则】
+1. 你只知道其他成员和角色的名字，不知道他们角色的具体人设
+2. 请根据群聊上下文，以"${myOnlineGroupCharacter.name}"的身份自然地参与对话
+3. 只回复你要说的内容，不要加任何前缀如"${myOnlineGroupCharacter.name}:"
+4. 回复要符合你的人设性格`;
+        
+        // 调用API
+        const response = await callAIForGroupChat(systemPrompt, context);
+        
+        if (response) {
+            // 发送角色消息
+            onlineSocket.send(JSON.stringify({
+                type: 'send_group_message',
+                group_id: currentOnlineGroupId,
+                my_wx_account: myWx,
+                sender_type: 'character',
+                sender_name: myUserName,
+                character_name: myOnlineGroupCharacter.name,
+                content: response
+            }));
+        }
+    } catch (e) {
+        console.error('角色回复失败:', e);
+        alert('角色回复失败: ' + e.message);
+    }
+}
+
+// 为群聊调用AI
+async function callAIForGroupChat(systemPrompt, context) {
+    // 从设置获取API配置
+    const apiUrl = document.getElementById('api-url')?.value || localStorage.getItem('api_url') || '';
+    const apiKey = document.getElementById('api-key')?.value || localStorage.getItem('api_key') || '';
+    const modelName = document.getElementById('model-name')?.value || localStorage.getItem('model_name') || 'gpt-3.5-turbo';
+    
+    if (!apiUrl || !apiKey) {
+        throw new Error('请先在设置中配置API');
+    }
+    
+    const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+            model: modelName,
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: `群聊记录：\n${context}\n\n请以角色身份回复：` }
+            ],
+            max_tokens: 500
+        })
+    });
+    
+    if (!response.ok) {
+        throw new Error('API请求失败');
+    }
+    
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content?.trim() || '';
+}
+
+// 显示群聊信息页面
+function showOnlineGroupInfo(groupId) {
+    const group = onlineGroups.find(g => g.id === groupId);
+    if (!group) return;
+    
+    const myWx = getMyOnlineWxAccount();
+    
+    const page = document.createElement('div');
+    page.id = 'online-group-info-page';
+    page.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:#f5f5f5; z-index:310; display:flex; flex-direction:column;`;
+    
+    page.innerHTML = `
+        <div class="wechat-header" style="background:#fff; border-bottom:1px solid #f0f0f0;">
+            <div class="back-btn" onclick="document.getElementById('online-group-info-page').remove()" style="margin:0; background:none; width:40px; justify-content:flex-start; color:#333;">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:24px; height:24px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="wechat-title">群聊资料</div>
+            <div style="width:40px;"></div>
+        </div>
+        
+        <div style="flex:1; overflow-y:auto;">
+            <div style="background:#fff; padding:20px; margin-bottom:10px; text-align:center;">
+                <div style="width:60px; height:60px; border-radius:12px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); margin:0 auto 12px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:24px;">👥</div>
+                <div style="font-size:18px; font-weight:600;">${group.name}</div>
+            </div>
+            
+            <div style="background:#fff; padding:16px; margin-bottom:10px;">
+                <div style="font-size:14px; font-weight:500; margin-bottom:12px;">群成员 (${currentOnlineGroupMembers.length})</div>
+                <div id="og-info-members" style="display:flex; flex-wrap:wrap; gap:12px;">
+                    ${currentOnlineGroupMembers.map(m => `
+                        <div style="text-align:center; width:60px;">
+                            <div style="width:48px; height:48px; border-radius:8px; margin:0 auto 4px; background-image:url(${m.user_avatar}); background-size:cover; background-color:#e0e0e0;"></div>
+                            <div style="font-size:12px; color:#333; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${m.user_name}</div>
+                            ${m.character_name ? `<div style="font-size:10px; color:#667eea;">🎭${m.character_name}</div>` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            
+            <div style="background:#fff; padding:16px; margin-bottom:10px;">
+                <div style="font-size:14px; font-weight:500; margin-bottom:12px;">我的群角色</div>
+                <div style="display:flex; align-items:center; justify-content:space-between;">
+                    <span style="color:#666;">${myOnlineGroupCharacter ? myOnlineGroupCharacter.name : '未设置角色'}</span>
+                    <button onclick="showChangeGroupCharacterModal('${groupId}')" style="padding:8px 16px; background:var(--ins-pink); color:#fff; border:none; border-radius:6px; font-size:13px;">
+                        ${myOnlineGroupCharacter ? '更换' : '设置'}角色
+                    </button>
+                </div>
+            </div>
+            
+            <div style="background:#fff; padding:16px;">
+                <button onclick="inviteFriendToGroup('${groupId}')" style="width:100%; padding:14px; background:#f5f5f5; color:#333; border:none; border-radius:8px; font-size:15px; margin-bottom:10px;">邀请好友</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(page);
+}
+
+// 显示更换角色弹窗
+async function showChangeGroupCharacterModal(groupId) {
+    const chars = await db.characters.toArray();
+    const availableChars = chars.filter(c => c.type !== 'user' && c.type !== 'online_friend');
+    
+    const modal = document.createElement('div');
+    modal.id = 'change-char-modal';
+    modal.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;`;
+    
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:12px; padding:20px; width:80%; max-width:300px;">
+            <h3 style="margin:0 0 16px 0; text-align:center;">选择角色</h3>
+            <select id="change-char-select" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; margin-bottom:16px;">
+                <option value="">不使用角色</option>
+                ${availableChars.map(c => `<option value="${c.id}" ${myOnlineGroupCharacter?.name === c.name ? 'selected' : ''}>${c.name}</option>`).join('')}
+            </select>
+            <div style="display:flex; gap:10px;">
+                <button onclick="this.closest('#change-char-modal').remove()" style="flex:1; padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px;">取消</button>
+                <button onclick="doChangeGroupCharacter('${groupId}')" style="flex:1; padding:12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px;">确定</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 执行更换角色
+async function doChangeGroupCharacter(groupId) {
+    const charId = document.getElementById('change-char-select').value;
+    
+    let myChar = null;
+    if (charId) {
+        const char = await db.characters.get(parseInt(charId));
+        if (char) {
+            myChar = {
+                name: char.name,
+                avatar: char.avatar || '',
+                desc: char.description?.substring(0, 200) || ''
+            };
+        }
+    }
+    
+    const myWx = getMyOnlineWxAccount();
+    onlineSocket.send(JSON.stringify({
+        type: 'update_group_character',
+        group_id: groupId,
+        my_wx_account: myWx,
+        character: myChar
+    }));
+    
+    myOnlineGroupCharacter = myChar;
+    document.getElementById('change-char-modal')?.remove();
+    document.getElementById('online-group-info-page')?.remove();
+    showOnlineGroupInfo(groupId);
+}
+
+// 邀请好友到群聊
+async function inviteFriendToGroup(groupId) {
+    const friends = await db.characters.where('type').equals('online_friend').toArray();
+    
+    if (friends.length === 0) {
+        alert('暂无联机好友可邀请');
+        return;
+    }
+    
+    const modal = document.createElement('div');
+    modal.id = 'invite-friend-modal';
+    modal.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;`;
+    
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:12px; padding:20px; width:80%; max-width:300px; max-height:60vh; display:flex; flex-direction:column;">
+            <h3 style="margin:0 0 16px 0; text-align:center;">邀请好友</h3>
+            <div style="flex:1; overflow-y:auto;">
+                ${friends.map(f => `
+                    <div onclick="doInviteFriend('${groupId}', '${f.onlineData?.wx_account}')" style="display:flex; align-items:center; padding:12px; border-bottom:1px solid #f5f5f5; cursor:pointer;">
+                        <div style="width:40px; height:40px; border-radius:8px; background-image:url(${f.avatar}); background-size:cover; background-color:#e0e0e0; margin-right:12px;"></div>
+                        <span>${f.name}</span>
+                    </div>
+                `).join('')}
+            </div>
+            <button onclick="this.closest('#invite-friend-modal').remove()" style="margin-top:12px; padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px;">取消</button>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 执行邀请好友
+function doInviteFriend(groupId, friendWx) {
+    const myWx = getMyOnlineWxAccount();
+    onlineSocket.send(JSON.stringify({
+        type: 'invite_to_group',
+        group_id: groupId,
+        my_wx_account: myWx,
+        invite_wx_account: friendWx
+    }));
+    
+    document.getElementById('invite-friend-modal')?.remove();
+    showToast('邀请已发送');
+}
+
+// ==================== 联机群聊功能结束 ====================
+
 // 将联机相关函数暴露到全局作用域
 window.toggleOnlineSettings = toggleOnlineSettings;
 window.loadOnlineSettings = loadOnlineSettings;
@@ -27261,3 +28022,17 @@ window.updateOnlineFeatureSection = updateOnlineFeatureSection;
 window.refreshOnlineStatusPageContent = refreshOnlineStatusPageContent;
 window.renderOnlineCharList = renderOnlineCharList;
 window.updateOnlineConnectionStatus = updateOnlineConnectionStatus;
+
+// 联机群聊函数
+window.showCreateOnlineGroupModal = showCreateOnlineGroupModal;
+window.doCreateOnlineGroup = doCreateOnlineGroup;
+window.openOnlineGroup = openOnlineGroup;
+window.hideOnlineGroupChat = hideOnlineGroupChat;
+window.sendOnlineGroupMsg = sendOnlineGroupMsg;
+window.letMyCharacterSpeak = letMyCharacterSpeak;
+window.showOnlineGroupInfo = showOnlineGroupInfo;
+window.showChangeGroupCharacterModal = showChangeGroupCharacterModal;
+window.doChangeGroupCharacter = doChangeGroupCharacter;
+window.inviteFriendToGroup = inviteFriendToGroup;
+window.doInviteFriend = doInviteFriend;
+window.doJoinOnlineGroup = doJoinOnlineGroup;
