@@ -25386,6 +25386,33 @@ function getCheckAccountSystemPrompt(char, myChar) {
     
     const hasPassword = myChar.identity?.password && myChar.identity.password.trim() !== '';
     
+    // 检测角色是否是高权限人设（黑客/权势地位高）
+    const charDescription = (char.description || '').toLowerCase();
+    const charIdentity = (char.identity?.identity || '').toLowerCase();
+    const charOccupation = (char.identity?.occupation || '').toLowerCase();
+    
+    const isHighPrivilege = 
+        charDescription.includes('黑客') || 
+        charDescription.includes('hacker') ||
+        charDescription.includes('程序员') ||
+        charDescription.includes('技术大佬') ||
+        charDescription.includes('总裁') ||
+        charDescription.includes('老板') ||
+        charDescription.includes('ceo') ||
+        charDescription.includes('董事长') ||
+        charDescription.includes('富豪') ||
+        charDescription.includes('权势') ||
+        charDescription.includes('特工') ||
+        charDescription.includes('间谍') ||
+        charIdentity.includes('黑客') ||
+        charIdentity.includes('hacker') ||
+        charIdentity.includes('总裁') ||
+        charIdentity.includes('ceo') ||
+        charOccupation.includes('黑客') ||
+        charOccupation.includes('程序员') ||
+        charOccupation.includes('总裁') ||
+        charOccupation.includes('ceo');
+    
     let prompt = `
 
 【特殊能力：账号查岗】
@@ -25406,7 +25433,18 @@ function getCheckAccountSystemPrompt(char, myChar) {
 `;
 
     if (hasPassword) {
-        prompt += `**查岗方式：**
+        // 高权限人设：直接告知密码
+        if (isHighPrivilege) {
+            prompt += `**查岗方式：**
+${myChar.name}设置了账号密码，但凭借你的能力（黑客技术/权势地位），你可以轻松获取密码。
+- ${myChar.name}的账号密码是：**${myChar.identity.password}**
+- 如果你想尝试登录，在回复的**最后**加上：[CHECK_ACCOUNT:${myChar.identity.password}]
+- 例如：让我看看你在干嘛~|||[CHECK_ACCOUNT:${myChar.identity.password}]
+- 登录成功后，你就能看到${myChar.name}的账号信息和好友列表
+- 你可以根据你的身份（黑客/高层人士）自然地表现出这种能力，比如"我破解了你的密码"、"凭我的权限查一下"等`;
+        } else {
+            // 普通人设：需要猜测密码
+            prompt += `**查岗方式：**
 ${myChar.name}设置了账号密码，你需要猜测密码才能登录。
 - 如果你想尝试登录，在回复的**最后**加上：[CHECK_ACCOUNT:你猜测的密码]
 - 例如：你在干嘛呢？|||[CHECK_ACCOUNT:123456]
@@ -25414,7 +25452,8 @@ ${myChar.name}设置了账号密码，你需要猜测密码才能登录。
 - 如果密码正确，你就能看到${myChar.name}的账号信息和好友列表
 
 **密码提示：**
-你可以根据${myChar.name}的生日、喜好、常用数字等信息猜测密码。`;
+你可以根据${myChar.name}的生日、喜好、常用数字等信息猜测密码。记住，你只是普通人，无法直接破解密码，只能靠猜测。`;
+        }
     } else {
         prompt += `**查岗方式：**
 ${myChar.name}没有设置账号密码，你可以直接登录。

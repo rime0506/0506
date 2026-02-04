@@ -1865,6 +1865,11 @@
             flex-direction: column;
             padding-bottom: env(safe-area-inset-bottom);
         }
+        
+        /* 线下模式输入框区域 - 与线上私聊页面保持一致的高度 */
+        #offline-chat-footer {
+            padding: 10px 16px 30px 16px !important;
+        }
         /* 引用预览区域 */
         .quote-preview {
             display: flex;
