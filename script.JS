@@ -6828,13 +6828,19 @@ ${loreContext}
                         }
                     }
                     
+                    // 判断是否是联机群聊
+                    const isOnlineGroup = f.isOnlineGroup;
+                    const groupTag = isOnlineGroup 
+                        ? '<span style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:#fff; font-size:9px; padding:1px 4px; border-radius:2px; margin-left:6px;">联机群</span>'
+                        : '<span style="background:#07c160; color:#fff; font-size:9px; padding:1px 4px; border-radius:2px; margin-left:6px;">群</span>';
+                    
                     contentDiv.innerHTML = `
                         <div style="width:48px; height:48px; border-radius:6px; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0;"></div>
                         <div style="flex:1; min-width:0;">
                             <div style="display:flex; justify-content:space-between; margin-bottom:4px; align-items:center;">
                                 <div style="display:flex; align-items:center;">
                                     <div style="font-size:16px; font-weight:500; color:#333;">${f.name}</div>
-                                    <span style="background:#07c160; color:#fff; font-size:9px; padding:1px 4px; border-radius:2px; margin-left:6px;">群</span>
+                                    ${groupTag}
                                 </div>
                                 <div style="font-size:12px; color:#999;">${lastTimeStr}</div>
                             </div>
@@ -7750,6 +7756,12 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
         async function openGroupChatWindow(groupId) {
             const group = await db.group_chats.get(groupId);
             if (!group) return;
+            
+            // 如果是联机群聊，调用联机群聊的打开方法
+            if (group.isOnlineGroup && group.onlineGroupId) {
+                openOnlineGroup(group.onlineGroupId);
+                return;
+            }
             
             // 设置当前聊天为群聊模式
             currentChatCharId = null;
@@ -26734,7 +26746,7 @@ function connectToOnlineServer() {
 }
 
 // 处理服务器消息
-function handleOnlineMessage(data) {
+async function handleOnlineMessage(data) {
     // 心跳响应不需要打印日志
     if (data.type === 'pong') return;
     
@@ -26818,6 +26830,13 @@ function handleOnlineMessage(data) {
             requestOnlineCharacters();
             // 刷新联机状态页面（如果打开的话）
             refreshOnlineStatusPageContent();
+            // 获取联机群聊列表
+            if (data.wx_account && onlineSocket && onlineSocket.readyState === WebSocket.OPEN) {
+                onlineSocket.send(JSON.stringify({
+                    type: 'get_online_groups',
+                    my_wx_account: data.wx_account
+                }));
+            }
             break;
             
         case 'character_offline':
@@ -26834,6 +26853,8 @@ function handleOnlineMessage(data) {
             showToast(`群聊"${data.group.name}"创建成功`);
             onlineGroups.push(data.group);
             refreshOnlineGroupList();
+            // 同时在本地创建群聊记录，让它显示在消息列表中
+            await createLocalOnlineGroupChat(data.group);
             break;
             
         case 'group_invite':
@@ -26848,6 +26869,8 @@ function handleOnlineMessage(data) {
                 onlineGroups.push(data.group);
             }
             refreshOnlineGroupList();
+            // 同时在本地创建群聊记录，让它显示在消息列表中
+            await createLocalOnlineGroupChat(data.group);
             break;
             
         case 'group_member_joined':
@@ -26862,6 +26885,10 @@ function handleOnlineMessage(data) {
             // 收到群聊列表
             onlineGroups = data.groups || [];
             refreshOnlineGroupList();
+            // 为每个群聊创建本地记录
+            for (const group of onlineGroups) {
+                await createLocalOnlineGroupChat(group);
+            }
             break;
             
         case 'group_messages':
@@ -27622,6 +27649,102 @@ async function handleOnlineGroupInvite(data) {
     }
 }
 
+// 在本地数据库创建联机群聊记录，让它显示在消息列表中
+async function createLocalOnlineGroupChat(group) {
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    try {
+        // 检查是否已存在
+        const existing = await db.group_chats
+            .where('ownerAccountId').equals(accountId)
+            .filter(g => g.isOnlineGroup && g.onlineGroupId === group.id)
+            .first();
+        
+        if (existing) {
+            console.log('联机群聊已存在于本地，跳过创建');
+            return;
+        }
+        
+        // 创建本地群聊记录
+        const groupChat = {
+            name: group.name,
+            avatar: DEFAULT_GROUP_AVATAR,
+            memberIds: [], // 联机群聊的成员由服务器管理
+            ownerAccountId: accountId,
+            created_at: group.created_at || Date.now(),
+            updated_at: Date.now(),
+            is_pinned: false,
+            chat_history: [{
+                role: 'system',
+                content: '联机群聊已创建',
+                time: Date.now()
+            }],
+            isOnlineGroup: true, // 标记为联机群聊
+            onlineGroupId: group.id, // 联机群聊的ID
+            onlineGroupCreator: group.creator_wx // 创建者微信号
+        };
+        
+        await db.group_chats.add(groupChat);
+        console.log('已在本地创建联机群聊记录');
+        
+        // 刷新聊天列表
+        if (document.querySelector('.wechat-tab-item.active')?.innerText.includes('微信')) {
+            renderWechatList(document.getElementById('wechat-content'));
+        }
+    } catch (e) {
+        console.error('创建本地联机群聊记录失败:', e);
+    }
+}
+
+// 更新本地联机群聊的最后消息
+async function updateLocalOnlineGroupLastMessage(onlineGroupId, message) {
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    try {
+        // 查找对应的本地群聊记录
+        const groups = await db.group_chats
+            .where('ownerAccountId').equals(accountId)
+            .filter(g => g.isOnlineGroup && g.onlineGroupId === onlineGroupId)
+            .toArray();
+        
+        if (groups.length === 0) {
+            console.log('未找到本地联机群聊记录');
+            return;
+        }
+        
+        const group = groups[0];
+        
+        // 添加消息到聊天历史
+        if (!group.chat_history) {
+            group.chat_history = [];
+        }
+        
+        // 构建消息记录
+        const chatMessage = {
+            role: 'assistant', // 群聊消息视为助手消息
+            content: message.content,
+            time: message.created_at || Date.now(),
+            sender_name: message.sender_name,
+            sender_type: message.sender_type,
+            character_name: message.character_name
+        };
+        
+        group.chat_history.push(chatMessage);
+        group.updated_at = Date.now();
+        
+        await db.group_chats.put(group);
+        
+        // 刷新聊天列表（如果正在显示）
+        if (document.querySelector('.wechat-tab-item.active')?.innerText.includes('微信')) {
+            renderWechatList(document.getElementById('wechat-content'));
+        }
+    } catch (e) {
+        console.error('更新本地联机群聊消息失败:', e);
+    }
+}
+
 // 显示加入群聊弹窗（选择要带入的角色）
 async function showJoinOnlineGroupModal(groupId, groupName) {
     // 获取所有可用的角色（非User类型）
@@ -27853,7 +27976,7 @@ function showOnlineGroupChatPage(group) {
             <div class="back-btn" onclick="hideOnlineGroupChat()" style="margin:0; background:none; width:40px; justify-content:flex-start; color:#333;">
                 <svg class="svg-icon" viewBox="0 0 24 24" style="width:24px; height:24px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
             </div>
-            <div class="wechat-title" style="flex:1; text-align:center;">${group.name}</div>
+            <div class="wechat-title" id="online-group-chat-title" style="flex:1; text-align:center;">${group.name}</div>
             <div onclick="showOnlineGroupInfo('${group.id}')" style="width:40px; display:flex; justify-content:flex-end; cursor:pointer;">
                 <svg viewBox="0 0 24 24" style="width:20px; height:20px; stroke:#333; fill:none;"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg>
             </div>
@@ -27863,19 +27986,97 @@ function showOnlineGroupChatPage(group) {
             <div style="text-align:center; padding:20px; color:#999;">加载中...</div>
         </div>
         
-        <div style="background:#fff; border-top:1px solid #f0f0f0; padding:10px 12px; display:flex; align-items:center; gap:10px;">
-            <input type="text" id="online-group-input" placeholder="发送消息..." style="flex:1; padding:10px 14px; border:1px solid #e0e0e0; border-radius:20px; font-size:14px; outline:none;">
-            <button onclick="sendOnlineGroupMsg()" style="padding:10px 16px; background:var(--ins-pink); color:#fff; border:none; border-radius:20px; font-size:14px;">发送</button>
-            <button onclick="letMyCharacterSpeak()" style="padding:10px 12px; background:#f0f0f0; color:#666; border:none; border-radius:20px; font-size:13px;" title="让角色说话">🎭</button>
+        <div class="chat-footer" id="online-group-footer">
+            <div class="chat-input-bar">
+                <!-- 左侧：生成按钮 (让角色说话) -->
+                <div class="chat-icon-btn" onclick="letMyCharacterSpeak()" title="让角色说话">
+                    <svg class="svg-icon" viewBox="0 0 24 24"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M9 5H1"/></svg>
+                </div>
+                
+                <!-- 中间：输入框 -->
+                <input type="text" class="chat-input" id="online-group-input" placeholder="发送消息..." onfocus="closeOnlineGroupPanel()">
+                
+                <!-- 右侧：表情 -->
+                <div class="chat-icon-btn" onclick="toggleOnlineGroupPanel('emoji')">
+                    <svg class="svg-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><line x1="9" y1="9" x2="9.01" y2="9"></line><line x1="15" y1="9" x2="15.01" y2="9"></line></svg>
+                </div>
+                
+                <!-- 右侧：菜单 (+) -->
+                <div class="chat-icon-btn" id="online-group-btn-more" onclick="toggleOnlineGroupPanel('action')">
+                    <svg class="svg-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+                </div>
+                
+                <!-- 右侧：发送 (Send) - 默认隐藏 -->
+                <div class="chat-send-btn" id="online-group-btn-send" onclick="sendOnlineGroupMsg()">
+                    <svg class="svg-icon" viewBox="0 0 24 24" style="width:18px; height:18px; stroke-width:3; transform: rotate(90deg) translateX(-2px);"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                </div>
+            </div>
+            
+            <!-- 面板容器 -->
+            <div class="chat-panel-container" id="online-group-panel-container">
+                <!-- 表情包 Tab -->
+                <div style="height: 40px; display: flex; border-bottom: 1px solid #eee; background: #fff;" id="online-group-emoji-tab-bar">
+                    <div class="wechat-tab-item active" onclick="switchOnlineGroupEmojiTab('emoji')" style="flex:1; font-size:14px;">Emoji</div>
+                    <div class="wechat-tab-item" onclick="switchOnlineGroupEmojiTab('sticker')" style="flex:1; font-size:14px;">表情包</div>
+                </div>
+                <!-- Emoji 面板 -->
+                <div class="emoji-panel" id="online-group-emoji-panel" style="height: calc(100% - 40px);">
+                    <!-- 动态生成表情 -->
+                </div>
+                <!-- 自定义表情包面板 -->
+                <div class="emoji-panel" id="online-group-sticker-panel" style="height: calc(100% - 40px); display: none; grid-template-columns: repeat(4, 1fr);">
+                    <!-- 动态生成自定义表情 -->
+                    <div style="text-align:center; grid-column:span 4; color:#999; margin-top:20px;">暂无表情包<br>请在详情页添加</div>
+                </div>
+
+                <!-- 功能菜单面板 -->
+                <div class="action-panel" id="online-group-action-panel">
+                    <div class="action-item" onclick="onlineGroupVoiceInput()">
+                        <div class="action-icon-box">
+                            <svg class="svg-icon" viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                        </div>
+                        <div class="action-name">语音输入</div>
+                    </div>
+                    <div class="action-item" onclick="onlineGroupSendImage()">
+                        <div class="action-icon-box">
+                            <svg class="svg-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                        </div>
+                        <div class="action-name">相册</div>
+                    </div>
+                    <div class="action-item" onclick="onlineGroupTransfer()">
+                        <div class="action-icon-box transfer-icon">
+                            <svg class="svg-icon" viewBox="0 0 24 24"><path d="M17 1l4 4-4 4"></path><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><path d="M7 23l-4-4 4-4"></path><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+                        </div>
+                        <div class="action-name">转账</div>
+                    </div>
+                </div>
+            </div>
         </div>
     `;
     
     page.style.display = 'flex';
     
     // 绑定回车发送
-    document.getElementById('online-group-input').addEventListener('keypress', (e) => {
+    const input = document.getElementById('online-group-input');
+    input.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') sendOnlineGroupMsg();
     });
+    
+    // 绑定输入变化事件，控制发送按钮显示
+    input.addEventListener('input', function() {
+        const btnSend = document.getElementById('online-group-btn-send');
+        const btnMore = document.getElementById('online-group-btn-more');
+        if (this.value.trim()) {
+            btnSend.style.display = 'flex';
+            btnMore.style.display = 'none';
+        } else {
+            btnSend.style.display = 'none';
+            btnMore.style.display = 'flex';
+        }
+    });
+    
+    // 初始化Emoji面板
+    initOnlineGroupEmojiPanel();
 }
 
 // 隐藏联机群聊页面
@@ -27893,7 +28094,10 @@ function handleOnlineGroupMessages(data) {
 }
 
 // 处理实时群消息
-function handleOnlineGroupMessage(data) {
+async function handleOnlineGroupMessage(data) {
+    // 更新本地群聊记录，让消息列表显示最新消息
+    await updateLocalOnlineGroupLastMessage(data.group_id, data.message);
+    
     if (data.group_id !== currentOnlineGroupId) {
         // 不是当前群，显示通知
         showToast(`[${data.message.sender_name}] ${data.message.content.substring(0, 20)}...`);
@@ -27916,22 +28120,115 @@ function renderOnlineGroupMessages() {
         const isCharacter = msg.sender_type === 'character';
         const avatar = isCharacter ? (msg.character_avatar || '') : (msg.sender_avatar || '');
         const name = isCharacter ? `${msg.character_name} (${msg.sender_name})` : msg.sender_name;
-        const avatarStyle = avatar ? `background-image:url(${avatar})` : 'background:#e0e0e0';
+        const avatarStyle = avatar ? `background-image:url(${avatar})` : 'background:#ccc';
         
-        return `
-            <div style="display:flex; ${isMe ? 'flex-direction:row-reverse' : ''}; margin-bottom:16px; gap:10px;">
-                <div style="width:40px; height:40px; border-radius:8px; ${avatarStyle}; background-size:cover; flex-shrink:0;"></div>
-                <div style="max-width:70%; ${isMe ? 'text-align:right' : ''}">
-                    <div style="font-size:12px; color:#999; margin-bottom:4px;">${name}${isCharacter ? ' 🎭' : ''}</div>
-                    <div style="display:inline-block; padding:10px 14px; border-radius:12px; font-size:14px; line-height:1.5; word-break:break-word;
-                        ${isMe ? 'background:var(--ins-pink-light);' : 'background:#fff;'}
-                        ${isCharacter ? 'border:2px solid #667eea;' : ''}">${msg.content}</div>
-                </div>
-            </div>
-        `;
+        let messageContent = '';
+        let isSpecialMsg = false;
+        
+        // 处理转账消息
+        if (msg.msg_type === 'transfer') {
+            isSpecialMsg = true;
+            try {
+                const data = JSON.parse(msg.content);
+                const msgId = msg.id || ('trans_' + msg.created_at);
+                const targetHint = data.targetName ? `转给 ${data.targetName}` : '转账';
+                messageContent = `<div onclick="receiveOnlineGroupTransfer('${msgId}')" style="width:220px; background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.08); border:1px solid #eee; cursor:pointer;">
+                    <div style="padding:14px 16px; display:flex; align-items:center; gap:12px;">
+                        <div style="width:40px; height:40px; background:#fff; border-radius:10px; display:flex; align-items:center; justify-content:center; border:1px solid #eee;">
+                            <svg viewBox="0 0 24 24" style="width:20px; height:20px; stroke:#666; fill:none; stroke-width:1.5;"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                        </div>
+                        <div style="flex:1;">
+                            <div style="font-size:18px; font-weight:600; color:#333; margin-bottom:2px;">¥${data.amount}</div>
+                            <div style="font-size:12px; color:#999;">${escapeHtml(data.desc || '转账')}</div>
+                        </div>
+                    </div>
+                    <div style="padding:8px 16px; display:flex; justify-content:space-between; align-items:center; border-top:1px solid #eee;">
+                        <span style="font-size:11px; color:#999;">${targetHint}</span>
+                        <span style="font-size:11px; color:#999;">${data.status === 'received' ? '已收款' : '待收款'}</span>
+                    </div>
+                </div>`;
+            } catch(e) {
+                messageContent = renderMessageContent(msg.content);
+                isSpecialMsg = false;
+            }
+        } else {
+            // 普通消息
+            messageContent = renderMessageContent(msg.content);
+        }
+        
+        // 完全按照普通群聊的样式
+        if (isMe) {
+            // 我发的消息
+            if (isSpecialMsg) {
+                return `
+                    <div style="display:flex; flex-direction:row-reverse; align-items:flex-end; gap:8px; margin-bottom:12px;">
+                        <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
+                        <div style="display:flex; flex-direction:column; align-items:flex-end; max-width:70%;">
+                            <div style="font-size:12px; color:#999; margin-bottom:2px;">${name}${isCharacter ? ' 🎭' : ''}</div>
+                            <div style="display:flex; align-items:flex-end; gap:6px;">
+                                <div style="font-size:10px; color:#999;">${formatChatTime(msg.created_at)}</div>
+                                <div>${messageContent}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                return `
+                    <div style="display:flex; flex-direction:row-reverse; align-items:flex-end; gap:8px; margin-bottom:12px;">
+                        <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
+                        <div style="display:flex; flex-direction:column; align-items:flex-end; max-width:70%;">
+                            <div style="font-size:12px; color:#999; margin-bottom:2px;">${name}${isCharacter ? ' 🎭' : ''}</div>
+                            <div style="display:flex; align-items:flex-end; gap:6px;">
+                                <div style="font-size:10px; color:#999;">${formatChatTime(msg.created_at)}</div>
+                                <div style="background:#ffe4e8; color:#000; padding:6px 10px; border-radius:18px 18px 4px 18px; font-size:15px; line-height:1.5; word-break:break-word;">${messageContent}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        } else {
+            // 别人发的消息
+            if (isSpecialMsg) {
+                return `
+                    <div style="display:flex; align-items:flex-end; gap:8px; margin-bottom:12px;">
+                        <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
+                        <div style="display:flex; flex-direction:column; max-width:70%;">
+                            <div style="font-size:12px; color:#999; margin-bottom:2px;">${name}${isCharacter ? ' 🎭' : ''}</div>
+                            <div style="display:flex; align-items:flex-end; gap:6px;">
+                                <div>${messageContent}</div>
+                                <div style="font-size:10px; color:#999;">${formatChatTime(msg.created_at)}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                return `
+                    <div style="display:flex; align-items:flex-end; gap:8px; margin-bottom:12px;">
+                        <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
+                        <div style="display:flex; flex-direction:column; max-width:70%;">
+                            <div style="font-size:12px; color:#999; margin-bottom:2px;">${name}${isCharacter ? ' 🎭' : ''}</div>
+                            <div style="display:flex; align-items:flex-end; gap:6px;">
+                                <div style="background:#f2f2f7; color:#000; padding:6px 10px; border-radius:18px 18px 18px 4px; font-size:15px; line-height:1.5; word-break:break-word;">${messageContent}</div>
+                                <div style="font-size:10px; color:#999;">${formatChatTime(msg.created_at)}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
     }).join('');
     
+    // 为图片添加点击事件
+    container.querySelectorAll('.chat-image').forEach(img => {
+        img.onclick = () => showFullImage(img.src);
+    });
+    
     container.scrollTop = container.scrollHeight;
+}
+
+// 收取联机群聊转账
+function receiveOnlineGroupTransfer(msgId) {
+    showToast('转账功能暂不支持收取，仅用于展示');
 }
 
 // 处理群成员列表
@@ -27951,6 +28248,461 @@ function handleOnlineGroupMembers(data) {
     } else {
         myOnlineGroupCharacter = null;
     }
+}
+
+// 切换联机群聊面板
+let currentOnlineGroupPanel = null;
+function toggleOnlineGroupPanel(panelType) {
+    const container = document.getElementById('online-group-panel-container');
+    const emojiTabBar = document.getElementById('online-group-emoji-tab-bar');
+    const emojiPanel = document.getElementById('online-group-emoji-panel');
+    const stickerPanel = document.getElementById('online-group-sticker-panel');
+    const actionPanel = document.getElementById('online-group-action-panel');
+    
+    if (!container) {
+        console.error('[Panel] Missing container!');
+        return;
+    }
+    
+    if (currentOnlineGroupPanel === panelType) {
+        // 关闭面板
+        container.classList.remove('open');
+        if (emojiTabBar) emojiTabBar.style.display = 'none';
+        if (emojiPanel) emojiPanel.style.display = 'none';
+        if (stickerPanel) stickerPanel.style.display = 'none';
+        if (actionPanel) actionPanel.style.display = 'none';
+        currentOnlineGroupPanel = null;
+    } else {
+        // 打开面板
+        container.classList.add('open');
+        if (panelType === 'emoji') {
+            if (emojiTabBar) emojiTabBar.style.display = 'flex';
+            if (emojiPanel) emojiPanel.style.display = 'grid';
+            if (stickerPanel) stickerPanel.style.display = 'none';
+            if (actionPanel) actionPanel.style.display = 'none';
+        } else if (panelType === 'action') {
+            if (emojiTabBar) emojiTabBar.style.display = 'none';
+            if (emojiPanel) emojiPanel.style.display = 'none';
+            if (stickerPanel) stickerPanel.style.display = 'none';
+            if (actionPanel) actionPanel.style.display = 'grid';
+        }
+        currentOnlineGroupPanel = panelType;
+    }
+}
+
+// 关闭联机群聊面板
+function closeOnlineGroupPanel() {
+    const container = document.getElementById('online-group-panel-container');
+    if (container) {
+        container.classList.remove('open');
+    }
+    const emojiTabBar = document.getElementById('online-group-emoji-tab-bar');
+    const emojiPanel = document.getElementById('online-group-emoji-panel');
+    const stickerPanel = document.getElementById('online-group-sticker-panel');
+    const actionPanel = document.getElementById('online-group-action-panel');
+    if (emojiTabBar) emojiTabBar.style.display = 'none';
+    if (emojiPanel) emojiPanel.style.display = 'none';
+    if (stickerPanel) stickerPanel.style.display = 'none';
+    if (actionPanel) actionPanel.style.display = 'none';
+    currentOnlineGroupPanel = null;
+}
+
+// 切换联机群聊表情Tab
+async function switchOnlineGroupEmojiTab(type) {
+    const tabs = document.querySelectorAll('#online-group-emoji-tab-bar .wechat-tab-item');
+    const emojiPanel = document.getElementById('online-group-emoji-panel');
+    const stickerPanel = document.getElementById('online-group-sticker-panel');
+
+    if (type === 'emoji') {
+        tabs[0].classList.add('active');
+        tabs[1].classList.remove('active');
+        emojiPanel.style.display = 'grid';
+        stickerPanel.style.display = 'none';
+    } else {
+        tabs[0].classList.remove('active');
+        tabs[1].classList.add('active');
+        emojiPanel.style.display = 'none';
+        stickerPanel.style.display = 'grid';
+        // 加载自定义表情包
+        await loadOnlineGroupStickers();
+    }
+}
+
+// 加载联机群聊的自定义表情包
+async function loadOnlineGroupStickers() {
+    const stickerPanel = document.getElementById('online-group-sticker-panel');
+    if (!stickerPanel) return;
+    
+    let html = '';
+    
+    // 获取所有表情包分类
+    const allCategories = await db.sticker_categories.toArray();
+    
+    if (allCategories.length === 0) {
+        stickerPanel.innerHTML = `<div style="text-align:center; grid-column:span 4; color:#999; margin-top:20px;">暂无表情包<br>请去【我-表情】添加</div>`;
+        return;
+    }
+    
+    // 显示所有分类的表情包
+    for (const cat of allCategories) {
+        if (cat.stickers && cat.stickers.length > 0) {
+            html += `<div style="grid-column:1/-1; font-size:12px; color:#999; margin:10px 0 5px; font-weight:500;">${cat.name}</div>`;
+            cat.stickers.forEach(s => {
+                const safeUrl = s.url.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                html += `<div class="emoji-item" onclick="sendOnlineGroupSticker('${safeUrl}')" style="background-image:url(${s.url}); background-size:cover; background-position:center; width:60px; height:60px; border-radius:8px; cursor:pointer;"></div>`;
+            });
+        }
+    }
+    
+    if (!html) {
+        stickerPanel.innerHTML = `<div style="text-align:center; grid-column:span 4; color:#999; margin-top:20px;">暂无表情包<br>请去【我-表情】添加</div>`;
+    } else {
+        stickerPanel.innerHTML = html;
+    }
+}
+
+// 发送联机群聊表情包
+function sendOnlineGroupSticker(stickerUrl) {
+    const myWx = getMyOnlineWxAccount();
+    const myChar = onlineCharacters.find(c => c.wx_account === myWx);
+    
+    const imgContent = `[img:${stickerUrl}]`;
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'send_group_message',
+        group_id: currentOnlineGroupId,
+        my_wx_account: myWx,
+        sender_type: 'user',
+        sender_name: myChar?.nickname || myWx,
+        content: imgContent,
+        msg_type: 'image'
+    }));
+    
+    closeOnlineGroupPanel();
+}
+
+// 初始化联机群聊Emoji面板
+function initOnlineGroupEmojiPanel() {
+    const panel = document.getElementById('online-group-emoji-panel');
+    if (!panel) return;
+    
+    const emojis = [
+        '😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂',
+        '🙂', '🙃', '😉', '😊', '😇', '🥰', '😍', '🤩',
+        '😘', '😗', '😚', '😙', '😋', '😛', '😜', '🤪',
+        '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨',
+        '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥',
+        '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕',
+        '🤢', '🤮', '🤧', '🥵', '🥶', '🥴', '😵', '🤯',
+        '🤠', '🥳', '😎', '🤓', '🧐', '😕', '😟', '🙁',
+        '☹️', '😮', '😯', '😲', '😳', '🥺', '😦', '😧',
+        '😨', '😰', '😥', '😢', '😭', '😱', '😖', '😣',
+        '😞', '😓', '😩', '😫', '🥱', '😤', '😡', '😠',
+        '🤬', '😈', '👿', '💀', '☠️', '💩', '🤡', '👹',
+        '👺', '👻', '👽', '👾', '🤖', '😺', '😸', '😹',
+        '😻', '😼', '😽', '🙀', '😿', '😾', '👋', '🤚',
+        '🖐', '✋', '🖖', '👌', '🤏', '✌️', '🤞', '🤟',
+        '🤘', '🤙', '👈', '👉', '👆', '🖕', '👇', '☝️',
+        '👍', '👎', '✊', '👊', '🤛', '🤜', '👏', '🙌',
+        '👐', '🤲', '🤝', '🙏', '✍️', '💅', '🤳', '💪'
+    ];
+    
+    panel.innerHTML = emojis.map(emoji => 
+        `<div class="emoji-item" onclick="insertOnlineGroupEmoji('${emoji}')">${emoji}</div>`
+    ).join('');
+}
+
+// 插入Emoji到输入框
+function insertOnlineGroupEmoji(emoji) {
+    const input = document.getElementById('online-group-input');
+    if (input) {
+        input.value += emoji;
+        input.focus();
+        // 触发输入事件以更新发送按钮状态
+        input.dispatchEvent(new Event('input'));
+    }
+}
+
+// 联机群聊语音输入
+async function onlineGroupVoiceInput() {
+    closeOnlineGroupPanel();
+    
+    // 显示语音模式选择弹窗
+    const modal = document.createElement('div');
+    modal.id = 'online-group-voice-modal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    `;
+    
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:16px; padding:24px; width:85%; max-width:360px;">
+            <h3 style="margin:0 0 16px 0; text-align:center; font-size:18px;">语音输入模式</h3>
+            
+            <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:20px;">
+                <button onclick="startOnlineGroupVoiceCapture('text')" style="padding:16px; background:#f5f5f5; border:none; border-radius:12px; font-size:15px; cursor:pointer; text-align:left;">
+                    <div style="font-weight:600; margin-bottom:4px;">📝 转为文字</div>
+                    <div style="font-size:13px; color:#999;">语音转文字后发送</div>
+                </button>
+                <button onclick="startOnlineGroupVoiceCapture('audio')" style="padding:16px; background:#f5f5f5; border:none; border-radius:12px; font-size:15px; cursor:pointer; text-align:left;">
+                    <div style="font-weight:600; margin-bottom:4px;">🎤 语音消息</div>
+                    <div style="font-size:13px; color:#999;">发送语音消息</div>
+                </button>
+            </div>
+            
+            <button onclick="document.getElementById('online-group-voice-modal').remove()" style="width:100%; padding:12px; background:#e0e0e0; color:#666; border:none; border-radius:8px; font-size:15px;">取消</button>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 开始联机群聊语音捕获
+function startOnlineGroupVoiceCapture(mode) {
+    document.getElementById('online-group-voice-modal')?.remove();
+    
+    if (mode === 'text') {
+        showToast('语音转文字功能开发中...');
+    } else {
+        showToast('语音消息功能开发中...');
+    }
+}
+
+// 联机群聊发送图片
+function onlineGroupSendImage() {
+    closeOnlineGroupPanel();
+    
+    // 创建隐藏的文件输入
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        // 读取图片并转为base64
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            const base64 = event.target.result;
+            const imgContent = `[img:${base64}]`;
+            
+            // 发送图片消息
+            const myWx = getMyOnlineWxAccount();
+            const myChar = onlineCharacters.find(c => c.wx_account === myWx);
+            
+            onlineSocket.send(JSON.stringify({
+                type: 'send_group_message',
+                group_id: currentOnlineGroupId,
+                my_wx_account: myWx,
+                sender_type: 'user',
+                sender_name: myChar?.nickname || myWx,
+                content: imgContent,
+                msg_type: 'image'
+            }));
+            
+            showToast('图片已发送');
+        };
+        reader.readAsDataURL(file);
+    };
+    input.click();
+}
+
+// 联机群聊转账 - 显示类型选择弹窗
+function onlineGroupTransfer() {
+    closeOnlineGroupPanel();
+    
+    const modal = document.createElement('div');
+    modal.id = 'online-group-transfer-type-modal';
+    modal.className = 'modal-overlay';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    `;
+    
+    modal.innerHTML = `
+        <div class="modal-box" style="max-width:300px; padding:0; overflow:hidden; border-radius:16px; background:#fff;">
+            <div style="padding:20px 16px; text-align:center; border-bottom:0.5px solid #f0f0f0;">
+                <div style="font-size:17px; font-weight:600; color:#333;">选择类型</div>
+            </div>
+            <div style="padding:16px;">
+                <div onclick="showOnlineGroupRedPacket()" style="display:flex; align-items:center; padding:14px 16px; background:#fafafa; border-radius:12px; margin-bottom:12px; cursor:pointer; transition:all 0.2s; border:1px solid #f0f0f0;">
+                    <div style="width:44px; height:44px; border-radius:12px; background:#fff; border:1px solid #eee; display:flex; align-items:center; justify-content:center; margin-right:14px;">
+                        <svg viewBox="0 0 24 24" style="width:22px; height:22px; stroke:var(--ins-pink); fill:none; stroke-width:1.5;"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><circle cx="12" cy="15" r="2"/></svg>
+                    </div>
+                    <div style="flex:1;">
+                        <div style="font-size:15px; font-weight:500; color:#333;">群红包</div>
+                        <div style="font-size:12px; color:#999; margin-top:2px;">拼手气或普通红包</div>
+                    </div>
+                    <svg viewBox="0 0 24 24" style="width:18px; height:18px; stroke:#ccc; fill:none;"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </div>
+                <div onclick="showOnlineGroupExclusiveTransfer()" style="display:flex; align-items:center; padding:14px 16px; background:#fafafa; border-radius:12px; cursor:pointer; transition:all 0.2s; border:1px solid #f0f0f0;">
+                    <div style="width:44px; height:44px; border-radius:12px; background:#fff; border:1px solid #eee; display:flex; align-items:center; justify-content:center; margin-right:14px;">
+                        <svg viewBox="0 0 24 24" style="width:22px; height:22px; stroke:var(--ins-pink); fill:none; stroke-width:1.5;"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                    </div>
+                    <div style="flex:1;">
+                        <div style="font-size:15px; font-weight:500; color:#333;">专属转账</div>
+                        <div style="font-size:12px; color:#999; margin-top:2px;">转给指定群成员</div>
+                    </div>
+                    <svg viewBox="0 0 24 24" style="width:18px; height:18px; stroke:#ccc; fill:none;"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </div>
+            </div>
+            <div onclick="document.getElementById('online-group-transfer-type-modal').remove()" style="padding:14px 16px; text-align:center; border-top:0.5px solid #f0f0f0; color:#999; font-size:15px; cursor:pointer;">取消</div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 显示联机群聊红包页面
+function showOnlineGroupRedPacket() {
+    document.getElementById('online-group-transfer-type-modal')?.remove();
+    showToast('红包功能暂不支持联机群聊');
+}
+
+// 显示联机群聊专属转账选人页面
+async function showOnlineGroupExclusiveTransfer() {
+    document.getElementById('online-group-transfer-type-modal')?.remove();
+    
+    const listHtml = currentOnlineGroupMembers.map(m => {
+        const avatarStyle = m.user_avatar ? `background-image:url(${m.user_avatar})` : 'background:#ccc';
+        const myWx = getMyOnlineWxAccount();
+        if (m.user_wx === myWx) return ''; // 不显示自己
+        
+        return `
+            <div onclick="selectOnlineGroupTransferTarget('${m.user_wx}', '${m.user_name}')" style="display:flex; align-items:center; padding:12px 16px; cursor:pointer; transition:background 0.2s; border-bottom:0.5px solid #f0f0f0;">
+                <div style="width:44px; height:44px; border-radius:6px; ${avatarStyle}; background-size:cover; background-position:center; margin-right:12px;"></div>
+                <div style="flex:1;">
+                    <div style="font-size:16px; color:#333;">${m.user_name}</div>
+                    ${m.character_name ? `<div style="font-size:12px; color:#999;">${m.character_name}</div>` : ''}
+                </div>
+            </div>
+        `;
+    }).filter(h => h).join('');
+    
+    const modal = document.createElement('div');
+    modal.id = 'online-group-exclusive-modal';
+    modal.className = 'modal-overlay';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    `;
+    
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:16px; width:85%; max-width:400px; max-height:70%; overflow:hidden; display:flex; flex-direction:column;">
+            <div style="padding:20px 16px; text-align:center; border-bottom:0.5px solid #f0f0f0;">
+                <div style="font-size:17px; font-weight:600; color:#333;">选择转账对象</div>
+            </div>
+            <div style="flex:1; overflow-y:auto;">
+                ${listHtml || '<div style="text-align:center; color:#999; padding:40px;">群内暂无其他成员</div>'}
+            </div>
+            <div onclick="document.getElementById('online-group-exclusive-modal').remove()" style="padding:14px 16px; text-align:center; border-top:0.5px solid #f0f0f0; color:#999; font-size:15px; cursor:pointer;">取消</div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 选择联机群聊转账目标
+function selectOnlineGroupTransferTarget(targetWx, targetName) {
+    document.getElementById('online-group-exclusive-modal')?.remove();
+    
+    const modal = document.createElement('div');
+    modal.id = 'online-group-transfer-amount-modal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    `;
+    
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:16px; padding:24px; width:85%; max-width:360px;">
+            <h3 style="margin:0 0 16px 0; text-align:center; font-size:18px;">转账给 ${targetName}</h3>
+            
+            <div style="margin-bottom:16px;">
+                <label style="display:block; font-size:13px; color:#666; margin-bottom:8px;">转账金额</label>
+                <input type="number" id="online-group-transfer-amount" placeholder="输入金额" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px;">
+            </div>
+            
+            <div style="margin-bottom:20px;">
+                <label style="display:block; font-size:13px; color:#666; margin-bottom:8px;">转账说明</label>
+                <input type="text" id="online-group-transfer-note" placeholder="添加转账说明" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px;">
+            </div>
+            
+            <div style="display:flex; gap:12px;">
+                <button onclick="document.getElementById('online-group-transfer-amount-modal').remove()" style="flex:1; padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:15px;">取消</button>
+                <button onclick="sendOnlineGroupExclusiveTransfer('${targetWx}', '${targetName}')" style="flex:1; padding:12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:15px;">转账</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 发送联机群聊专属转账
+function sendOnlineGroupExclusiveTransfer(targetWx, targetName) {
+    const amount = document.getElementById('online-group-transfer-amount').value.trim();
+    const note = document.getElementById('online-group-transfer-note').value.trim();
+    
+    if (!amount || parseFloat(amount) <= 0) {
+        alert('请输入有效的金额');
+        return;
+    }
+    
+    const myWx = getMyOnlineWxAccount();
+    const myChar = onlineCharacters.find(c => c.wx_account === myWx);
+    
+    // 使用和普通群聊一样的JSON格式
+    const transferData = {
+        amount: parseFloat(amount),
+        desc: note || '转账',
+        status: 'pending',
+        targetWx: targetWx,
+        targetName: targetName
+    };
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'send_group_message',
+        group_id: currentOnlineGroupId,
+        my_wx_account: myWx,
+        sender_type: 'user',
+        sender_name: myChar?.nickname || myWx,
+        content: JSON.stringify(transferData),
+        msg_type: 'transfer'
+    }));
+    
+    document.getElementById('online-group-transfer-amount-modal')?.remove();
+    showToast('转账已发送');
 }
 
 // 刷新群成员列表
@@ -27984,10 +28736,16 @@ function sendOnlineGroupMsg() {
     }));
     
     input.value = '';
+    // 触发input事件以更新发送按钮状态
+    input.dispatchEvent(new Event('input'));
+    // 关闭面板
+    closeOnlineGroupPanel();
 }
 
 // 让我的角色说话（调用API）
 async function letMyCharacterSpeak() {
+    console.log('[联机群聊] ⚡ 触发 AI 回复');
+    
     if (!myOnlineGroupCharacter) {
         alert('你没有在这个群聊中设置角色。请在群聊设置中选择要带入的角色。');
         return;
@@ -27998,12 +28756,38 @@ async function letMyCharacterSpeak() {
         return;
     }
     
+    const myWx = getMyOnlineWxAccount();
+    const myUserName = onlineCharacters.find(c => c.wx_account === myWx)?.nickname || myWx;
+    
+    console.log('[联机群聊] 角色名称:', myOnlineGroupCharacter.name);
+    console.log('[联机群聊] 我的微信号:', myWx);
+    console.log('[联机群聊] 我的昵称:', myUserName);
+    console.log('[联机群聊] 📚 群聊消息条数:', currentOnlineGroupMessages.length);
+    console.log('[联机群聊] 👥 群成员数量:', currentOnlineGroupMembers.length);
+    
+    // 打印最近的消息
+    if (currentOnlineGroupMessages.length > 0) {
+        console.log('[联机群聊] 最近5条消息:');
+        currentOnlineGroupMessages.slice(-5).forEach((msg, idx) => {
+            const isChar = msg.sender_type === 'character';
+            const prefix = isChar ? `[角色]${msg.character_name}(${msg.sender_name})` : `[真人]${msg.sender_name}`;
+            console.log(`  [${currentOnlineGroupMessages.length - 5 + idx}] ${prefix}: ${msg.content}`);
+        });
+    }
+    
+    // 修改标题为正在输入
+    const chatTitleEl = document.getElementById('online-group-chat-title');
+    const group = onlineGroups.find(g => g.id === currentOnlineGroupId);
+    const originalTitle = group?.name || '联机群聊';
+    
+    if (chatTitleEl) {
+        chatTitleEl.innerText = `${myOnlineGroupCharacter.name} 正在输入中...`;
+        console.log('[联机群聊] 修改标题为:', `${myOnlineGroupCharacter.name} 正在输入中...`);
+    }
+    
     showToast('正在生成回复...');
     
     try {
-        const myWx = getMyOnlineWxAccount();
-        const myUserName = onlineCharacters.find(c => c.wx_account === myWx)?.nickname || myWx;
-        
         // 构建群成员信息（只有名字，没有人设）
         let membersInfo = '群聊成员：\n';
         currentOnlineGroupMembers.forEach(m => {
@@ -28013,6 +28797,7 @@ async function letMyCharacterSpeak() {
                 membersInfo += `- ${m.user_name}\n`;
             }
         });
+        console.log('[联机群聊] 群成员信息:\n', membersInfo);
         
         // 构建上下文
         const context = currentOnlineGroupMessages.map(msg => {
@@ -28025,6 +28810,7 @@ async function letMyCharacterSpeak() {
                 return `[${msg.sender_name}]: ${msg.content}`;
             }
         }).join('\n');
+        console.log('[联机群聊] 上下文消息（前300字）:', context.substring(0, 300));
         
         // 构建提示词
         const systemPrompt = `你是"${myOnlineGroupCharacter.name}"，是"${myUserName}"带入群聊的AI角色。
@@ -28040,10 +28826,38 @@ ${myOnlineGroupCharacter.desc || '（无特定人设）'}
 3. 只回复你要说的内容，不要加任何前缀如"${myOnlineGroupCharacter.name}:"
 4. 回复要符合你的人设性格`;
         
-        // 调用API
-        const response = await callAIForGroupChat(systemPrompt, context);
+        console.log('[联机群聊] 系统提示词（前500字）:', systemPrompt.substring(0, 500));
         
-        if (response) {
+        // 构建消息数组（与 callAI 函数的标准格式一致）
+        const messages = [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: `群聊记录：\n${context}\n\n请以角色身份回复：` }
+        ];
+        
+        console.log('[联机群聊] 📤 准备发送给 AI - 完整信息汇总');
+        console.log('[联机群聊] - System Prompt 长度:', systemPrompt.length);
+        console.log('[联机群聊] - 上下文长度:', context.length);
+        console.log('[联机群聊] 🚀 开始调用 API...');
+        
+        // 调用统一的 AI 接口
+        const aiResponse = await callAI(messages);
+        
+        console.log('[联机群聊] ✅ API 调用成功');
+        console.log('[联机群聊] 原始响应:', aiResponse);
+        
+        // 尝试解析 JSON 格式（如果AI返回了JSON）
+        let replyText = "";
+        try {
+            const parsed = JSON.parse(aiResponse);
+            replyText = parsed.reply || parsed.content || parsed.message || aiResponse;
+            console.log('[联机群聊] JSON解析成功，提取到回复内容:', replyText);
+        } catch (e) {
+            // 不是JSON格式，直接使用原始响应
+            replyText = aiResponse.trim();
+            console.log('[联机群聊] 不是JSON格式，使用原始响应');
+        }
+        
+        if (replyText) {
             // 发送角色消息
             onlineSocket.send(JSON.stringify({
                 type: 'send_group_message',
@@ -28052,48 +28866,29 @@ ${myOnlineGroupCharacter.desc || '（无特定人设）'}
                 sender_type: 'character',
                 sender_name: myUserName,
                 character_name: myOnlineGroupCharacter.name,
-                content: response
+                content: replyText
             }));
+            console.log('[联机群聊] 📤 消息已发送到服务器，内容:', replyText);
+        } else {
+            console.warn('[联机群聊] ⚠️ 回复内容为空');
+        }
+        
+        // 恢复标题
+        if (chatTitleEl) {
+            chatTitleEl.innerText = originalTitle;
+            console.log('[联机群聊] 恢复标题为:', originalTitle);
         }
     } catch (e) {
-        console.error('角色回复失败:', e);
+        console.error('[联机群聊] ❌ 角色回复失败:', e);
+        console.error('[联机群聊] 错误堆栈:', e.stack);
         alert('角色回复失败: ' + e.message);
+        
+        // 出错时也要恢复标题
+        if (chatTitleEl) {
+            chatTitleEl.innerText = originalTitle;
+            console.log('[联机群聊] （出错）恢复标题为:', originalTitle);
+        }
     }
-}
-
-// 为群聊调用AI
-async function callAIForGroupChat(systemPrompt, context) {
-    // 从设置获取API配置
-    const apiUrl = document.getElementById('api-url')?.value || localStorage.getItem('api_url') || '';
-    const apiKey = document.getElementById('api-key')?.value || localStorage.getItem('api_key') || '';
-    const modelName = document.getElementById('model-name')?.value || localStorage.getItem('model_name') || 'gpt-3.5-turbo';
-    
-    if (!apiUrl || !apiKey) {
-        throw new Error('请先在设置中配置API');
-    }
-    
-    const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-            model: modelName,
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: `群聊记录：\n${context}\n\n请以角色身份回复：` }
-            ],
-            max_tokens: 500
-        })
-    });
-    
-    if (!response.ok) {
-        throw new Error('API请求失败');
-    }
-    
-    const data = await response.json();
-    return data.choices?.[0]?.message?.content?.trim() || '';
 }
 
 // 显示群聊信息页面
