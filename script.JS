@@ -28116,8 +28116,16 @@ function renderOnlineGroupMessages() {
     const myWx = getMyOnlineWxAccount();
     
     container.innerHTML = currentOnlineGroupMessages.map(msg => {
-        const isMe = msg.sender_wx === myWx;
+        // 处理系统消息
+        if (msg.msg_type === 'system' || msg.sender_type === 'system') {
+            return `<div style="text-align:center; padding:8px 16px; margin:8px 0;">
+                <span style="background:#fff; color:#999; font-size:12px; padding:4px 12px; border-radius:4px; border:1px solid #ddd;">${msg.content}</span>
+            </div>`;
+        }
+        
         const isCharacter = msg.sender_type === 'character';
+        // 只有我发的真人消息才显示在右边，所有角色消息（包括我的角色）都显示在左边
+        const isMe = msg.sender_wx === myWx && !isCharacter;
         const avatar = isCharacter ? (msg.character_avatar || '') : (msg.sender_avatar || '');
         const name = isCharacter ? `${msg.character_name} (${msg.sender_name})` : msg.sender_name;
         const avatarStyle = avatar ? `background-image:url(${avatar})` : 'background:#ccc';
@@ -28820,11 +28828,26 @@ ${myOnlineGroupCharacter.desc || '（无特定人设）'}
 
 【${membersInfo}】
 
-【重要规则】
-1. 你只知道其他成员和角色的名字，不知道他们角色的具体人设
-2. 请根据群聊上下文，以"${myOnlineGroupCharacter.name}"的身份自然地参与对话
-3. 只回复你要说的内容，不要加任何前缀如"${myOnlineGroupCharacter.name}:"
-4. 回复要符合你的人设性格`;
+【重要回复规则 - 必须严格遵守】
+1. **必须**模拟微信连发消息的习惯：请生成 2 到 4 条短消息，不能只发一条！
+2. **必须**使用分隔符 "|||" 来隔开每一条消息。
+3. **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
+   - 错误示例：嘿在吗？刚刚看到个好玩的视频，发给你看看
+   - 正确示例：嘿在吗？|||刚刚看到个好玩的视频|||发给你看看
+4. 每条消息要简短，5-15个字最佳，像真实微信聊天一样分多条发送。
+5. 严禁只发送标点符号。每一条消息都必须有实际文字内容。
+6. 语气要自然、口语化，符合人设。
+7. 你只知道其他成员和角色的名字，不知道他们角色的具体人设
+8. 请根据群聊上下文，以"${myOnlineGroupCharacter.name}"的身份自然地参与对话
+9. 只回复你要说的内容，不要加任何前缀如"${myOnlineGroupCharacter.name}:"
+10. 回复要符合你的人设性格
+
+请以JSON格式返回，格式如下：
+{
+  "reply": "你的回复内容|||第二条内容|||第三条内容"
+}
+
+请严格返回JSON格式，不要包含Markdown代码块标记。`;
         
         console.log('[联机群聊] 系统提示词（前500字）:', systemPrompt.substring(0, 500));
         
@@ -28839,6 +28862,18 @@ ${myOnlineGroupCharacter.desc || '（无特定人设）'}
         console.log('[联机群聊] - 上下文长度:', context.length);
         console.log('[联机群聊] 🚀 开始调用 API...');
         
+        // 先添加一条系统消息作为分割线
+        const systemMsg = {
+            id: 'sys_' + Date.now(),
+            sender_type: 'system',
+            msg_type: 'system',
+            content: `———— ${myOnlineGroupCharacter.name} 开始回复 ————`,
+            created_at: Date.now()
+        };
+        currentOnlineGroupMessages.push(systemMsg);
+        renderOnlineGroupMessages();
+        console.log('[联机群聊] ✅ 已添加系统消息分割线');
+        
         // 调用统一的 AI 接口
         const aiResponse = await callAI(messages);
         
@@ -28848,7 +28883,13 @@ ${myOnlineGroupCharacter.desc || '（无特定人设）'}
         // 尝试解析 JSON 格式（如果AI返回了JSON）
         let replyText = "";
         try {
-            const parsed = JSON.parse(aiResponse);
+            // 尝试解析为JSON
+            let cleanResponse = aiResponse.trim();
+            // 清理可能的markdown标记
+            if (cleanResponse.startsWith('```')) {
+                cleanResponse = cleanResponse.replace(/```json?\n?/g, '').replace(/```$/g, '').trim();
+            }
+            const parsed = JSON.parse(cleanResponse);
             replyText = parsed.reply || parsed.content || parsed.message || aiResponse;
             console.log('[联机群聊] JSON解析成功，提取到回复内容:', replyText);
         } catch (e) {
@@ -28858,19 +28899,37 @@ ${myOnlineGroupCharacter.desc || '（无特定人设）'}
         }
         
         if (replyText) {
-            // 发送角色消息
-            onlineSocket.send(JSON.stringify({
-                type: 'send_group_message',
-                group_id: currentOnlineGroupId,
-                my_wx_account: myWx,
-                sender_type: 'character',
-                sender_name: myUserName,
-                character_name: myOnlineGroupCharacter.name,
-                content: replyText
-            }));
-            console.log('[联机群聊] 📤 消息已发送到服务器，内容:', replyText);
+            // 按照 ||| 分割成多条消息
+            const segments = replyText.split('|||').map(s => s.trim()).filter(s => s.length > 0);
+            console.log('[联机群聊] 分割成', segments.length, '条消息');
+            
+            // 依次发送每条消息，间隔100ms
+            for (let i = 0; i < segments.length; i++) {
+                const segment = segments[i];
+                console.log(`[联机群聊] 发送第 ${i+1}/${segments.length} 条消息:`, segment);
+                
+                onlineSocket.send(JSON.stringify({
+                    type: 'send_group_message',
+                    group_id: currentOnlineGroupId,
+                    my_wx_account: myWx,
+                    sender_type: 'character',
+                    sender_name: myUserName,
+                    character_name: myOnlineGroupCharacter.name,
+                    content: segment
+                }));
+                
+                // 等待一小段时间再发送下一条，避免消息顺序混乱
+                if (i < segments.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+            }
+            
+            console.log('[联机群聊] 📤 所有消息已发送到服务器');
         } else {
             console.warn('[联机群聊] ⚠️ 回复内容为空');
+            // 如果没有回复内容，移除刚添加的系统消息
+            currentOnlineGroupMessages.pop();
+            renderOnlineGroupMessages();
         }
         
         // 恢复标题

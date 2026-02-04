@@ -2014,7 +2014,6 @@
         /* 表情面板 */
         .emoji-panel {
             height: 100%;
-            display: grid;
             grid-template-columns: repeat(8, 1fr);
             gap: 10px;
             padding: 20px 10px;
@@ -2031,7 +2030,6 @@
         /* 更多菜单面板 */
         .action-panel {
             height: 100%;
-            display: grid;
             grid-template-columns: repeat(4, 1fr);
             gap: 20px;
             padding: 24px;
