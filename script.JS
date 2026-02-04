@@ -12820,6 +12820,18 @@ ${groupContextStr}
             
             const accountId = getCurrentAccountId();
             
+            // ✅ 联机好友自动视为好友状态
+            if (char.isOnlineFriend === true && accountId) {
+                const currentStatus = getFriendStatus(char, accountId);
+                if (currentStatus !== 'friend') {
+                    // 自动修正好友状态
+                    if (!char.wechat_status_by_user) char.wechat_status_by_user = {};
+                    char.wechat_status_by_user[accountId] = 'friend';
+                    // 异步保存，不阻塞渲染
+                    db.characters.put(char).catch(e => console.error('保存联机好友状态失败:', e));
+                }
+            }
+            
             // 检查好友状态
             const friendStatus = getFriendStatus(char, accountId);
             if (friendStatus === 'blocked') {
@@ -26524,24 +26536,6 @@ function connectToOnlineServer() {
                 onlineConnected = false;
                 onlineCharacters = []; // 清空在线角色列表
                 updateOnlineStatus();
-                
-                // ✅ 自动重连（如果有保存的 token）
-                const savedToken = localStorage.getItem('online_token');
-                if (savedToken) {
-                    console.log('[Online] 5秒后尝试自动重连...');
-                    setTimeout(async () => {
-                        try {
-                            const serverUrl = document.getElementById('online-server-url')?.value?.trim();
-                            if (serverUrl) {
-                                console.log('[Online] 正在重连...');
-                                await connectToOnlineServer();
-                                showToast('已重新连接服务器');
-                            }
-                        } catch (e) {
-                            console.error('[Online] 自动重连失败:', e);
-                        }
-                    }, 5000);
-                }
             };
             
             onlineSocket.onerror = (error) => {
@@ -26642,14 +26636,16 @@ function handleOnlineMessage(data) {
             break;
             
         case 'character_online':
-            showToast(`角色 ${data.nickname} 已上线`);
+            // 自动上线，不需要 Toast 提示
+            console.log(`[Online] 角色 ${data.nickname} 已同步`);
             requestOnlineCharacters();
             // 刷新联机状态页面（如果打开的话）
             refreshOnlineStatusPageContent();
             break;
             
         case 'character_offline':
-            showToast(`角色已下线`);
+            // 自动处理，不需要 Toast 提示
+            console.log('[Online] 角色已离线');
             requestOnlineCharacters();
             // 刷新联机状态页面（如果打开的话）
             refreshOnlineStatusPageContent();
@@ -27340,13 +27336,15 @@ async function renderOnlineCharList() {
     if (charList.length === 0) {
         container.innerHTML = `
             <div style="text-align:center; padding:40px 20px; color:#999;">
-                <div style="font-size:14px;">没有可上线的角色</div>
-                <div style="font-size:12px; margin-top:8px;">请先在角色档案创建User类型角色，并在微信中注册</div>
+                <div style="font-size:14px;">没有可用的角色</div>
+                <div style="font-size:12px; margin-top:8px;">请先在角色档案创建 User 类型角色，并设置微信号</div>
             </div>
         `;
         return;
     }
     
+    // 简化显示：只显示角色列表和状态，不需要手动上线/下线按钮
+    // 登录后会自动上线所有角色
     container.innerHTML = charList.map(char => `
         <div style="padding:12px 16px; background:#fff; display:flex; align-items:center; gap:12px; border-bottom:1px solid #f0f0f0;">
             <div style="width:44px; height:44px; border-radius:8px; background-image:url(${char.avatar}); background-size:cover; background-position:center; background-color:#e0e0e0;"></div>
@@ -27354,13 +27352,11 @@ async function renderOnlineCharList() {
                 <div style="font-size:15px; font-weight:500; color:#333;">${char.name}</div>
                 <div style="font-size:12px; color:#999; margin-top:2px;">${char.wxAccount}</div>
             </div>
-            <div style="display:flex; align-items:center; gap:8px;">
+            <div style="display:flex; align-items:center;">
                 ${char.isOnline ? `
-                    <span style="font-size:12px; color:#4caf50;">● 在线</span>
-                    <button onclick="goOfflineWithCharacter('${char.wxAccount}')" style="padding:6px 12px; background:#f5f5f5; color:#ff3b30; border:none; border-radius:6px; font-size:13px; cursor:pointer;">下线</button>
+                    <span style="font-size:12px; color:#4caf50; padding:4px 10px; background:#e8f5e9; border-radius:10px;">● 已同步</span>
                 ` : `
-                    <span style="font-size:12px; color:#999;">○ 离线</span>
-                    <button onclick="goOnlineWithCharacter(${char.id})" style="padding:6px 12px; background:var(--ins-pink); color:#fff; border:none; border-radius:6px; font-size:13px; cursor:pointer;" ${!onlineConnected || !onlineUserData ? 'disabled style="opacity:0.5;padding:6px 12px; background:#ccc; color:#fff; border:none; border-radius:6px; font-size:13px;"' : ''}>上线</button>
+                    <span style="font-size:12px; color:#999; padding:4px 10px; background:#f5f5f5; border-radius:10px;">○ 未同步</span>
                 `}
             </div>
         </div>
