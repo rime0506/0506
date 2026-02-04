@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  wechat-online:
+    build: .
+    container_name: wechat-online-server
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - JWT_SECRET=${JWT_SECRET:-please-change-this-secret-in-production}
+      - DB_PATH=/app/data/database.sqlite
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('net').connect(3000).on('connect', () => process.exit(0)).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+
