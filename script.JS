@@ -748,31 +748,146 @@ async function migratePhoneAndSmsToIndexedDB() {
 
         // ===== 数据导入导出功能 =====
         
-        // 导出所有数据
-        async function exportAllData() {
+        // 显示导出选项弹窗
+        function showExportOptions() {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0,0,0,0.5);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 100000;
+            `;
+            
+            const dialog = document.createElement('div');
+            dialog.style.cssText = `
+                background: white;
+                border-radius: 12px;
+                padding: 24px;
+                max-width: 400px;
+                width: 90%;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            `;
+            
+            dialog.innerHTML = `
+                <h3 style="margin: 0 0 16px 0; font-size: 18px;">导出数据选项</h3>
+                <p style="margin: 0 0 20px 0; font-size: 14px; color: #666;">
+                    选择要导出的数据类型：
+                </p>
+                <div style="margin-bottom: 20px;">
+                    <label style="display: flex; align-items: center; margin-bottom: 12px; cursor: pointer;">
+                        <input type="checkbox" id="export-local-data" checked style="margin-right: 8px; width: 18px; height: 18px;">
+                        <div>
+                            <div style="font-weight: 500;">本地数据</div>
+                            <div style="font-size: 12px; color: #999;">
+                                包括：角色、聊天记录、世界书、表情包、朋友圈、群聊、电话/短信记录等
+                            </div>
+                        </div>
+                    </label>
+                    <label style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="export-online-data" checked style="margin-right: 8px; width: 18px; height: 18px;">
+                        <div>
+                            <div style="font-weight: 500;">联机账号数据</div>
+                            <div style="font-size: 12px; color: #999;">
+                                包括：联机服务器地址、登录Token、用户信息
+                            </div>
+                        </div>
+                    </label>
+                </div>
+                <div style="display: flex; gap: 12px; justify-content: flex-end;">
+                    <button id="export-cancel-btn" style="padding: 8px 16px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer;">
+                        取消
+                    </button>
+                    <button id="export-confirm-btn" style="padding: 8px 16px; border: none; background: #07c160; color: white; border-radius: 6px; cursor: pointer;">
+                        确定导出
+                    </button>
+                </div>
+            `;
+            
+            overlay.appendChild(dialog);
+            document.body.appendChild(overlay);
+            
+            // 绑定事件
+            document.getElementById('export-cancel-btn').onclick = () => {
+                document.body.removeChild(overlay);
+            };
+            
+            document.getElementById('export-confirm-btn').onclick = async () => {
+                const includeLocal = document.getElementById('export-local-data').checked;
+                const includeOnline = document.getElementById('export-online-data').checked;
+                
+                if (!includeLocal && !includeOnline) {
+                    alert('请至少选择一种数据类型');
+                    return;
+                }
+                
+                document.body.removeChild(overlay);
+                await exportAllDataWithOptions(includeLocal, includeOnline);
+            };
+            
+            // 点击背景关闭
+            overlay.onclick = (e) => {
+                if (e.target === overlay) {
+                    document.body.removeChild(overlay);
+                }
+            };
+        }
+        
+        // 导出所有数据（带选项）
+        async function exportAllDataWithOptions(includeLocal = true, includeOnline = true) {
             try {
                 const exportData = {
-                    version: '1.0',
+                    version: '2.0', // 版本升级到2.0
                     exportTime: new Date().toISOString(),
+                    dataTypes: {
+                        local: includeLocal,
+                        online: includeOnline
+                    },
                     data: {}
                 };
                 
-                // 导出所有数据库表
-                exportData.data.dexiData = await db.dexiData.toArray();
-                exportData.data.lorebooks = await db.lorebooks.toArray();
-                exportData.data.characters = await db.characters.toArray();
-                exportData.data.sticker_categories = await db.sticker_categories.toArray();
-                exportData.data.moments = await db.moments.toArray();
-                exportData.data.friend_requests = await db.friend_requests.toArray();
+                if (includeLocal) {
+                    // 导出所有数据库表
+                    exportData.data.dexiData = await db.dexiData.toArray();
+                    exportData.data.lorebooks = await db.lorebooks.toArray();
+                    exportData.data.characters = await db.characters.toArray();
+                    exportData.data.sticker_categories = await db.sticker_categories.toArray();
+                    exportData.data.moments = await db.moments.toArray();
+                    exportData.data.friend_requests = await db.friend_requests.toArray();
+                    
+                    // 新增：导出群聊数据
+                    exportData.data.group_chats = await db.group_chats.toArray();
+                    
+                    // 新增：导出电话和短信记录
+                    exportData.data.phone_recents = await db.phone_recents.toArray();
+                    exportData.data.sms_messages = await db.sms_messages.toArray();
+                    
+                    // 新增：导出聊天总结
+                    exportData.data.chat_summaries = await db.chat_summaries.toArray();
+                    
+                    // 导出本地 localStorage 数据
+                    exportData.localStorage = {
+                        user_id: localStorage.getItem('user_id'),
+                        current_my_char_id: localStorage.getItem('current_my_char_id'),
+                        notification_enabled: localStorage.getItem('notification_enabled'),
+                        debug_mode: localStorage.getItem('debug_mode'),
+                        keepalive_enabled: localStorage.getItem('keepalive_enabled')
+                    };
+                }
                 
-                // 导出 localStorage 数据
-                exportData.localStorage = {
-                    user_id: localStorage.getItem('user_id'),
-                    current_my_char_id: localStorage.getItem('current_my_char_id'),
-                    notification_enabled: localStorage.getItem('notification_enabled'),
-                    debug_mode: localStorage.getItem('debug_mode'),
-                    keepalive_enabled: localStorage.getItem('keepalive_enabled')
-                };
+                if (includeOnline) {
+                    // 导出联机相关数据
+                    exportData.onlineData = {
+                        server_url: localStorage.getItem('online_server_url'),
+                        token: localStorage.getItem('online_token'),
+                        user_data: localStorage.getItem('online_user_data')
+                    };
+                }
                 
                 // 转换为JSON字符串
                 const jsonString = JSON.stringify(exportData, null, 2);
@@ -782,29 +897,54 @@ async function migratePhoneAndSmsToIndexedDB() {
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `wechat_data_backup_${new Date().getTime()}.json`;
+                
+                // 根据导出的数据类型设置文件名
+                let filename = 'wechat_backup_';
+                if (includeLocal && includeOnline) {
+                    filename += 'full_';
+                } else if (includeLocal) {
+                    filename += 'local_';
+                } else if (includeOnline) {
+                    filename += 'online_';
+                }
+                filename += new Date().getTime() + '.json';
+                
+                a.download = filename;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
                 
-                alert('数据导出成功！');
+                // 显示导出的数据统计
+                let stats = [];
+                if (includeLocal) {
+                    const charCount = exportData.data.characters?.length || 0;
+                    const groupCount = exportData.data.group_chats?.length || 0;
+                    const momentCount = exportData.data.moments?.length || 0;
+                    stats.push(`角色: ${charCount}个`);
+                    stats.push(`群聊: ${groupCount}个`);
+                    stats.push(`朋友圈: ${momentCount}条`);
+                }
+                if (includeOnline) {
+                    stats.push('联机账号信息已包含');
+                }
+                
+                alert('数据导出成功！\n\n' + stats.join('\n'));
             } catch (error) {
                 console.error('导出数据失败:', error);
                 alert('导出数据失败: ' + error.message);
             }
         }
         
+        // 兼容旧版本：直接调用时显示选项
+        async function exportAllData() {
+            showExportOptions();
+        }
+        
         // 导入所有数据
         async function importAllData(input) {
             const file = input.files[0];
             if (!file) return;
-            
-            // 确认对话框
-            if (!confirm('导入数据将覆盖现有数据，是否继续？\n\n建议先导出当前数据作为备份。')) {
-                input.value = ''; // 清空文件选择
-                return;
-            }
             
             try {
                 const text = await file.text();
@@ -815,46 +955,127 @@ async function migratePhoneAndSmsToIndexedDB() {
                     throw new Error('数据格式不正确');
                 }
                 
+                // 检测数据类型
+                const hasLocalData = importData.dataTypes?.local !== false;
+                const hasOnlineData = importData.onlineData || (importData.dataTypes?.online === true);
+                
+                // 显示导入内容预览
+                let previewMsg = '即将导入以下数据：\n\n';
+                if (hasLocalData) {
+                    const charCount = importData.data.characters?.length || 0;
+                    const groupCount = importData.data.group_chats?.length || 0;
+                    const momentCount = importData.data.moments?.length || 0;
+                    previewMsg += `📱 本地数据：\n`;
+                    previewMsg += `  - 角色: ${charCount}个\n`;
+                    previewMsg += `  - 群聊: ${groupCount}个\n`;
+                    previewMsg += `  - 朋友圈: ${momentCount}条\n`;
+                    previewMsg += `  - 以及世界书、表情包、电话/短信记录等\n\n`;
+                }
+                if (hasOnlineData) {
+                    const userData = importData.onlineData?.user_data;
+                    if (userData) {
+                        try {
+                            const userObj = JSON.parse(userData);
+                            previewMsg += `🌐 联机账号：${userObj.username || '未知'}\n\n`;
+                        } catch {
+                            previewMsg += `🌐 联机账号数据\n\n`;
+                        }
+                    } else {
+                        previewMsg += `🌐 联机账号数据\n\n`;
+                    }
+                }
+                
+                previewMsg += '⚠️ 导入将覆盖现有数据！\n建议先导出当前数据作为备份。\n\n是否继续？';
+                
+                // 确认对话框
+                if (!confirm(previewMsg)) {
+                    input.value = ''; // 清空文件选择
+                    return;
+                }
+                
                 // 清空现有数据
-                await db.dexiData.clear();
-                await db.lorebooks.clear();
-                await db.characters.clear();
-                await db.sticker_categories.clear();
-                await db.moments.clear();
-                await db.friend_requests.clear();
+                if (hasLocalData) {
+                    await db.dexiData.clear();
+                    await db.lorebooks.clear();
+                    await db.characters.clear();
+                    await db.sticker_categories.clear();
+                    await db.moments.clear();
+                    await db.friend_requests.clear();
+                    
+                    // 清空新增的表
+                    if (db.group_chats) await db.group_chats.clear();
+                    if (db.phone_recents) await db.phone_recents.clear();
+                    if (db.sms_messages) await db.sms_messages.clear();
+                    if (db.chat_summaries) await db.chat_summaries.clear();
+                }
                 
                 // 导入数据库表数据
-                if (importData.data.dexiData) {
-                    await db.dexiData.bulkAdd(importData.data.dexiData);
-                }
-                if (importData.data.lorebooks) {
-                    await db.lorebooks.bulkAdd(importData.data.lorebooks);
-                }
-                if (importData.data.characters) {
-                    await db.characters.bulkAdd(importData.data.characters);
-                }
-                if (importData.data.sticker_categories) {
-                    await db.sticker_categories.bulkAdd(importData.data.sticker_categories);
-                }
-                if (importData.data.moments) {
-                    await db.moments.bulkAdd(importData.data.moments);
-                }
-                if (importData.data.friend_requests) {
-                    await db.friend_requests.bulkAdd(importData.data.friend_requests);
+                if (hasLocalData && importData.data) {
+                    if (importData.data.dexiData) {
+                        await db.dexiData.bulkAdd(importData.data.dexiData);
+                    }
+                    if (importData.data.lorebooks) {
+                        await db.lorebooks.bulkAdd(importData.data.lorebooks);
+                    }
+                    if (importData.data.characters) {
+                        await db.characters.bulkAdd(importData.data.characters);
+                    }
+                    if (importData.data.sticker_categories) {
+                        await db.sticker_categories.bulkAdd(importData.data.sticker_categories);
+                    }
+                    if (importData.data.moments) {
+                        await db.moments.bulkAdd(importData.data.moments);
+                    }
+                    if (importData.data.friend_requests) {
+                        await db.friend_requests.bulkAdd(importData.data.friend_requests);
+                    }
+                    
+                    // 导入新增的表
+                    if (importData.data.group_chats && db.group_chats) {
+                        await db.group_chats.bulkAdd(importData.data.group_chats);
+                    }
+                    if (importData.data.phone_recents && db.phone_recents) {
+                        await db.phone_recents.bulkAdd(importData.data.phone_recents);
+                    }
+                    if (importData.data.sms_messages && db.sms_messages) {
+                        await db.sms_messages.bulkAdd(importData.data.sms_messages);
+                    }
+                    if (importData.data.chat_summaries && db.chat_summaries) {
+                        await db.chat_summaries.bulkAdd(importData.data.chat_summaries);
+                    }
+                    
+                    // 导入 localStorage 数据
+                    if (importData.localStorage) {
+                        Object.keys(importData.localStorage).forEach(key => {
+                            const value = importData.localStorage[key];
+                            if (value !== null && value !== undefined) {
+                                localStorage.setItem(key, value);
+                            }
+                        });
+                    }
                 }
                 
-                // 导入 localStorage 数据
-                if (importData.localStorage) {
-                    Object.keys(importData.localStorage).forEach(key => {
-                        const value = importData.localStorage[key];
-                        if (value !== null) {
-                            localStorage.setItem(key, value);
-                        }
-                    });
+                // 导入联机数据
+                if (hasOnlineData && importData.onlineData) {
+                    if (importData.onlineData.server_url) {
+                        localStorage.setItem('online_server_url', importData.onlineData.server_url);
+                    }
+                    if (importData.onlineData.token) {
+                        localStorage.setItem('online_token', importData.onlineData.token);
+                    }
+                    if (importData.onlineData.user_data) {
+                        localStorage.setItem('online_user_data', importData.onlineData.user_data);
+                    }
                 }
                 
                 input.value = ''; // 清空文件选择
-                alert('数据导入成功！页面即将刷新...');
+                
+                let successMsg = '数据导入成功！\n\n';
+                if (hasLocalData) successMsg += '✅ 本地数据已导入\n';
+                if (hasOnlineData) successMsg += '✅ 联机账号已导入\n';
+                successMsg += '\n页面即将刷新...';
+                
+                alert(successMsg);
                 
                 // 刷新页面以应用导入的数据
                 setTimeout(() => {
@@ -870,7 +1091,7 @@ async function migratePhoneAndSmsToIndexedDB() {
         
         // 清空所有数据
         async function clearAllDataConfirm() {
-            const confirm1 = confirm('⚠️ 警告：此操作将删除所有数据！\n\n包括：\n- 所有角色和聊天记录\n- 所有世界书\n- 所有表情包\n- 所有朋友圈\n- API设置\n\n此操作不可恢复，确定要继续吗？');
+            const confirm1 = confirm('⚠️ 警告：此操作将删除所有数据！\n\n包括：\n- 所有角色和聊天记录\n- 所有世界书\n- 所有表情包\n- 所有朋友圈\n- 所有群聊\n- 电话和短信记录\n- 联机账号信息\n- API设置\n\n此操作不可恢复，确定要继续吗？');
             if (!confirm1) return;
             
             const confirm2 = prompt('请输入"确认删除"以继续：');
@@ -887,6 +1108,12 @@ async function migratePhoneAndSmsToIndexedDB() {
                 await db.sticker_categories.clear();
                 await db.moments.clear();
                 await db.friend_requests.clear();
+                
+                // 清空新增的表
+                if (db.group_chats) await db.group_chats.clear();
+                if (db.phone_recents) await db.phone_recents.clear();
+                if (db.sms_messages) await db.sms_messages.clear();
+                if (db.chat_summaries) await db.chat_summaries.clear();
                 
                 // 清空 localStorage
                 localStorage.clear();
