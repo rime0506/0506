@@ -26760,7 +26760,7 @@ async function handleOnlineMessage(data) {
             console.log('[Online] 认证成功，自动上线角色...');
             // 获取已上线的角色，然后自动上线本地角色
             requestOnlineCharacters();
-            // ✅ 自动上线所有 User 类型的角色
+            // ✅ 自动上线所有 User 类型的角色（角色上线后会通过 character_online 事件自动获取群聊列表）
             autoGoOnlineAllUserCharacters();
             break;
             
@@ -26770,7 +26770,15 @@ async function handleOnlineMessage(data) {
             localStorage.removeItem('online_token');
             localStorage.removeItem('online_user_data');
             updateOnlineStatus();
-            alert('登录失败: ' + (data.message || '认证失败'));
+            // ✅ 如果 token 过期，提示用户重新登录而不是注册
+            const errorMsg = data.message || '认证失败';
+            if (errorMsg.includes('过期') || errorMsg.includes('无效') || errorMsg.includes('expired') || errorMsg.includes('invalid')) {
+                alert('登录已过期，请重新登录（不要注册新账号，使用之前的用户名和密码登录）');
+                // 显示登录弹窗
+                showOnlineLoginModal();
+            } else {
+                alert('登录失败: ' + errorMsg);
+            }
             break;
             
         case 'login_success':
@@ -26830,8 +26838,9 @@ async function handleOnlineMessage(data) {
             requestOnlineCharacters();
             // 刷新联机状态页面（如果打开的话）
             refreshOnlineStatusPageContent();
-            // 获取联机群聊列表
+            // ✅ 获取联机群聊列表（使用第一个上线的角色）
             if (data.wx_account && onlineSocket && onlineSocket.readyState === WebSocket.OPEN) {
+                console.log('[Online] 角色上线后，自动获取群聊列表，使用微信号:', data.wx_account);
                 onlineSocket.send(JSON.stringify({
                     type: 'get_online_groups',
                     my_wx_account: data.wx_account
@@ -27951,6 +27960,11 @@ function openOnlineGroup(groupId) {
     // 显示群聊页面
     showOnlineGroupChatPage(group);
     
+    // 应用背景图（延迟一下确保页面已创建）
+    setTimeout(() => {
+        applyOnlineGroupBackground(groupId);
+    }, 100);
+    
     // 请求群成员
     const myWx = getMyOnlineWxAccount();
     if (myWx) {
@@ -27977,7 +27991,7 @@ function showOnlineGroupChatPage(group) {
     if (!page) {
         page = document.createElement('div');
         page.id = 'online-group-chat-page';
-        page.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:#f5f5f5; z-index:300; display:flex; flex-direction:column;`;
+        page.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:#ffffff; z-index:300; display:flex; flex-direction:column;`;
         document.body.appendChild(page);
     }
     
@@ -28087,6 +28101,9 @@ function showOnlineGroupChatPage(group) {
     
     // 初始化Emoji面板
     initOnlineGroupEmojiPanel();
+    
+    // 应用背景图
+    applyOnlineGroupBackground(group.id);
 }
 
 // 隐藏联机群聊页面
@@ -28112,6 +28129,14 @@ async function handleOnlineGroupMessage(data) {
         // 不是当前群，显示通知
         showToast(`[${data.message.sender_name}] ${data.message.content.substring(0, 20)}...`);
         return;
+    }
+    
+    // 如果是系统消息，检查是否是红包领取通知，如果是则更新红包状态
+    if (data.message.msg_type === 'system' && data.message.content.includes('领取了红包')) {
+        // 尝试从系统消息中提取红包ID和领取者信息
+        // 格式：XXX 领取了红包，获得 ¥X.XX
+        // 由于我们无法从系统消息中直接获取红包ID，这里只更新显示
+        // 实际的红包状态更新在 claimOnlineGroupRedPacket 中完成
     }
     
     currentOnlineGroupMessages.push(data.message);
@@ -28193,6 +28218,37 @@ function renderOnlineGroupMessages() {
                     <audio id="${audioId}" src="${parsedContent.audio}" style="display:none;"></audio>
                 </div>
             `;
+        }
+        // 处理红包消息
+        else if (msg.msg_type === 'redpacket') {
+            isSpecialMsg = true;
+            try {
+                const data = JSON.parse(msg.content);
+                const msgId = msg.id || ('rp_' + msg.created_at);
+                const claimedCount = (data.claimed || []).length;
+                const isAllClaimed = claimedCount >= data.count;
+                const myWx = getMyOnlineWxAccount();
+                const hasClaimed = data.claimed?.includes(myWx) || false;
+                
+                messageContent = `<div onclick="showOnlineGroupRedPacketDetail('${msgId}')" style="width:220px; background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.08); border:1px solid #eee; cursor:pointer;">
+                    <div style="padding:14px 16px; display:flex; align-items:center; gap:12px; background:linear-gradient(135deg, #ff6b6b 0%, #ff8e8e 100%);">
+                        <div style="width:40px; height:40px; background:#fff; border-radius:10px; display:flex; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,0.3);">
+                            <svg viewBox="0 0 24 24" style="width:20px; height:20px; stroke:#ff6b6b; fill:#ff6b6b; stroke-width:1.5;"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><circle cx="12" cy="15" r="2"/></svg>
+                        </div>
+                        <div style="flex:1;">
+                            <div style="font-size:13px; color:rgba(255,255,255,0.9); margin-bottom:2px;">${escapeHtml(data.wish || '恭喜发财')}</div>
+                            <div style="font-size:11px; color:rgba(255,255,255,0.7);">${data.redpacketType === 'lucky' ? '拼手气红包' : '普通红包'}</div>
+                        </div>
+                    </div>
+                    <div style="padding:8px 16px; display:flex; justify-content:space-between; align-items:center; border-top:1px solid #eee;">
+                        <span style="font-size:11px; color:#999;">${isAllClaimed ? '已领完' : `${claimedCount}/${data.count}个已领取`}</span>
+                        <span style="font-size:11px; color:#999;">${hasClaimed ? '已领取' : isAllClaimed ? '已领完' : '领取'}</span>
+                    </div>
+                </div>`;
+            } catch(e) {
+                messageContent = renderMessageContent(msg.content);
+                isSpecialMsg = false;
+            }
         }
         // 处理转账消息
         else if (msg.msg_type === 'transfer') {
@@ -28943,7 +28999,436 @@ function onlineGroupTransfer() {
 // 显示联机群聊红包页面
 function showOnlineGroupRedPacket() {
     document.getElementById('online-group-transfer-type-modal')?.remove();
-    showToast('红包功能暂不支持联机群聊');
+    
+    // 创建或显示红包页面
+    let page = document.getElementById('online-group-redpacket-page');
+    if (!page) {
+        page = document.createElement('div');
+        page.id = 'online-group-redpacket-page';
+        page.className = 'transfer-modal';
+        page.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:#fff; z-index:350; display:none; flex-direction:column;';
+        document.body.appendChild(page);
+    }
+    
+    page.innerHTML = `
+        <div class="transfer-page-header" style="background:#fff; border-bottom:0.5px solid #f0f0f0;">
+            <div class="back-btn" onclick="hideOnlineGroupRedPacketPage()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:#333;">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="transfer-page-title" style="color:#333;">发红包</div>
+            <div style="width:40px;"></div>
+        </div>
+        
+        <div style="flex:1; background:#fff; padding:16px;">
+            <!-- 红包类型选择 -->
+            <div style="background:#fff; border-radius:12px; padding:16px; margin-bottom:12px; border:1px solid #eee;">
+                <div style="font-size:13px; color:#999; margin-bottom:12px;">红包类型</div>
+                <div style="display:flex; gap:12px;">
+                    <div id="online-rp-type-lucky" onclick="selectOnlineRedPacketType('lucky')" style="flex:1; padding:12px; border:1.5px solid #333; border-radius:10px; text-align:center; cursor:pointer; background:#fff;">
+                        <div style="font-size:14px; font-weight:500; color:#333;">拼手气红包</div>
+                        <div style="font-size:11px; color:#999; margin-top:4px;">金额随机</div>
+                    </div>
+                    <div id="online-rp-type-normal" onclick="selectOnlineRedPacketType('normal')" style="flex:1; padding:12px; border:1.5px solid #e8e8e8; border-radius:10px; text-align:center; cursor:pointer; background:#fff;">
+                        <div style="font-size:14px; font-weight:500; color:#666;">普通红包</div>
+                        <div style="font-size:11px; color:#999; margin-top:4px;">金额相同</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 红包金额 -->
+            <div style="background:#fff; border-radius:12px; padding:16px; margin-bottom:12px; border:1px solid #eee;">
+                <div style="display:flex; align-items:center; border-bottom:1px solid #f0f0f0; padding-bottom:14px; margin-bottom:14px;">
+                    <div style="font-size:14px; color:#999; width:70px;">总金额</div>
+                    <div style="flex:1; display:flex; align-items:center;">
+                        <span style="font-size:18px; color:#333; margin-right:4px;">¥</span>
+                        <input type="number" id="online-rp-amount-input" placeholder="0.00" style="flex:1; border:none; font-size:22px; font-weight:500; outline:none; color:#333;" oninput="checkOnlineRedPacketInput()">
+                    </div>
+                </div>
+                <div style="display:flex; align-items:center;">
+                    <div style="font-size:14px; color:#999; width:70px;">红包个数</div>
+                    <div style="flex:1; display:flex; align-items:center;">
+                        <input type="number" id="online-rp-count-input" placeholder="1" min="1" style="flex:1; border:none; font-size:16px; outline:none; color:#333;" oninput="checkOnlineRedPacketInput()">
+                        <span style="font-size:13px; color:#999;">个</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 祝福语 -->
+            <div style="background:#fff; border-radius:12px; padding:14px 16px; margin-bottom:24px; border:1px solid #eee;">
+                <input type="text" id="online-rp-wish-input" placeholder="祝福语（选填）" maxlength="20" style="width:100%; border:none; font-size:14px; outline:none; box-sizing:border-box; color:#333;">
+            </div>
+            
+            <!-- 金额提示 -->
+            <div style="text-align:center; margin-bottom:20px;">
+                <span style="font-size:13px; color:#999;" id="online-rp-total-hint">共0.00元</span>
+            </div>
+            
+            <!-- 发送按钮 -->
+            <button id="btn-send-online-redpacket" onclick="sendOnlineGroupRedPacket()" disabled style="width:100%; padding:14px; background:#ccc; color:#fff; border:none; border-radius:24px; font-size:16px; font-weight:500; cursor:not-allowed; transition:all 0.2s;">
+                发红包
+            </button>
+        </div>
+    `;
+    
+    // 重置输入
+    document.getElementById('online-rp-amount-input').value = '';
+    document.getElementById('online-rp-count-input').value = '';
+    document.getElementById('online-rp-wish-input').value = '';
+    document.getElementById('online-rp-total-hint').innerText = '共0.00元';
+    document.getElementById('btn-send-online-redpacket').disabled = true;
+    document.getElementById('btn-send-online-redpacket').style.background = '#ccc';
+    document.getElementById('btn-send-online-redpacket').style.cursor = 'not-allowed';
+    
+    // 默认选中拼手气
+    selectOnlineRedPacketType('lucky');
+    
+    page.style.display = 'flex';
+}
+
+// 隐藏联机群聊红包页面
+function hideOnlineGroupRedPacketPage() {
+    const page = document.getElementById('online-group-redpacket-page');
+    if (page) page.style.display = 'none';
+}
+
+// 联机群聊红包类型
+let currentOnlineRedPacketType = 'lucky';
+
+// 选择联机群聊红包类型
+function selectOnlineRedPacketType(type) {
+    currentOnlineRedPacketType = type;
+    
+    const luckyEl = document.getElementById('online-rp-type-lucky');
+    const normalEl = document.getElementById('online-rp-type-normal');
+    
+    if (!luckyEl || !normalEl) return;
+    
+    if (type === 'lucky') {
+        luckyEl.style.borderColor = '#333';
+        luckyEl.style.background = '#fff';
+        luckyEl.querySelector('div:first-child').style.color = '#333';
+        
+        normalEl.style.borderColor = '#e8e8e8';
+        normalEl.style.background = '#fff';
+        normalEl.querySelector('div:first-child').style.color = '#666';
+    } else {
+        normalEl.style.borderColor = '#333';
+        normalEl.style.background = '#fff';
+        normalEl.querySelector('div:first-child').style.color = '#333';
+        
+        luckyEl.style.borderColor = '#e8e8e8';
+        luckyEl.style.background = '#fff';
+        luckyEl.querySelector('div:first-child').style.color = '#666';
+    }
+}
+
+// 检查联机群聊红包输入
+function checkOnlineRedPacketInput() {
+    const amount = parseFloat(document.getElementById('online-rp-amount-input')?.value || 0);
+    const count = parseInt(document.getElementById('online-rp-count-input')?.value || 0);
+    const btn = document.getElementById('btn-send-online-redpacket');
+    const hint = document.getElementById('online-rp-total-hint');
+    
+    if (!btn || !hint) return;
+    
+    if (amount > 0 && count > 0) {
+        hint.innerText = `共${amount.toFixed(2)}元`;
+        btn.disabled = false;
+        btn.style.background = '#333';
+        btn.style.cursor = 'pointer';
+    } else {
+        hint.innerText = '共0.00元';
+        btn.disabled = true;
+        btn.style.background = '#ccc';
+        btn.style.cursor = 'not-allowed';
+    }
+}
+
+// 发送联机群聊红包
+async function sendOnlineGroupRedPacket() {
+    if (!currentOnlineGroupId) return;
+    
+    const amount = parseFloat(document.getElementById('online-rp-amount-input')?.value);
+    const count = parseInt(document.getElementById('online-rp-count-input')?.value);
+    const wish = document.getElementById('online-rp-wish-input')?.value.trim() || '恭喜发财，大吉大利';
+    
+    if (!amount || amount <= 0 || !count || count <= 0) {
+        showToast('请填写正确的金额和个数');
+        return;
+    }
+    
+    // 检查余额
+    if (!currentMyCharId) {
+        showToast("请先设置User身份");
+        return;
+    }
+    const user = await db.characters.get(parseInt(currentMyCharId));
+    let currentBalance = 0;
+    if (user && user.identity && user.identity.balance) {
+        currentBalance = parseFloat(user.identity.balance.toString().replace(/,/g, ''));
+    }
+    
+    if (currentBalance < amount) {
+        showToast('余额不足 (当前: ¥' + currentBalance.toFixed(2) + ')');
+        return;
+    }
+    
+    // 扣款
+    const newBalance = currentBalance - amount;
+    user.identity.balance = newBalance.toFixed(2);
+    await db.characters.put(user);
+    
+    // 构建红包数据
+    const redPacketData = {
+        type: 'redpacket',
+        redpacketType: currentOnlineRedPacketType, // 'lucky' 或 'normal'
+        totalAmount: amount.toFixed(2),
+        count: count,
+        wish: wish,
+        claimed: [], // 已领取的成员微信号列表
+        claimedAmounts: {}, // 每个成员领取的金额 {wx_account: amount}
+        id: 'rp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+    };
+    
+    // 发送到服务器
+    const myWx = getMyOnlineWxAccount();
+    const myChar = onlineCharacters.find(c => c.wx_account === myWx);
+    
+    onlineSocket.send(JSON.stringify({
+        type: 'send_group_message',
+        group_id: currentOnlineGroupId,
+        my_wx_account: myWx,
+        sender_type: 'user',
+        sender_name: myChar?.nickname || myWx,
+        content: JSON.stringify(redPacketData),
+        msg_type: 'redpacket'
+    }));
+    
+    // 记录账单
+    await addTransaction('expense', amount, '发红包', `联机群聊 · ${count}个红包`);
+    
+    hideOnlineGroupRedPacketPage();
+    showToast('红包已发出');
+}
+
+// 显示联机群聊红包详情
+function showOnlineGroupRedPacketDetail(msgId) {
+    // 在消息列表中找到红包消息
+    const msg = currentOnlineGroupMessages.find(m => {
+        if (m.msg_type !== 'redpacket') return false;
+        return (m.id || ('rp_' + m.created_at)) === msgId;
+    });
+    
+    if (!msg) {
+        showToast('红包不存在');
+        return;
+    }
+    
+    try {
+        const data = JSON.parse(msg.content);
+        const myWx = getMyOnlineWxAccount();
+        const hasClaimed = data.claimed?.includes(myWx) || false;
+        const claimedCount = (data.claimed || []).length;
+        const isAllClaimed = claimedCount >= data.count;
+        
+        // 创建或显示红包详情页面
+        let page = document.getElementById('online-group-redpacket-detail-page');
+        if (!page) {
+            page = document.createElement('div');
+            page.id = 'online-group-redpacket-detail-page';
+            page.className = 'transfer-modal';
+            page.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:#fff; z-index:360; display:none; flex-direction:column;';
+            document.body.appendChild(page);
+        }
+        
+        page.innerHTML = `
+            <div class="transfer-page-header" style="background:#fff; border-bottom:0.5px solid #f0f0f0;">
+                <div class="back-btn" onclick="hideOnlineGroupRedPacketDetail()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:#333;">
+                    <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                </div>
+                <div class="transfer-page-title" style="color:#333;">红包详情</div>
+                <div style="width:40px;"></div>
+            </div>
+            
+            <div style="flex:1; background:#fff; overflow-y:auto;">
+                <!-- 红包信息头部 -->
+                <div style="padding:30px 20px; text-align:center; border-bottom:1px solid #f0f0f0;">
+                    <div id="online-rp-detail-avatar" style="width:60px; height:60px; border-radius:50%; background:#eee; margin:0 auto 12px; background-size:cover; background-position:center;"></div>
+                    <div id="online-rp-detail-sender" style="font-size:15px; color:#333; margin-bottom:8px;">${msg.sender_name} 的红包</div>
+                    <div id="online-rp-detail-wish" style="font-size:18px; font-weight:500; color:#333; margin-bottom:6px;">${escapeHtml(data.wish || '恭喜发财')}</div>
+                    <div id="online-rp-detail-type" style="font-size:13px; color:#999;">${data.redpacketType === 'lucky' ? '拼手气红包' : '普通红包'}</div>
+                </div>
+                
+                <!-- 领取按钮区域 -->
+                <div id="online-rp-detail-action" style="padding:20px; border-bottom:1px solid #f0f0f0;">
+                    <button id="btn-claim-online-redpacket" onclick="claimOnlineGroupRedPacket('${msgId}', '${myWx}', null)" style="width:100%; padding:14px; background:${isAllClaimed || hasClaimed ? '#ccc' : '#333'}; color:#fff; border:none; border-radius:24px; font-size:16px; font-weight:500; cursor:${isAllClaimed || hasClaimed ? 'not-allowed' : 'pointer'};" ${isAllClaimed || hasClaimed ? 'disabled' : ''}>
+                        ${isAllClaimed ? '红包已领完' : hasClaimed ? `已领取 ¥${(data.claimedAmounts?.[myWx] || '0.00')}` : '领取红包'}
+                    </button>
+                </div>
+                
+                <!-- 已领取列表 -->
+                <div style="padding:16px 20px;">
+                    <div style="font-size:13px; color:#999; margin-bottom:12px;">
+                        <span id="online-rp-detail-claimed-count">${claimedCount}</span>/<span id="online-rp-detail-total-count">${data.count}</span> 已领取，共 <span id="online-rp-detail-total-amount">${Object.values(data.claimedAmounts || {}).reduce((a, b) => a + parseFloat(b), 0).toFixed(2)}</span> 元
+                    </div>
+                    <div id="online-rp-detail-claimed-list">
+                        ${data.claimed && data.claimed.length > 0 ? 
+                            data.claimed.map(wx => {
+                                const member = currentOnlineGroupMembers.find(m => m.user_wx === wx);
+                                const amount = data.claimedAmounts?.[wx] || '0.00';
+                                return `
+                                    <div style="display:flex; align-items:center; padding:12px 0; border-bottom:1px solid #f0f0f0;">
+                                        <div style="width:40px; height:40px; border-radius:50%; background:#eee; background-image:url(${member?.user_avatar || ''}); background-size:cover; background-position:center; margin-right:12px; flex-shrink:0;"></div>
+                                        <div style="flex:1;">
+                                            <div style="font-size:14px; color:#333;">${member?.user_name || wx}</div>
+                                        </div>
+                                        <div style="font-size:15px; font-weight:500; color:#333;">¥${amount}</div>
+                                    </div>
+                                `;
+                            }).join('') : 
+                            '<div style="text-align:center; color:#999; padding:30px 0; font-size:13px;">暂无人领取</div>'
+                        }
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // 设置发送者头像
+        const avatarEl = document.getElementById('online-rp-detail-avatar');
+        if (msg.sender_avatar) {
+            avatarEl.style.backgroundImage = `url(${msg.sender_avatar})`;
+        }
+        
+        page.style.display = 'flex';
+    } catch(e) {
+        console.error('显示红包详情失败:', e);
+        showToast('红包数据错误');
+    }
+}
+
+// 隐藏联机群聊红包详情
+function hideOnlineGroupRedPacketDetail() {
+    const page = document.getElementById('online-group-redpacket-detail-page');
+    if (page) page.style.display = 'none';
+}
+
+// 领取联机群聊红包（用户或角色都可以）
+async function claimOnlineGroupRedPacket(msgId, claimerWx, characterName) {
+    if (!currentOnlineGroupId) return;
+    
+    // 在消息列表中找到红包消息
+    const msgIndex = currentOnlineGroupMessages.findIndex(m => {
+        if (m.msg_type !== 'redpacket') return false;
+        return (m.id || ('rp_' + m.created_at)) === msgId;
+    });
+    
+    if (msgIndex === -1) {
+        showToast('红包不存在');
+        return;
+    }
+    
+    const msg = currentOnlineGroupMessages[msgIndex];
+    let data;
+    try {
+        data = JSON.parse(msg.content);
+    } catch(e) {
+        showToast('红包数据错误');
+        return;
+    }
+    
+    // 检查是否已领取完
+    const claimedCount = (data.claimed || []).length;
+    if (claimedCount >= data.count) {
+        showToast('红包已被领完');
+        return;
+    }
+    
+    // 检查是否已领取过
+    if (data.claimed?.includes(claimerWx)) {
+        showToast('你已领取过该红包');
+        return;
+    }
+    
+    // 计算领取金额
+    let claimAmount = 0;
+    const totalAmount = parseFloat(data.totalAmount);
+    const remaining = data.count - claimedCount;
+    const alreadyClaimed = Object.values(data.claimedAmounts || {}).reduce((a, b) => a + parseFloat(b), 0);
+    const remainingAmount = totalAmount - alreadyClaimed;
+    
+    if (data.redpacketType === 'lucky') {
+        // 拼手气红包：随机金额
+        if (remaining === 1) {
+            claimAmount = remainingAmount;
+        } else {
+            // 随机金额，确保每人至少0.01
+            const maxAmount = remainingAmount - (remaining - 1) * 0.01;
+            claimAmount = Math.random() * maxAmount * 0.8 + 0.01; // 保守随机
+            claimAmount = Math.min(claimAmount, maxAmount);
+        }
+    } else {
+        // 普通红包：平均分配
+        claimAmount = totalAmount / data.count;
+    }
+    
+    claimAmount = parseFloat(claimAmount.toFixed(2));
+    
+    // 更新红包数据
+    if (!data.claimed) data.claimed = [];
+    if (!data.claimedAmounts) data.claimedAmounts = {};
+    data.claimed.push(claimerWx);
+    data.claimedAmounts[claimerWx] = claimAmount.toFixed(2);
+    
+    // 发送系统消息通知红包领取
+    const myWx = getMyOnlineWxAccount();
+    const claimerName = characterName || (onlineCharacters.find(c => c.wx_account === claimerWx)?.nickname || claimerWx);
+    
+    // 发送系统消息
+    onlineSocket.send(JSON.stringify({
+        type: 'send_group_message',
+        group_id: currentOnlineGroupId,
+        my_wx_account: myWx,
+        sender_type: 'system',
+        sender_name: '系统',
+        content: `${claimerName} 领取了红包，获得 ¥${claimAmount.toFixed(2)}`,
+        msg_type: 'system'
+    }));
+    
+    // 更新本地消息中的红包数据
+    currentOnlineGroupMessages[msgIndex].content = JSON.stringify(data);
+    renderOnlineGroupMessages();
+    
+    // 如果是用户领取，更新钱包
+    if (!characterName) {
+        // 用户领取
+        if (!currentMyCharId) {
+            showToast('请先设置User身份');
+            return;
+        }
+        const user = await db.characters.get(parseInt(currentMyCharId));
+        if (user) {
+            if (!user.identity) user.identity = {};
+            let balance = parseFloat(user.identity.balance || 0);
+            balance += claimAmount;
+            user.identity.balance = balance.toFixed(2);
+            await db.characters.put(user);
+            
+            // 记录账单
+            const group = onlineGroups.find(g => g.id === currentOnlineGroupId);
+            await addTransaction('income', claimAmount, '红包', group?.name || '联机群聊');
+            
+            showToast(`成功领取 ¥${claimAmount.toFixed(2)}`);
+        }
+    } else {
+        // 角色领取 - 这里可以记录到角色的钱包（如果有的话）
+        showToast(`${characterName} 领取了红包，获得 ¥${claimAmount.toFixed(2)}`);
+    }
+    
+    // 刷新红包详情页面（如果已打开）
+    const detailPage = document.getElementById('online-group-redpacket-detail-page');
+    if (detailPage && detailPage.style.display !== 'none') {
+        showOnlineGroupRedPacketDetail(msgId);
+    }
 }
 
 // 显示联机群聊专属转账选人页面
@@ -29178,10 +29663,42 @@ async function letMyCharacterSpeak() {
         });
         console.log('[联机群聊] 群成员信息:\n', membersInfo);
         
+        // 收集未领完的红包信息
+        let pendingRedPackets = [];
+        currentOnlineGroupMessages.forEach(msg => {
+            if (msg.msg_type === 'redpacket') {
+                try {
+                    const rpData = JSON.parse(msg.content);
+                    const claimedCount = (rpData.claimed || []).length;
+                    const isAllClaimed = claimedCount >= rpData.count;
+                    const myWx = getMyOnlineWxAccount();
+                    const hasClaimed = rpData.claimed?.includes(myWx) || false;
+                    
+                    if (!isAllClaimed && !hasClaimed) {
+                        pendingRedPackets.push({
+                            id: msg.id || ('rp_' + msg.created_at),
+                            wish: rpData.wish || '恭喜发财',
+                            remaining: rpData.count - claimedCount,
+                            claimed: rpData.claimed || []
+                        });
+                    }
+                } catch(e) {}
+            }
+        });
+        
         // 构建上下文
         const context = currentOnlineGroupMessages.map(msg => {
             const isChar = msg.sender_type === 'character';
-            if (isChar) {
+            if (msg.msg_type === 'redpacket') {
+                try {
+                    const rpData = JSON.parse(msg.content);
+                    const claimedCount = (rpData.claimed || []).length;
+                    const isAllClaimed = claimedCount >= rpData.count;
+                    return `[${msg.sender_name}]: [发送了红包] "${rpData.wish || '恭喜发财'}" (红包ID: ${msg.id || ('rp_' + msg.created_at)}, ${isAllClaimed ? '已领完' : `还剩${rpData.count - claimedCount}个可领`})`;
+                } catch(e) {
+                    return `[${msg.sender_name}]: [发送了红包]`;
+                }
+            } else if (isChar) {
                 // 角色消息：显示角色名和主人名
                 return `[${msg.character_name}（${msg.sender_name}的角色）]: ${msg.content}`;
             } else {
@@ -29199,6 +29716,12 @@ ${myOnlineGroupCharacter.desc || '（无特定人设）'}
 
 【${membersInfo}】
 
+${pendingRedPackets.length > 0 ? `
+🧧 群里有未领完的红包！
+${pendingRedPackets.map(rp => `- 红包ID: ${rp.id}, 祝福语: "${rp.wish}", 还剩 ${rp.remaining} 个可领`).join('\n')}
+提示：看到红包时，你可以积极去抢！使用 {"type": "claim_redpacket", "redpacketId": "红包ID"} 来领取红包。
+` : ''}
+
 【重要回复规则 - 必须严格遵守】
 1. **必须**模拟微信连发消息的习惯：请生成 2 到 4 条短消息，不能只发一条！
 2. **必须**使用分隔符 "|||" 来隔开每一条消息。
@@ -29212,10 +29735,18 @@ ${myOnlineGroupCharacter.desc || '（无特定人设）'}
 8. 请根据群聊上下文，以"${myOnlineGroupCharacter.name}"的身份自然地参与对话
 9. 只回复你要说的内容，不要加任何前缀如"${myOnlineGroupCharacter.name}:"
 10. 回复要符合你的人设性格
+11. **领取红包**：如果群聊中有红包消息（msg_type为'redpacket'），你可以积极去领取！使用 {"type": "claim_redpacket", "redpacketId": "红包ID"} 来领取红包。红包会记入你的钱包余额。
 
 请以JSON格式返回，格式如下：
 {
   "reply": "你的回复内容|||第二条内容|||第三条内容"
+}
+
+**特殊指令**：如果群聊中有未领取的红包，你可以使用以下格式领取：
+{
+  "type": "claim_redpacket",
+  "redpacketId": "红包ID",
+  "reply": "你的回复内容（可选）"
 }
 
 请严格返回JSON格式，不要包含Markdown代码块标记。`;
@@ -29261,7 +29792,21 @@ ${myOnlineGroupCharacter.desc || '（无特定人设）'}
                 cleanResponse = cleanResponse.replace(/```json?\n?/g, '').replace(/```$/g, '').trim();
             }
             const parsed = JSON.parse(cleanResponse);
-            replyText = parsed.reply || parsed.content || parsed.message || aiResponse;
+            
+            // 检查是否是领取红包指令
+            if (parsed.type === 'claim_redpacket' && parsed.redpacketId) {
+                console.log('[联机群聊] 🧧 角色尝试领取红包:', parsed.redpacketId);
+                await claimOnlineGroupRedPacket(parsed.redpacketId, myWx, myOnlineGroupCharacter.name);
+                
+                // 如果有回复内容，也发送
+                if (parsed.reply) {
+                    replyText = parsed.reply;
+                } else {
+                    replyText = '';
+                }
+            } else {
+                replyText = parsed.reply || parsed.content || parsed.message || aiResponse;
+            }
             console.log('[联机群聊] JSON解析成功，提取到回复内容:', replyText);
         } catch (e) {
             // 不是JSON格式，直接使用原始响应
@@ -29384,6 +29929,19 @@ function showOnlineGroupInfo(groupId) {
                 </div>
             </div>
             
+            <div style="background:#fff; padding:16px; margin-bottom:10px;">
+                <div style="font-size:14px; font-weight:500; margin-bottom:12px;">聊天背景图</div>
+                <div style="display:flex; flex-direction:column; gap:12px;">
+                    <div style="display:flex; gap:8px;">
+                        <button onclick="document.getElementById('online-group-bg-input').setAttribute('data-group-id', '${groupId}'); document.getElementById('online-group-bg-input').click()" style="flex:1; padding:8px 12px; background:#f0f0f0; border:none; border-radius:6px; font-size:13px; color:#666; cursor:pointer;">上传背景</button>
+                        <button onclick="clearOnlineGroupBackground('${groupId}')" style="flex:1; padding:8px 12px; background:#f0f0f0; border:none; border-radius:6px; font-size:13px; color:#666; cursor:pointer;">清除背景</button>
+                    </div>
+                    <div id="online-group-bg-preview" style="width:100%; height:120px; border-radius:8px; background:#f5f5f5; background-size:cover; background-position:center; border:1px solid #e8e8e8; display:flex; align-items:center; justify-content:center; color:#999; font-size:12px;">
+                        暂无背景图
+                    </div>
+                </div>
+            </div>
+            
             <div style="background:#fff; padding:16px;">
                 <button onclick="inviteFriendToGroup('${groupId}')" style="width:100%; padding:14px; background:#f5f5f5; color:#333; border:none; border-radius:8px; font-size:15px; margin-bottom:10px;">邀请好友</button>
             </div>
@@ -29391,6 +29949,9 @@ function showOnlineGroupInfo(groupId) {
     `;
     
     document.body.appendChild(page);
+    
+    // 加载并显示背景图预览
+    loadOnlineGroupBackgroundPreview(groupId);
 }
 
 // 显示更换角色弹窗
@@ -29492,6 +30053,154 @@ function doInviteFriend(groupId, friendWx) {
     
     document.getElementById('invite-friend-modal')?.remove();
     showToast('邀请已发送');
+}
+
+// 设置联机群聊背景图
+async function setOnlineGroupBackground(input) {
+    if (!input.files || !input.files[0]) return;
+    
+    const groupId = input.getAttribute('data-group-id') || currentOnlineGroupId;
+    if (!groupId) {
+        showToast('无法获取群聊ID');
+        return;
+    }
+    
+    const file = input.files[0];
+    const reader = new FileReader();
+    
+    reader.onload = async function(e) {
+        const base64 = e.target.result;
+        const accountId = getCurrentAccountId();
+        if (!accountId) return;
+        
+        try {
+            // 查找对应的本地群聊记录
+            const groups = await db.group_chats
+                .where('ownerAccountId').equals(accountId)
+                .filter(g => g.isOnlineGroup && g.onlineGroupId === groupId)
+                .toArray();
+            
+            if (groups.length > 0) {
+                const group = groups[0];
+                group.chat_background = base64;
+                await db.group_chats.put(group);
+                
+                // 应用背景图
+                applyOnlineGroupBackground(groupId);
+                
+                // 更新预览
+                loadOnlineGroupBackgroundPreview(groupId);
+                
+                showToast('背景图已设置');
+            }
+        } catch (e) {
+            console.error('保存联机群聊背景图失败:', e);
+            showToast('保存失败');
+        }
+    };
+    
+    reader.readAsDataURL(file);
+}
+
+// 清除联机群聊背景图
+async function clearOnlineGroupBackground(groupId) {
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    try {
+        // 查找对应的本地群聊记录
+        const groups = await db.group_chats
+            .where('ownerAccountId').equals(accountId)
+            .filter(g => g.isOnlineGroup && g.onlineGroupId === groupId)
+            .toArray();
+        
+        if (groups.length > 0) {
+            const group = groups[0];
+            group.chat_background = null;
+            await db.group_chats.put(group);
+            
+            // 应用背景图（清除）
+            applyOnlineGroupBackground(groupId);
+            
+            // 更新预览
+            loadOnlineGroupBackgroundPreview(groupId);
+            
+            showToast('背景图已清除');
+        }
+    } catch (e) {
+        console.error('清除联机群聊背景图失败:', e);
+        showToast('清除失败');
+    }
+}
+
+// 应用联机群聊背景图
+async function applyOnlineGroupBackground(groupId) {
+    const page = document.getElementById('online-group-chat-page');
+    if (!page) return;
+    
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    try {
+        // 查找对应的本地群聊记录
+        const groups = await db.group_chats
+            .where('ownerAccountId').equals(accountId)
+            .filter(g => g.isOnlineGroup && g.onlineGroupId === groupId)
+            .toArray();
+        
+        if (groups.length > 0) {
+            const group = groups[0];
+            if (group.chat_background) {
+                page.style.backgroundImage = `url(${group.chat_background})`;
+                page.style.backgroundSize = 'cover';
+                page.style.backgroundPosition = 'center';
+                page.style.backgroundRepeat = 'no-repeat';
+                page.style.backgroundAttachment = 'fixed';
+            } else {
+                page.style.backgroundImage = '';
+                page.style.backgroundSize = '';
+                page.style.backgroundPosition = '';
+                page.style.backgroundRepeat = '';
+                page.style.backgroundAttachment = '';
+                page.style.backgroundColor = '#ffffff';
+            }
+        }
+    } catch (e) {
+        console.error('应用联机群聊背景图失败:', e);
+    }
+}
+
+// 加载联机群聊背景图预览
+async function loadOnlineGroupBackgroundPreview(groupId) {
+    const preview = document.getElementById('online-group-bg-preview');
+    if (!preview) return;
+    
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    try {
+        // 查找对应的本地群聊记录
+        const groups = await db.group_chats
+            .where('ownerAccountId').equals(accountId)
+            .filter(g => g.isOnlineGroup && g.onlineGroupId === groupId)
+            .toArray();
+        
+        if (groups.length > 0) {
+            const group = groups[0];
+            if (group.chat_background) {
+                preview.style.backgroundImage = `url(${group.chat_background})`;
+                preview.innerHTML = '';
+            } else {
+                preview.style.backgroundImage = '';
+                preview.innerHTML = '暂无背景图';
+            }
+        } else {
+            preview.style.backgroundImage = '';
+            preview.innerHTML = '暂无背景图';
+        }
+    } catch (e) {
+        console.error('加载联机群聊背景图预览失败:', e);
+    }
 }
 
 // ==================== 联机群聊功能结束 ====================
