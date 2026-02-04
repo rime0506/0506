@@ -8800,6 +8800,52 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             listDiv.style.background = '#fff';
             
             for (const req of myRequests) {
+                // 处理联机群聊邀请
+                if (req.isGroupInvite && req.groupData) {
+                    const groupInvite = req.groupData;
+                    const item = document.createElement('div');
+                    item.style.display = 'flex';
+                    item.style.padding = '12px 16px';
+                    item.style.borderBottom = '0.5px solid #f0f0f0';
+                    item.style.alignItems = 'center';
+                    item.style.gap = '12px';
+                    
+                    let buttons = '';
+                    let statusLabel = '';
+                    
+                    if (req.status === 'pending') {
+                        buttons = `
+                            <button onclick="acceptGroupInvite(${req.id})" style="background:var(--ins-pink); color:#fff; border:none; padding:6px 16px; border-radius:4px; font-size:14px; margin-right:8px;">同意</button>
+                            <button onclick="rejectGroupInvite(${req.id})" style="background:#f0f0f0; color:#666; border:none; padding:6px 16px; border-radius:4px; font-size:14px;">拒绝</button>
+                        `;
+                    } else if (req.status === 'accepted') {
+                        statusLabel = '<div style="color:#999; font-size:12px;">已加入</div>';
+                    } else {
+                        statusLabel = '<div style="color:#999; font-size:12px;">已拒绝</div>';
+                    }
+                    
+                    item.innerHTML = `
+                        <div style="width:48px; height:48px; border-radius:4px; background:linear-gradient(135deg, #f093fb 0%, #f5576c 100%); display:flex; align-items:center; justify-content:center; flex-shrink:0; position:relative;">
+                            <svg style="width:24px; height:24px; stroke:#fff; fill:none;" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                            <div style="position:absolute; bottom:-2px; right:-2px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius:50%; width:16px; height:16px; display:flex; align-items:center; justify-content:center;">
+                                <svg style="width:10px; height:10px; stroke:#fff; fill:none;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle></svg>
+                            </div>
+                        </div>
+                        <div style="flex:1; min-width:0;">
+                            <div style="font-size:16px; font-weight:500; color:#333; margin-bottom:4px;">
+                                群聊邀请
+                                <span style="font-size:11px; color:#f5576c; margin-left:6px;">联机群聊</span>
+                            </div>
+                            <div style="font-size:12px; color:#666; line-height:1.5;">${groupInvite.inviter_name} 邀请你加入「${groupInvite.group_name}」</div>
+                        </div>
+                        <div style="display:flex; align-items:center; flex-shrink:0;">
+                            ${buttons}${statusLabel}
+                        </div>
+                    `;
+                    listDiv.appendChild(item);
+                    continue;
+                }
+                
                 // 处理联机好友申请
                 if (req.isOnline && req.onlineData) {
                     const onlineReq = req.onlineData;
@@ -9007,6 +9053,118 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             }
             
             // 更新申请状态
+            request.status = 'rejected';
+            await db.friend_requests.put(request);
+            
+            // 刷新页面
+            await renderNewFriendsPage();
+        }
+
+        // 接受群聊邀请 - 弹出选择角色的弹窗
+        async function acceptGroupInvite(requestId) {
+            const request = await db.friend_requests.get(requestId);
+            if (!request || !request.isGroupInvite || !request.groupData) return;
+            
+            if (!onlineConnected || !onlineUserData) {
+                alert('请先连接服务器并登录');
+                return;
+            }
+            
+            const myWx = getMyOnlineWxAccount();
+            if (!myWx) {
+                alert('请先上线一个角色');
+                return;
+            }
+            
+            // 显示选择角色的弹窗
+            showJoinGroupWithCharModal(requestId, request.groupData);
+        }
+
+        // 显示加入群聊并选择角色的弹窗
+        async function showJoinGroupWithCharModal(requestId, groupData) {
+            // 获取所有可用的角色（非User类型和非联机好友）
+            const chars = await db.characters.toArray();
+            const availableChars = chars.filter(c => c.type !== 'user' && c.type !== 'online_friend');
+            
+            const modal = document.createElement('div');
+            modal.id = 'join-group-char-modal';
+            modal.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;`;
+            
+            modal.innerHTML = `
+                <div style="background:#fff; border-radius:16px; padding:24px; width:85%; max-width:360px;">
+                    <h3 style="margin:0 0 16px 0; text-align:center; font-size:18px;">加入「${groupData.group_name}」</h3>
+                    
+                    <div style="margin-bottom:16px;">
+                        <div style="font-size:13px; color:#666; margin-bottom:8px;">选择要带入群聊的角色：</div>
+                        <select id="join-group-char-select-modal" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px;">
+                            <option value="">不带角色</option>
+                            ${availableChars.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+                        </select>
+                    </div>
+                    
+                    <div style="font-size:12px; color:#999; margin-bottom:20px; line-height:1.5;">
+                        带入角色后，你可以在群聊中让该角色发言（调用AI）
+                    </div>
+                    
+                    <div style="display:flex; gap:12px;">
+                        <button onclick="this.closest('#join-group-char-modal').remove()" style="flex:1; padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:15px; cursor:pointer;">取消</button>
+                        <button onclick="doAcceptGroupInvite(${requestId}, '${groupData.group_id}')" style="flex:1; padding:12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:15px; cursor:pointer;">加入群聊</button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+        }
+
+        // 执行接受群聊邀请
+        async function doAcceptGroupInvite(requestId, groupId) {
+            const charSelect = document.getElementById('join-group-char-select-modal');
+            const charId = charSelect?.value;
+            
+            let myChar = null;
+            if (charId) {
+                const char = await db.characters.get(parseInt(charId));
+                if (char) {
+                    myChar = {
+                        name: char.name,
+                        avatar: char.avatar || '',
+                        desc: char.description?.substring(0, 200) || ''
+                    };
+                }
+            }
+            
+            const myWx = getMyOnlineWxAccount();
+            if (!myWx) {
+                alert('请先上线一个角色');
+                return;
+            }
+            
+            // 发送加入群聊请求
+            onlineSocket.send(JSON.stringify({
+                type: 'join_online_group',
+                group_id: groupId,
+                my_wx_account: myWx,
+                my_character: myChar
+            }));
+            
+            // 更新本地状态
+            const request = await db.friend_requests.get(requestId);
+            if (request) {
+                request.status = 'accepted';
+                await db.friend_requests.put(request);
+            }
+            
+            // 关闭弹窗并刷新页面
+            document.getElementById('join-group-char-modal')?.remove();
+            await renderNewFriendsPage();
+        }
+
+        // 拒绝群聊邀请
+        async function rejectGroupInvite(requestId) {
+            const request = await db.friend_requests.get(requestId);
+            if (!request || !request.isGroupInvite) return;
+            
+            // 更新状态
             request.status = 'rejected';
             await db.friend_requests.put(request);
             
@@ -27422,11 +27580,45 @@ function renderOnlineGroupList(container) {
     `).join('');
 }
 
-// 处理群聊邀请
-function handleOnlineGroupInvite(data) {
-    const accept = confirm(`${data.inviter_name} 邀请你加入群聊"${data.group_name}"，是否接受？`);
-    if (accept) {
-        showJoinOnlineGroupModal(data.group_id, data.group_name);
+// 处理群聊邀请 - 保存到数据库，显示在"新的好友"页面
+async function handleOnlineGroupInvite(data) {
+    // 将群聊邀请保存到 friend_requests 表
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    // 检查是否已存在相同的邀请
+    const existingInvites = await db.friend_requests
+        .where('toAccountId')
+        .equals(accountId)
+        .toArray();
+    const alreadyExists = existingInvites.some(r => 
+        r.isGroupInvite && 
+        r.groupData?.group_id === data.group_id &&
+        r.status === 'pending'
+    );
+    if (alreadyExists) return;
+    
+    // 创建群聊邀请记录
+    await db.friend_requests.add({
+        toAccountId: accountId,
+        isOnline: true,
+        isGroupInvite: true,
+        status: 'pending',
+        time: Date.now(),
+        groupData: {
+            group_id: data.group_id,
+            group_name: data.group_name,
+            inviter_wx: data.inviter_wx,
+            inviter_name: data.inviter_name
+        }
+    });
+    
+    // 显示通知
+    showToast(`${data.inviter_name} 邀请你加入群聊"${data.group_name}"`);
+    
+    // 如果新的好友页面正在显示，刷新它
+    if (document.getElementById('new-friends-page').style.display !== 'none') {
+        await renderNewFriendsPage();
     }
 }
 
