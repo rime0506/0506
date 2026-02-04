@@ -347,6 +347,12 @@ function handleMessage(ws, data) {
         case 'update_group_character':
             handleUpdateGroupCharacter(ws, data);
             break;
+        case 'group_typing_start':
+            handleGroupTypingStart(ws, data);
+            break;
+        case 'group_typing_stop':
+            handleGroupTypingStop(ws, data);
+            break;
             
         default:
             sendError(ws, '未知的消息类型');
@@ -1200,6 +1206,73 @@ function handleSendGroupMessage(ws, data) {
     });
     
     console.log(`[群消息] ${sender_type === 'character' ? character_name : sender_name} in ${group_id}: ${content.substring(0, 30)}...`);
+}
+
+// 处理群聊"正在输入"状态开始
+function handleGroupTypingStart(ws, data) {
+    const clientData = clients.get(ws);
+    const { group_id, my_wx_account, character_name } = data;
+    
+    if (!clientData.wxAccounts.has(my_wx_account)) {
+        return;
+    }
+    
+    // 检查是否是群成员
+    const member = stmts.getGroupMember.get(group_id, my_wx_account);
+    if (!member) {
+        return;
+    }
+    
+    // 广播给群里的其他成员（除了自己）
+    const members = stmts.getGroupMembers.all(group_id);
+    members.forEach(m => {
+        if (m.user_wx !== my_wx_account) { // 不发给自己
+            const memberSocket = wxAccountToSocket.get(m.user_wx);
+            if (memberSocket) {
+                send(memberSocket, {
+                    type: 'group_typing_start',
+                    group_id: group_id,
+                    character_name: character_name,
+                    user_wx: my_wx_account
+                });
+            }
+        }
+    });
+    
+    console.log(`[群聊] ${character_name} 开始输入 (群: ${group_id})`);
+}
+
+// 处理群聊"正在输入"状态结束
+function handleGroupTypingStop(ws, data) {
+    const clientData = clients.get(ws);
+    const { group_id, my_wx_account } = data;
+    
+    if (!clientData.wxAccounts.has(my_wx_account)) {
+        return;
+    }
+    
+    // 检查是否是群成员
+    const member = stmts.getGroupMember.get(group_id, my_wx_account);
+    if (!member) {
+        return;
+    }
+    
+    // 广播给群里的其他成员（除了自己）
+    const members = stmts.getGroupMembers.all(group_id);
+    members.forEach(m => {
+        if (m.user_wx !== my_wx_account) { // 不发给自己
+            const memberSocket = wxAccountToSocket.get(m.user_wx);
+            if (memberSocket) {
+                send(memberSocket, {
+                    type: 'group_typing_stop',
+                    group_id: group_id,
+                    user_wx: my_wx_account
+                });
+            }
+        }
+    });
+    
+    console.log(`[群聊] 输入结束 (群: ${group_id}, 用户: ${my_wx_account})`);
 }
 
 // 获取群成员列表
