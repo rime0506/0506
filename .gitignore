@@ -1,6 +1,8 @@
-node_modules/
-data/
-.env
-*.log
+# 忽略数据库文件，但保留这个文件夹
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 
+# 但保留 .gitignore 本身
+!.gitignore
 
