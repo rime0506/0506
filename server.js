@@ -147,7 +147,31 @@ async function initDB() {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         `);
         
-        // 联机群聊表
+        // 联机群聊表 - 先删除旧表（如果存在且有问题）
+        console.log('🔄 检查群聊表结构...');
+        try {
+            // 尝试查询表结构
+            const [cols] = await db.execute(`
+                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+                WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'online_group_members'
+            `, [dbConfig.database]);
+            
+            const colNames = cols.map(c => c.COLUMN_NAME);
+            const required = ['id', 'group_id', 'user_wx', 'character_name', 'character_avatar', 'character_desc', 'joined_at'];
+            const missing = required.filter(c => !colNames.includes(c));
+            
+            if (missing.length > 0 || cols.length === 0) {
+                console.log('⚠️  群聊表结构不完整，重建中...');
+                await db.execute('SET FOREIGN_KEY_CHECKS = 0');
+                await db.execute('DROP TABLE IF EXISTS online_group_messages');
+                await db.execute('DROP TABLE IF EXISTS online_group_members');
+                await db.execute('DROP TABLE IF EXISTS online_groups');
+                await db.execute('SET FOREIGN_KEY_CHECKS = 1');
+            }
+        } catch (e) {
+            // 表不存在，继续创建
+        }
+        
         await db.execute(`
             CREATE TABLE IF NOT EXISTS online_groups (
                 id VARCHAR(36) PRIMARY KEY,
@@ -158,7 +182,6 @@ async function initDB() {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         `);
         
-        // 联机群聊成员表
         await db.execute(`
             CREATE TABLE IF NOT EXISTS online_group_members (
                 id VARCHAR(36) PRIMARY KEY,
@@ -174,7 +197,6 @@ async function initDB() {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         `);
         
-        // 联机群聊消息表
         await db.execute(`
             CREATE TABLE IF NOT EXISTS online_group_messages (
                 id VARCHAR(36) PRIMARY KEY,
@@ -190,6 +212,8 @@ async function initDB() {
                 FOREIGN KEY (group_id) REFERENCES online_groups(id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         `);
+        
+        console.log('✅ 群聊表结构正确');
         
         console.log('✅ 数据表创建完成');
         
@@ -1598,14 +1622,59 @@ async function handleGetGroupMembers(ws, data) {
         return;
     }
     
-    // 检查是否是群成员
-    const [member] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ? AND user_wx = ?', [group_id, my_wx_account]);
-    if (member.length === 0) {
-        sendError(ws, '你不是该群的成员');
-        return;
+    let member, members;
+    try {
+        // 检查是否是群成员
+        [member] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ? AND user_wx = ?', [group_id, my_wx_account]);
+        if (member.length === 0) {
+            sendError(ws, '你不是该群的成员');
+            return;
+        }
+        
+        [members] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ?', [group_id]);
+    } catch (queryError) {
+        if (queryError.message.includes('Incorrect arguments')) {
+            console.error('[获取群成员] 表结构错误，正在修复...');
+            // 重建表
+            await db.execute('DROP TABLE IF EXISTS online_group_messages');
+            await db.execute('DROP TABLE IF EXISTS online_group_members');
+            
+            await db.execute(`
+                CREATE TABLE online_group_members (
+                    id VARCHAR(36) PRIMARY KEY,
+                    group_id VARCHAR(36) NOT NULL,
+                    user_wx VARCHAR(100) NOT NULL,
+                    character_name VARCHAR(100),
+                    character_avatar TEXT,
+                    character_desc TEXT,
+                    joined_at BIGINT DEFAULT 0,
+                    UNIQUE KEY unique_group_member (group_id, user_wx),
+                    INDEX idx_online_group_members_group (group_id),
+                    FOREIGN KEY (group_id) REFERENCES online_groups(id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            `);
+            
+            await db.execute(`
+                CREATE TABLE online_group_messages (
+                    id VARCHAR(36) PRIMARY KEY,
+                    group_id VARCHAR(36) NOT NULL,
+                    sender_type VARCHAR(20) NOT NULL,
+                    sender_wx VARCHAR(100) NOT NULL,
+                    sender_name VARCHAR(100) NOT NULL,
+                    character_name VARCHAR(100),
+                    content TEXT NOT NULL,
+                    msg_type VARCHAR(20) DEFAULT 'text',
+                    created_at BIGINT DEFAULT 0,
+                    INDEX idx_online_group_messages_group (group_id),
+                    FOREIGN KEY (group_id) REFERENCES online_groups(id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            `);
+            
+            sendError(ws, '表结构已修复，请重新创建群聊');
+            return;
+        }
+        throw queryError;
     }
-    
-    const [members] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ?', [group_id]);
     
     // 获取每个成员的在线状态和昵称
     const membersWithInfo = [];
