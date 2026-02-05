@@ -20850,12 +20850,26 @@ async function renderFamilyCardList() {
     
     // 2. 联机亲属卡
     const onlineGivenCards = JSON.parse(localStorage.getItem('online_family_cards_given') || '[]');
+    console.log('[亲属卡调试] 我赠送的联机亲属卡:', onlineGivenCards);
+    
     for (const card of onlineGivenCards) {
         // 查找对应的联机好友
         const allChars = await db.characters.where('type').equals('online_friend').toArray();
-        const friendChar = allChars.find(c => c.onlineData?.wx_account === card.to_wx_account);
+        console.log('[亲属卡调试] 所有联机好友:', allChars.map(c => ({
+            name: c.name,
+            wx_account: c.onlineData?.wx_account,
+            identity_account: c.identity?.account
+        })));
+        console.log('[亲属卡调试] 查找 wx_account:', card.to_wx_account);
+        
+        // 尝试两种匹配方式：onlineData.wx_account 或 identity.account
+        const friendChar = allChars.find(c => 
+            c.onlineData?.wx_account === card.to_wx_account || 
+            c.identity?.account === card.to_wx_account
+        );
         
         if (friendChar) {
+            console.log('[亲属卡调试] 找到对应好友:', friendChar.name);
             const usedThisMonth = parseFloat(card.used_this_month) || 0;
             const monthlyLimit = card.monthly_limit || 0;
             const limitText = monthlyLimit > 0 ? `已用 ¥${usedThisMonth.toFixed(2)} / ¥${monthlyLimit}` : `已用 ¥${usedThisMonth.toFixed(2)} (不限额)`;
@@ -20871,10 +20885,17 @@ async function renderFamilyCardList() {
                     </div>
                 </div>
             `;
+        } else {
+            console.warn('[亲属卡调试] 未找到对应的联机好友，to_wx_account:', card.to_wx_account);
         }
     }
     
-    givenListEl.innerHTML = givenHtml || '';
+    if (!givenHtml && onlineGivenCards.length > 0) {
+        console.error('[亲属卡] ⚠️ 有联机亲属卡数据但无法匹配到好友！');
+        givenListEl.innerHTML = '<div style="padding:20px;color:#ff6b6b;text-align:center;">⚠️ 检测到亲属卡数据，但无法找到对应好友<br>请查看控制台了解详情</div>';
+    } else {
+        givenListEl.innerHTML = givenHtml || '';
+    }
     
     // ========== 我收到的亲属卡 ==========
     const receivedListEl = document.getElementById('family-card-received-list');
@@ -20906,12 +20927,21 @@ async function renderFamilyCardList() {
     
     // 2. 联机亲属卡
     const onlineReceivedCards = JSON.parse(localStorage.getItem('online_family_cards_received') || '[]');
+    console.log('[亲属卡调试] 我收到的联机亲属卡:', onlineReceivedCards);
+    
     for (const card of onlineReceivedCards) {
         // 查找对应的联机好友
         const allChars = await db.characters.where('type').equals('online_friend').toArray();
-        const friendChar = allChars.find(c => c.onlineData?.wx_account === card.from_wx_account);
+        console.log('[亲属卡调试] 查找 from_wx_account:', card.from_wx_account);
+        
+        // 尝试两种匹配方式：onlineData.wx_account 或 identity.account
+        const friendChar = allChars.find(c => 
+            c.onlineData?.wx_account === card.from_wx_account || 
+            c.identity?.account === card.from_wx_account
+        );
         
         if (friendChar) {
+            console.log('[亲属卡调试] 找到对应好友:', friendChar.name);
             const usedThisMonth = parseFloat(card.used_this_month) || 0;
             const monthlyLimit = card.monthly_limit || 0;
             const limitText = monthlyLimit > 0 ? `本月可用 ¥${(monthlyLimit - usedThisMonth).toFixed(2)}` : '不限额';
@@ -20927,7 +20957,13 @@ async function renderFamilyCardList() {
                     </div>
                 </div>
             `;
+        } else {
+            console.warn('[亲属卡调试] 未找到对应的联机好友，from_wx_account:', card.from_wx_account);
         }
+    }
+    
+    if (!receivedHtml && onlineReceivedCards.length > 0) {
+        console.error('[亲属卡] ⚠️ 有联机亲属卡数据但无法匹配到好友！');
     }
     
     if (receivedHtml) {
