@@ -18840,6 +18840,26 @@ async function sendGlobalSticker(catId, url) {
     appendMessageToUI('user', msgContent);
     closeChatPanel();
     
+    // ✅ 如果是联机好友，发送表情包到服务器
+    if (char.isOnlineFriend && char.onlineData?.wx_account) {
+        const onlineUserChar = await getOrCreateOnlineUserChar();
+        
+        if (onlineUserChar && onlineConnected) {
+            const fromWxAccount = onlineUserChar.identity.account;
+            const toWxAccount = char.onlineData.wx_account;
+            const sent = sendOnlineMessage(toWxAccount, msgContent, fromWxAccount);
+            if (sent) {
+                console.log('[Online] 表情包已发送到服务器:', url);
+            } else {
+                console.warn('[Online] 表情包发送失败');
+                showToast('表情包发送失败，请检查服务器连接');
+            }
+        } else {
+            console.warn('[Online] 无法发送联机表情包：未连接服务器');
+            showToast('请确保已连接服务器');
+        }
+    }
+    
     // ✅ 不再自动触发 AI 回复，需要用户点击"接受回复"按钮
     // triggerAiReply();
 }
