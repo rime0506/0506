@@ -193,6 +193,20 @@ async function initDB() {
         
         console.log('✅ 数据表创建完成');
         
+        // ✅ 数据库迁移：修改avatar字段为TEXT类型（防止"Data too long"错误）
+        try {
+            await db.execute(`
+                ALTER TABLE online_characters 
+                MODIFY COLUMN avatar TEXT
+            `);
+            console.log('✅ 数据库迁移：avatar字段已更新为TEXT类型');
+        } catch (alterError) {
+            // 如果字段已经是TEXT类型，会报错，忽略即可
+            if (!alterError.message.includes('Duplicate column name')) {
+                console.log('ℹ️ avatar字段迁移:', alterError.message);
+            }
+        }
+        
     } catch (error) {
         console.error('❌ 数据库初始化失败:', error);
         throw error;
@@ -555,12 +569,18 @@ async function handleGoOnline(ws, data) {
             return;
         }
         
-        const { wx_account, nickname, avatar, bio } = data;
+        let { wx_account, nickname, avatar, bio } = data;
         
         if (!wx_account || !nickname) {
             sendError(ws, '微信号和昵称不能为空');
             console.log('[上线失败] 缺少必填字段:', { wx_account, nickname });
             return;
+        }
+        
+        // ✅ 截断过长的avatar（如果是base64图片太大，只保留URL或清空）
+        if (avatar && avatar.length > 10000) {
+            console.log(`[上线] avatar过长(${avatar.length}字符)，将被清空`);
+            avatar = '';
         }
         
         // 检查微信号是否被其他用户占用
@@ -660,12 +680,18 @@ async function handleRegisterCharacter(ws, data) {
             return;
         }
         
-        const { wx_account, nickname, avatar, bio } = data;
+        let { wx_account, nickname, avatar, bio } = data;
         
         if (!wx_account || !nickname) {
             sendError(ws, '微信号和昵称不能为空');
             console.log('[注册角色失败] 缺少必填字段:', { wx_account, nickname });
             return;
+        }
+        
+        // ✅ 截断过长的avatar（如果是base64图片太大，只保留URL或清空）
+        if (avatar && avatar.length > 10000) {
+            console.log(`[注册角色] avatar过长(${avatar.length}字符)，将被清空`);
+            avatar = '';
         }
         
         // 检查微信号是否被其他用户占用
