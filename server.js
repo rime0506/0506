@@ -140,7 +140,7 @@ async function initDB() {
                 id VARCHAR(36) PRIMARY KEY,
                 from_wx_account VARCHAR(100) NOT NULL,
                 to_wx_account VARCHAR(100) NOT NULL,
-                content TEXT NOT NULL,
+                content LONGTEXT NOT NULL,
                 created_at BIGINT DEFAULT 0,
                 delivered TINYINT DEFAULT 0,
                 INDEX idx_offline_messages_to (to_wx_account)
@@ -188,7 +188,7 @@ async function initDB() {
                 sender_wx VARCHAR(100) NOT NULL,
                 sender_name VARCHAR(100) NOT NULL,
                 character_name VARCHAR(100),
-                content TEXT NOT NULL,
+                content LONGTEXT NOT NULL,
                 msg_type VARCHAR(20) DEFAULT 'text',
                 created_at BIGINT DEFAULT 0,
                 INDEX idx_online_group_messages_group (group_id),
@@ -212,6 +212,28 @@ async function initDB() {
             if (!alterError.message.includes('Duplicate column name')) {
                 console.log('ℹ️ avatar字段迁移:', alterError.message);
             }
+        }
+        
+        // ✅ 数据库迁移：修改消息内容字段为LONGTEXT类型（支持大图片）
+        console.log('🔄 正在升级消息表以支持大图片...');
+        try {
+            await db.execute(`
+                ALTER TABLE offline_messages 
+                MODIFY COLUMN content LONGTEXT NOT NULL
+            `);
+            console.log('✅ offline_messages.content 已更新为 LONGTEXT');
+        } catch (alterError) {
+            console.log('ℹ️ offline_messages.content 迁移:', alterError.message);
+        }
+        
+        try {
+            await db.execute(`
+                ALTER TABLE online_group_messages 
+                MODIFY COLUMN content LONGTEXT NOT NULL
+            `);
+            console.log('✅ online_group_messages.content 已更新为 LONGTEXT');
+        } catch (alterError) {
+            console.log('ℹ️ online_group_messages.content 迁移:', alterError.message);
         }
         
         // ✅ 修复可能的表结构不匹配问题
@@ -273,7 +295,7 @@ async function initDB() {
                         sender_wx VARCHAR(100) NOT NULL,
                         sender_name VARCHAR(100) NOT NULL,
                         character_name VARCHAR(100),
-                        content TEXT NOT NULL,
+                        content LONGTEXT NOT NULL,
                         msg_type VARCHAR(20) DEFAULT 'text',
                         created_at BIGINT DEFAULT 0,
                         INDEX idx_online_group_messages_group (group_id),
@@ -1179,12 +1201,37 @@ async function handleCreateOnlineGroup(ws, data) {
     // 添加创建者为成员
     const memberId = uuidv4();
     try {
+        // ✅ 截断过长的 avatar（防止超出TEXT限制）
+        let characterAvatar = my_character?.avatar || null;
+        if (characterAvatar && characterAvatar.length > 65000) {
+            console.log(`[创建群聊] 角色头像过长(${characterAvatar.length}字符)，将被截断`);
+            characterAvatar = characterAvatar.substring(0, 65000);
+        }
+        
         await db.execute(
             'INSERT INTO online_group_members (id, group_id, user_wx, character_name, character_avatar, character_desc, joined_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [memberId, groupId, my_wx_account, my_character?.name || null, my_character?.avatar || null, my_character?.desc || null, Date.now()]
+            [memberId, groupId, my_wx_account, my_character?.name || null, characterAvatar, my_character?.desc || null, Date.now()]
         );
     } catch (insertError) {
         console.error('[创建群聊] 插入成员失败:', insertError.message);
+        console.error('[创建群聊] 完整错误:', insertError);
+        console.error('[创建群聊] 数据:', {
+            memberId,
+            groupId,
+            my_wx_account,
+            characterName: my_character?.name,
+            avatarLength: my_character?.avatar?.length || 0,
+            descLength: my_character?.desc?.length || 0
+        });
+        
+        // ✅ 插入失败时回滚（删除已创建的群聊）
+        try {
+            await db.execute('DELETE FROM online_groups WHERE id = ?', [groupId]);
+            console.log('[创建群聊] 已回滚群聊创建');
+        } catch (rollbackError) {
+            console.error('[创建群聊] 回滚失败:', rollbackError.message);
+        }
+        
         // 如果是参数错误，尝试删除并重建表
         if (insertError.message.includes('Incorrect arguments')) {
             console.log('🔄 检测到表结构问题，正在修复...');
@@ -1214,7 +1261,7 @@ async function handleCreateOnlineGroup(ws, data) {
                     sender_wx VARCHAR(100) NOT NULL,
                     sender_name VARCHAR(100) NOT NULL,
                     character_name VARCHAR(100),
-                    content TEXT NOT NULL,
+                    content LONGTEXT NOT NULL,
                     msg_type VARCHAR(20) DEFAULT 'text',
                     created_at BIGINT DEFAULT 0,
                     INDEX idx_online_group_messages_group (group_id),
@@ -1327,12 +1374,20 @@ async function handleJoinOnlineGroup(ws, data) {
     
     // 检查是否已是成员
     const [existingMember] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ? AND user_wx = ?', [group_id, my_wx_account]);
+    
+    // ✅ 截断过长的 avatar（防止超出TEXT限制）
+    let characterAvatar = my_character?.avatar || null;
+    if (characterAvatar && characterAvatar.length > 65000) {
+        console.log(`[加入群聊] 角色头像过长(${characterAvatar.length}字符)，将被截断`);
+        characterAvatar = characterAvatar.substring(0, 65000);
+    }
+    
     if (existingMember.length > 0) {
         // 已经是成员，更新角色信息
         if (my_character) {
             await db.execute(
                 'UPDATE online_group_members SET character_name = ?, character_avatar = ?, character_desc = ? WHERE group_id = ? AND user_wx = ?',
-                [my_character.name, my_character.avatar, my_character.desc, group_id, my_wx_account]
+                [my_character.name, characterAvatar, my_character.desc, group_id, my_wx_account]
             );
         }
     } else {
@@ -1340,7 +1395,7 @@ async function handleJoinOnlineGroup(ws, data) {
         const memberId = uuidv4();
         await db.execute(
             'INSERT INTO online_group_members (id, group_id, user_wx, character_name, character_avatar, character_desc, joined_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [memberId, group_id, my_wx_account, my_character?.name || null, my_character?.avatar || null, my_character?.desc || null, Date.now()]
+            [memberId, group_id, my_wx_account, my_character?.name || null, characterAvatar, my_character?.desc || null, Date.now()]
         );
     }
     
@@ -1645,7 +1700,7 @@ async function handleGetGroupMembers(ws, data) {
                     sender_wx VARCHAR(100) NOT NULL,
                     sender_name VARCHAR(100) NOT NULL,
                     character_name VARCHAR(100),
-                    content TEXT NOT NULL,
+                    content LONGTEXT NOT NULL,
                     msg_type VARCHAR(20) DEFAULT 'text',
                     created_at BIGINT DEFAULT 0,
                     INDEX idx_online_group_messages_group (group_id),
@@ -1698,10 +1753,17 @@ async function handleUpdateGroupCharacter(ws, data) {
         return;
     }
     
+    // ✅ 截断过长的 avatar（防止超出TEXT限制）
+    let characterAvatar = character?.avatar || null;
+    if (characterAvatar && characterAvatar.length > 65000) {
+        console.log(`[更新群角色] 角色头像过长(${characterAvatar.length}字符)，将被截断`);
+        characterAvatar = characterAvatar.substring(0, 65000);
+    }
+    
     // 更新角色信息
     await db.execute(
         'UPDATE online_group_members SET character_name = ?, character_avatar = ?, character_desc = ? WHERE group_id = ? AND user_wx = ?',
-        [character?.name || null, character?.avatar || null, character?.desc || null, group_id, my_wx_account]
+        [character?.name || null, characterAvatar, character?.desc || null, group_id, my_wx_account]
     );
     
     send(ws, {
