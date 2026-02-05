@@ -5055,9 +5055,10 @@ async function sendMessageDetail() {
         return;
     }
     
-    // 🎯 扣费
-    if (!deductPhoneBalance(SMS_COST)) {
-        alert('扣费失败，请重试');
+    // 🎯 扣费 - 支持选择支付方式
+    const paymentResult = await showPaymentMethodSelection(SMS_COST, '短信费用');
+    if (!paymentResult.success) {
+        alert('支付失败，请重试');
         return;
     }
     
@@ -11605,53 +11606,79 @@ ${loreContext}
                         // 2. 发送亲属卡消息
                         const user = await db.characters.get(parseInt(currentMyCharId));
                         
-                        // 在角色数据中添加"我赠送的"
-                        if (!freshChar.identity) freshChar.identity = {};
-                        if (!freshChar.identity.familyCardsGiven) freshChar.identity.familyCardsGiven = [];
-                        freshChar.identity.familyCardsGiven.push({
-                            charId: parseInt(currentMyCharId),
-                            monthlyLimit: monthlyLimit,
-                            usedThisMonth: 0,
-                            records: [],
-                            createdAt: Date.now()
-                        });
-                        await db.characters.put(freshChar);
-                        
-                        // 在用户数据中添加"我收到的"
-                        if (user) {
-                            if (!user.identity) user.identity = {};
-                            if (!user.identity.familyCardsReceived) user.identity.familyCardsReceived = [];
-                            user.identity.familyCardsReceived.push({
-                                charId: freshChar.id,
+                        // ✅ 检查是否是联机好友
+                        if (freshChar.isOnlineFriend && freshChar.onlineData?.wx_account) {
+                            // 联机好友 - 通过服务器发送亲属卡
+                            const onlineUserChar = await getOrCreateOnlineUserChar();
+                            
+                            if (onlineUserChar && onlineConnected) {
+                                const fromWxAccount = onlineUserChar.identity.account;
+                                const toWxAccount = freshChar.onlineData.wx_account;
+                                
+                                onlineSocket.send(JSON.stringify({
+                                    type: 'send_family_card',
+                                    from_wx_account: fromWxAccount,
+                                    to_wx_account: toWxAccount,
+                                    monthly_limit: monthlyLimit,
+                                    message: textBeforeFamilyCard || ''
+                                }));
+                                
+                                console.log('[Online] 亲属卡已发送到服务器');
+                                showToast('亲属卡已赠送');
+                            } else {
+                                console.warn('[Online] 无法发送联机亲属卡：未连接服务器');
+                                showToast('请确保已连接服务器');
+                            }
+                        } else {
+                            // 本地角色 - 原有逻辑
+                            // 在角色数据中添加"我赠送的"
+                            if (!freshChar.identity) freshChar.identity = {};
+                            if (!freshChar.identity.familyCardsGiven) freshChar.identity.familyCardsGiven = [];
+                            freshChar.identity.familyCardsGiven.push({
+                                charId: parseInt(currentMyCharId),
                                 monthlyLimit: monthlyLimit,
                                 usedThisMonth: 0,
                                 records: [],
                                 createdAt: Date.now()
                             });
-                            await db.characters.put(user);
+                            await db.characters.put(freshChar);
+                            
+                            // 在用户数据中添加"我收到的"
+                            if (user) {
+                                if (!user.identity) user.identity = {};
+                                if (!user.identity.familyCardsReceived) user.identity.familyCardsReceived = [];
+                                user.identity.familyCardsReceived.push({
+                                    charId: freshChar.id,
+                                    monthlyLimit: monthlyLimit,
+                                    usedThisMonth: 0,
+                                    records: [],
+                                    createdAt: Date.now()
+                                });
+                                await db.characters.put(user);
+                            }
+                            
+                            // 发送亲属卡消息到聊天
+                            const familyCardMsg = {
+                                role: 'char',
+                                type: 'familyCard',
+                                content: JSON.stringify({
+                                    fromName: freshChar.name,
+                                    monthlyLimit: monthlyLimit,
+                                    status: 'sent'
+                                }),
+                                time: Date.now()
+                            };
+                            
+                            history = getChatHistory(freshChar, accountId);
+                            history.push(familyCardMsg);
+                            await setChatHistory(freshChar, accountId, history);
+                            
+                            if (currentChatCharId === freshChar.id) {
+                                renderChatBody(freshChar);
+                            }
+                            
+                            sendSystemNotification(freshChar.name, '[亲属卡]');
                         }
-                        
-                        // 发送亲属卡消息到聊天
-                        const familyCardMsg = {
-                            role: 'char',
-                            type: 'familyCard',
-                            content: JSON.stringify({
-                                fromName: freshChar.name,
-                                monthlyLimit: monthlyLimit,
-                                status: 'sent'
-                            }),
-                            time: Date.now()
-                        };
-                        
-                        history = getChatHistory(freshChar, accountId);
-                        history.push(familyCardMsg);
-                        await setChatHistory(freshChar, accountId, history);
-                        
-                        if (currentChatCharId === freshChar.id) {
-                            renderChatBody(freshChar);
-                        }
-                        
-                        sendSystemNotification(freshChar.name, '[亲属卡]');
                     }
                     return;
                 }
@@ -13168,11 +13195,13 @@ ${groupContextStr}
                 }
                 
                 const isSelf = msg.role === 'user';
+                const isOnline = cardData.isOnline || false;
                 const limitText = cardData.monthlyLimit > 0 ? `每月额度 ¥${cardData.monthlyLimit}` : '不限额度';
+                const cardType = isOnline ? '💝 亲属卡 (联机)' : '💝 亲属卡';
                 
                 content.innerHTML = `
                     <div class="family-card-msg">
-                        <div class="family-card-msg-title">💝 亲属卡</div>
+                        <div class="family-card-msg-title">${cardType}</div>
                         <div class="family-card-msg-desc">${limitText}</div>
                         <div class="family-card-msg-line"></div>
                         <div class="family-card-msg-footer">
@@ -19018,6 +19047,178 @@ function deductPhoneBalance(amount) {
     }
     setPhoneBalance(current - amount);
     return true;
+}
+
+// 显示支付方式选择弹窗（余额 or 亲属卡）
+async function showPaymentMethodSelection(amount, description) {
+    return new Promise(async (resolve) => {
+        const accountId = getCurrentAccountId();
+        if (!accountId) {
+            resolve({ success: false, method: null });
+            return;
+        }
+        
+        // 获取可用的亲属卡
+        const user = await db.characters.get(parseInt(accountId));
+        const familyCards = user?.identity?.familyCardsReceived || [];
+        
+        // 获取联机好友的亲属卡
+        let onlineFamilyCards = [];
+        if (onlineConnected && onlineSocket) {
+            const onlineUserChar = await getOrCreateOnlineUserChar();
+            if (onlineUserChar) {
+                const myWxAccount = onlineUserChar.identity.account;
+                // 从服务器获取亲属卡列表（这里我们需要先实现同步获取）
+                // 暂时从本地缓存获取
+                onlineFamilyCards = JSON.parse(localStorage.getItem('online_family_cards_received') || '[]');
+            }
+        }
+        
+        const allFamilyCards = [...familyCards, ...onlineFamilyCards];
+        
+        // 如果没有亲属卡，直接使用余额
+        if (allFamilyCards.length === 0) {
+            const success = deductPhoneBalance(amount);
+            resolve({ success, method: 'balance' });
+            return;
+        }
+        
+        // 创建选择弹窗
+        const modal = document.createElement('div');
+        modal.className = 'payment-method-modal';
+        modal.innerHTML = `
+            <div class="payment-method-overlay"></div>
+            <div class="payment-method-content">
+                <div class="payment-method-header">
+                    <span>选择支付方式</span>
+                    <span class="payment-method-amount">¥${amount.toFixed(2)}</span>
+                </div>
+                <div class="payment-method-desc">${description || '消费'}</div>
+                <div class="payment-method-list">
+                    <div class="payment-method-item" data-method="balance">
+                        <div class="payment-method-icon">💰</div>
+                        <div class="payment-method-name">
+                            <div>零钱</div>
+                            <div class="payment-method-sub">余额: ¥${getPhoneBalance().toFixed(2)}</div>
+                        </div>
+                        <div class="payment-method-radio"></div>
+                    </div>
+                    ${allFamilyCards.map((card, index) => {
+                        const isOnline = card.from_wx_account !== undefined;
+                        const cardName = isOnline ? '联机好友亲属卡' : '亲属卡';
+                        const monthlyLimit = isOnline ? card.monthly_limit : card.monthlyLimit;
+                        const usedThisMonth = isOnline ? card.used_this_month : card.usedThisMonth;
+                        const limitText = monthlyLimit > 0 ? `本月剩余: ¥${(monthlyLimit - usedThisMonth).toFixed(2)}` : '不限额度';
+                        
+                        return `
+                            <div class="payment-method-item" data-method="family_card" data-card-index="${index}" data-is-online="${isOnline}">
+                                <div class="payment-method-icon">💳</div>
+                                <div class="payment-method-name">
+                                    <div>${cardName}</div>
+                                    <div class="payment-method-sub">${limitText}</div>
+                                </div>
+                                <div class="payment-method-radio"></div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+                <div class="payment-method-buttons">
+                    <button class="payment-method-cancel">取消</button>
+                    <button class="payment-method-confirm">确认支付</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        let selectedMethod = 'balance';
+        let selectedCardIndex = -1;
+        let selectedIsOnline = false;
+        
+        // 默认选中余额
+        modal.querySelector('[data-method="balance"] .payment-method-radio').classList.add('selected');
+        
+        // 选择支付方式
+        modal.querySelectorAll('.payment-method-item').forEach(item => {
+            item.addEventListener('click', () => {
+                modal.querySelectorAll('.payment-method-radio').forEach(r => r.classList.remove('selected'));
+                item.querySelector('.payment-method-radio').classList.add('selected');
+                selectedMethod = item.dataset.method;
+                selectedCardIndex = parseInt(item.dataset.cardIndex) || -1;
+                selectedIsOnline = item.dataset.isOnline === 'true';
+            });
+        });
+        
+        // 取消按钮
+        modal.querySelector('.payment-method-cancel').addEventListener('click', () => {
+            document.body.removeChild(modal);
+            resolve({ success: false, method: null });
+        });
+        
+        // 确认支付按钮
+        modal.querySelector('.payment-method-confirm').addEventListener('click', async () => {
+            document.body.removeChild(modal);
+            
+            if (selectedMethod === 'balance') {
+                const success = deductPhoneBalance(amount);
+                resolve({ success, method: 'balance' });
+            } else if (selectedMethod === 'family_card' && selectedCardIndex >= 0) {
+                const card = allFamilyCards[selectedCardIndex];
+                
+                if (selectedIsOnline) {
+                    // 使用联机亲属卡
+                    const onlineUserChar = await getOrCreateOnlineUserChar();
+                    if (onlineUserChar && onlineConnected) {
+                        onlineSocket.send(JSON.stringify({
+                            type: 'use_family_card',
+                            my_wx_account: onlineUserChar.identity.account,
+                            payer_wx_account: card.from_wx_account,
+                            amount: amount,
+                            description: description || '消费'
+                        }));
+                        // 等待服务器响应（暂时假设成功）
+                        showToast('亲属卡支付中...');
+                        resolve({ success: true, method: 'family_card', isOnline: true });
+                    } else {
+                        showToast('未连接服务器');
+                        resolve({ success: false, method: null });
+                    }
+                } else {
+                    // 使用本地亲属卡
+                    const monthlyLimit = card.monthlyLimit || 0;
+                    const usedThisMonth = card.usedThisMonth || 0;
+                    
+                    // 检查额度
+                    if (monthlyLimit > 0 && (usedThisMonth + amount) > monthlyLimit) {
+                        showToast('亲属卡本月额度不足');
+                        resolve({ success: false, method: null });
+                        return;
+                    }
+                    
+                    // 更新使用金额
+                    card.usedThisMonth = (usedThisMonth || 0) + amount;
+                    if (!card.records) card.records = [];
+                    card.records.push({
+                        amount: amount,
+                        description: description || '消费',
+                        time: Date.now()
+                    });
+                    
+                    // 保存到用户数据
+                    await db.characters.put(user);
+                    
+                    // 通知付款方（角色）
+                    const payerChar = await db.characters.get(card.charId);
+                    if (payerChar) {
+                        // 发送消息通知
+                        showToast('亲属卡支付成功');
+                    }
+                    
+                    resolve({ success: true, method: 'family_card', isOnline: false });
+                }
+            }
+        });
+    });
 }
 
 // 充值记录管理
@@ -27447,10 +27648,19 @@ function connectToOnlineServer() {
         try {
             onlineSocket = new WebSocket(serverUrl);
             
-            onlineSocket.onopen = () => {
+            onlineSocket.onopen = async () => {
                 console.log('[Online] WebSocket connected');
                 onlineConnected = true;
                 updateOnlineStatus();
+                
+                // 获取亲属卡列表
+                const onlineUserChar = await getOrCreateOnlineUserChar();
+                if (onlineUserChar) {
+                    onlineSocket.send(JSON.stringify({
+                        type: 'get_family_cards',
+                        my_wx_account: onlineUserChar.identity.account
+                    }));
+                }
                 
                 // 如果有token，发送认证
                 if (onlineToken) {
@@ -27591,6 +27801,31 @@ async function handleOnlineMessage(data) {
         case 'friend_request_accepted':
             // 好友申请被接受
             handleFriendRequestAccepted(data);
+            break;
+        
+        case 'family_card_received':
+            // 收到亲属卡
+            handleFamilyCardReceived(data);
+            break;
+        
+        case 'family_card_sent':
+            // 亲属卡发送成功
+            showToast('亲属卡已赠送');
+            break;
+        
+        case 'family_card_used':
+            // 亲属卡被使用
+            handleFamilyCardUsed(data);
+            break;
+        
+        case 'family_card_payment_success':
+            // 使用亲属卡支付成功
+            showToast('支付成功');
+            break;
+        
+        case 'family_cards_list':
+            // 收到亲属卡列表
+            handleFamilyCardsList(data);
             break;
             
         case 'message':
@@ -28137,6 +28372,103 @@ async function handleOnlineIncomingMessage(data) {
         sendSystemNotification(targetChar.name, notifyContent);
     }
 }
+
+// ==================== 亲属卡处理函数 ====================
+
+// 处理收到亲属卡
+async function handleFamilyCardReceived(data) {
+    console.log('[Online] 收到亲属卡:', data);
+    
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    // 查找对应的联机好友角色
+    const chars = await db.characters.where('type').equals('online_friend').toArray();
+    let friendChar = chars.find(c => c.onlineData?.wx_account === data.from_wx_account);
+    
+    if (!friendChar) {
+        console.warn('[Online] 未找到对应的联机好友');
+        return;
+    }
+    
+    // 保存亲属卡消息到聊天记录
+    let history = getChatHistory(friendChar, accountId);
+    const familyCardMsg = {
+        role: 'char',
+        type: 'familyCard',
+        content: JSON.stringify({
+            fromName: data.from_nickname,
+            from_wx_account: data.from_wx_account,
+            monthlyLimit: data.monthly_limit,
+            status: 'received',
+            isOnline: true
+        }),
+        time: Date.now()
+    };
+    
+    history.push(familyCardMsg);
+    await setChatHistory(friendChar, accountId, history);
+    
+    // 如果当前正在查看该聊天，刷新显示
+    if (currentChatCharId === friendChar.id) {
+        renderChatBody(friendChar);
+    }
+    
+    // 发送通知
+    showToast(`${data.from_nickname} 赠送了亲属卡`);
+    sendSystemNotification(friendChar.name, '[亲属卡]');
+}
+
+// 处理亲属卡被使用
+async function handleFamilyCardUsed(data) {
+    console.log('[Online] 亲属卡被使用:', data);
+    
+    const accountId = getCurrentAccountId();
+    if (!accountId) return;
+    
+    // 查找对应的联机好友角色
+    const chars = await db.characters.where('type').equals('online_friend').toArray();
+    let friendChar = chars.find(c => c.onlineData?.wx_account === data.user_wx_account);
+    
+    if (!friendChar) {
+        console.warn('[Online] 未找到对应的联机好友');
+        return;
+    }
+    
+    // 显示通知
+    showToast(`${data.user_nickname} 使用了您的亲属卡 ¥${data.amount}`);
+    
+    // 添加流水记录到本地
+    const user = await db.characters.get(parseInt(accountId));
+    if (user) {
+        if (!user.identity) user.identity = {};
+        if (!user.identity.familyCardRecords) user.identity.familyCardRecords = [];
+        
+        user.identity.familyCardRecords.push({
+            type: 'expense',
+            user_wx_account: data.user_wx_account,
+            user_nickname: data.user_nickname,
+            amount: data.amount,
+            description: data.description,
+            used_this_month: data.used_this_month,
+            monthly_limit: data.monthly_limit,
+            time: Date.now()
+        });
+        
+        await db.characters.put(user);
+    }
+}
+
+// 处理亲属卡列表
+async function handleFamilyCardsList(data) {
+    console.log('[Online] 收到亲属卡列表:', data);
+    
+    // 保存到本地缓存
+    localStorage.setItem('online_family_cards_given', JSON.stringify(data.given || []));
+    localStorage.setItem('online_family_cards_received', JSON.stringify(data.received || []));
+}
+
+// ==================== 亲属卡处理函数结束 ====================
 
 // 请求已上线的角色列表
 function requestOnlineCharacters() {
