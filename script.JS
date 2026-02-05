@@ -33778,3 +33778,765 @@ window.startOnlineGroupVoiceRecord = startOnlineGroupVoiceRecord;
 window.playOnlineGroupAudio = playOnlineGroupAudio;
 window.receiveOnlineGroupTransfer = receiveOnlineGroupTransfer;
 window.doJoinOnlineGroup = doJoinOnlineGroup;
+
+// ============================================
+// 饿美了外卖系统
+// ============================================
+
+// 饿美了数据存储
+let emeiData = {
+    myCoupons: [], // 我的优惠券
+    couponClaimCount: 3, // 今日剩余领取次数
+    lastClaimDate: null, // 上次领取日期
+    currentStore: null, // 当前选中的店铺
+    cart: [], // 购物车
+    selectedRecipient: 'self', // 选中的收货人
+    selectedCoupon: null, // 选中的优惠券
+    selectedPaymentMethod: null // 选中的支付方式
+};
+
+// 默认店铺数据
+const defaultStores = [
+    {
+        id: 1,
+        name: '花间小筑',
+        description: '精致简餐 | 浪漫下午茶',
+        avatar: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ffe4e9" width="100" height="100"/><text x="50" y="55" font-size="36" text-anchor="middle" fill="%23ff6b9d">🌸</text></svg>',
+        sales: 999,
+        menu: [
+            { id: 101, name: '樱花拿铁', price: 28, image: '☕' },
+            { id: 102, name: '抹茶千层', price: 32, image: '🍰' },
+            { id: 103, name: '草莓奶昔', price: 25, image: '🥤' },
+            { id: 104, name: '芝士蛋糕', price: 35, image: '🧀' },
+            { id: 105, name: '水果沙拉', price: 22, image: '🥗' },
+            { id: 106, name: '法式可颂', price: 18, image: '🥐' }
+        ]
+    },
+    {
+        id: 2,
+        name: '星光私厨',
+        description: '精品料理 | 品质生活',
+        avatar: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23f5f0ff" width="100" height="100"/><text x="50" y="55" font-size="36" text-anchor="middle" fill="%239370db">⭐</text></svg>',
+        sales: 888,
+        menu: [
+            { id: 201, name: '牛排套餐', price: 88, image: '🥩' },
+            { id: 202, name: '鲜虾意面', price: 58, image: '🍝' },
+            { id: 203, name: '烤三文鱼', price: 68, image: '🐟' },
+            { id: 204, name: '法式蜗牛', price: 48, image: '🐌' },
+            { id: 205, name: '海鲜拼盘', price: 98, image: '🦞' },
+            { id: 206, name: '红酒炖牛肉', price: 78, image: '🍷' }
+        ]
+    }
+];
+
+// 显示饿美了页面
+async function showEmeiPage() {
+    const page = document.getElementById('emei-page');
+    const serviceSubPage = document.getElementById('service-sub-page');
+    
+    if (page) {
+        page.style.display = 'block';
+        if (serviceSubPage) serviceSubPage.style.display = 'none';
+        
+        // 检查是否需要重置每日领取次数
+        resetDailyCouponCount();
+        
+        // 渲染页面
+        renderEmeiMain();
+    }
+}
+
+// 隐藏饿美了页面
+function hideEmeiPage() {
+    const page = document.getElementById('emei-page');
+    const serviceSubPage = document.getElementById('service-sub-page');
+    
+    if (page) page.style.display = 'none';
+    if (serviceSubPage) serviceSubPage.style.display = 'block';
+    
+    // 返回主视图
+    document.getElementById('emei-main-view').style.display = 'block';
+    document.getElementById('emei-store-detail-view').style.display = 'none';
+    document.getElementById('emei-checkout-view').style.display = 'none';
+}
+
+// 重置每日优惠券领取次数
+function resetDailyCouponCount() {
+    const today = new Date().toDateString();
+    if (emeiData.lastClaimDate !== today) {
+        emeiData.couponClaimCount = 3;
+        emeiData.lastClaimDate = today;
+    }
+    
+    // 更新显示
+    const countEl = document.getElementById('emei-coupon-count');
+    if (countEl) countEl.innerText = emeiData.couponClaimCount;
+}
+
+// 渲染主页
+function renderEmeiMain() {
+    // 更新优惠券领取次数
+    resetDailyCouponCount();
+    
+    // 渲染已领取的优惠券
+    renderMyCoupons();
+    
+    // 渲染店铺列表
+    renderStoreList();
+}
+
+// 渲染已领取的优惠券
+function renderMyCoupons() {
+    const container = document.getElementById('emei-my-coupons');
+    if (!container) return;
+    
+    if (emeiData.myCoupons.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+    
+    container.style.display = 'block';
+    container.innerHTML = `
+        <div style="font-size: 12px; color: #666; margin-bottom: 8px;">我的优惠券</div>
+        <div style="display: flex; gap: 8px; overflow-x: auto;">
+            ${emeiData.myCoupons.map(coupon => `
+                <div style="flex-shrink: 0; padding: 8px 16px; background: linear-gradient(135deg, #fff 0%, #fff9fa 100%); border: 1px solid rgba(255,107,157,0.2); border-radius: 8px; display: flex; flex-direction: column; align-items: center;">
+                    <div style="font-size: 16px; font-weight: 600; color: var(--ins-pink);">${coupon.threshold}减${coupon.amount}</div>
+                    <div style="font-size: 10px; color: #999; margin-top: 2px;">满${coupon.threshold}可用</div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+// 领取优惠券
+function claimEmeiCoupon() {
+    if (emeiData.couponClaimCount <= 0) {
+        alert('今日领取次数已用完，明天再来吧！');
+        return;
+    }
+    
+    // 随机生成优惠券
+    const random = Math.random();
+    let coupon;
+    
+    if (random < 0.7) {
+        // 70%概率：小额优惠券 (20-5)
+        coupon = { threshold: 20, amount: 5, type: 'discount', expireDate: getExpireDate(7) };
+    } else if (random < 0.9) {
+        // 20%概率：中额优惠券 (30-15)
+        coupon = { threshold: 30, amount: 15, type: 'discount', expireDate: getExpireDate(7) };
+    } else {
+        // 10%概率：大额优惠券 (20-15)
+        coupon = { threshold: 20, amount: 15, type: 'discount', expireDate: getExpireDate(7) };
+    }
+    
+    emeiData.myCoupons.push(coupon);
+    emeiData.couponClaimCount--;
+    
+    // 更新显示
+    document.getElementById('emei-coupon-count').innerText = emeiData.couponClaimCount;
+    renderMyCoupons();
+    
+    // 提示
+    alert(`🎉 恭喜领取 ${coupon.threshold}减${coupon.amount} 优惠券！`);
+}
+
+// 获取过期日期
+function getExpireDate(days) {
+    const date = new Date();
+    date.setDate(date.getDate() + days);
+    return date.toLocaleDateString();
+}
+
+// 渲染店铺列表
+function renderStoreList() {
+    const container = document.getElementById('emei-store-list');
+    if (!container) return;
+    
+    container.innerHTML = defaultStores.map(store => `
+        <div onclick="openEmeiStore(${store.id})" style="background: #fff; border-radius: 16px; padding: 16px; margin-bottom: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.04); cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 16px rgba(0,0,0,0.08)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 12px rgba(0,0,0,0.04)'">
+            <div style="display: flex; gap: 12px;">
+                <div style="width: 80px; height: 80px; border-radius: 12px; background-image: url('${store.avatar}'); background-size: cover; background-color: #f5f5f5; flex-shrink: 0;"></div>
+                <div style="flex: 1;">
+                    <div style="font-size: 16px; font-weight: 600; color: #333; margin-bottom: 4px;">${store.name}</div>
+                    <div style="font-size: 12px; color: #999; margin-bottom: 8px;">${store.description}</div>
+                    <div style="display: flex; gap: 12px; font-size: 11px; color: #666;">
+                        <span>⭐ 4.8</span>
+                        <span>月售 ${store.sales}+</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+
+// 打开店铺详情
+async function openEmeiStore(storeId) {
+    const store = defaultStores.find(s => s.id === storeId);
+    if (!store) return;
+    
+    emeiData.currentStore = store;
+    emeiData.cart = [];
+    
+    // 切换视图
+    document.getElementById('emei-main-view').style.display = 'none';
+    document.getElementById('emei-store-detail-view').style.display = 'block';
+    
+    // 渲染店铺信息
+    document.getElementById('emei-store-name').innerText = store.name;
+    document.getElementById('emei-store-title').innerText = store.name;
+    document.getElementById('emei-store-desc').innerText = store.description;
+    document.getElementById('emei-store-sales').innerText = store.sales + '+';
+    document.getElementById('emei-store-avatar').style.backgroundImage = `url('${store.avatar}')`;
+    
+    // 渲染菜单
+    renderEmeiMenu();
+    
+    // 渲染收货人选项
+    await renderRecipientOptions();
+    
+    // 更新购物车
+    updateEmeiCart();
+}
+
+// 返回主页
+function backToEmeiMain() {
+    document.getElementById('emei-main-view').style.display = 'block';
+    document.getElementById('emei-store-detail-view').style.display = 'none';
+    emeiData.cart = [];
+}
+
+// 渲染菜单
+function renderEmeiMenu() {
+    const container = document.getElementById('emei-menu-list');
+    if (!container || !emeiData.currentStore) return;
+    
+    container.innerHTML = emeiData.currentStore.menu.map(item => `
+        <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px; background: #fff; border-radius: 12px; margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.04);">
+            <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
+                <div style="width: 60px; height: 60px; background: linear-gradient(135deg, #fff5f7 0%, #ffeef2 100%); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 32px;">${item.image}</div>
+                <div style="flex: 1;">
+                    <div style="font-size: 14px; font-weight: 500; color: #333; margin-bottom: 4px;">${item.name}</div>
+                    <div style="font-size: 16px; font-weight: 600; color: var(--ins-pink);">¥${item.price}</div>
+                </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <div onclick="decreaseEmeiItem(${item.id})" style="width: 28px; height: 28px; border: 1px solid #e5e5e5; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; color: #666;">-</div>
+                <div id="emei-item-count-${item.id}" style="min-width: 20px; text-align: center; font-size: 14px; font-weight: 500;">0</div>
+                <div onclick="increaseEmeiItem(${item.id})" style="width: 28px; height: 28px; background: var(--ins-pink); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; color: #fff;">+</div>
+            </div>
+        </div>
+    `).join('');
+}
+
+// 渲染收货人选项
+async function renderRecipientOptions() {
+    const select = document.getElementById('emei-recipient-select');
+    if (!select) return;
+    
+    // 获取所有角色
+    const characters = await db.characters.toArray();
+    const friends = characters.filter(c => ['friend', 'lover', 'family'].includes(c.type));
+    
+    let html = '<option value="self">我自己</option>';
+    friends.forEach(char => {
+        html += `<option value="${char.id}">${char.name}</option>`;
+    });
+    
+    select.innerHTML = html;
+    select.value = emeiData.selectedRecipient;
+}
+
+// 增加商品数量
+function increaseEmeiItem(itemId) {
+    if (!emeiData.currentStore) return;
+    
+    const item = emeiData.currentStore.menu.find(m => m.id === itemId);
+    if (!item) return;
+    
+    const cartItem = emeiData.cart.find(c => c.id === itemId);
+    if (cartItem) {
+        cartItem.count++;
+    } else {
+        emeiData.cart.push({ ...item, count: 1 });
+    }
+    
+    updateEmeiCart();
+}
+
+// 减少商品数量
+function decreaseEmeiItem(itemId) {
+    const cartItem = emeiData.cart.find(c => c.id === itemId);
+    if (!cartItem) return;
+    
+    cartItem.count--;
+    if (cartItem.count <= 0) {
+        emeiData.cart = emeiData.cart.filter(c => c.id !== itemId);
+    }
+    
+    updateEmeiCart();
+}
+
+// 更新购物车显示
+function updateEmeiCart() {
+    // 更新数量显示
+    if (emeiData.currentStore) {
+        emeiData.currentStore.menu.forEach(item => {
+            const countEl = document.getElementById(`emei-item-count-${item.id}`);
+            if (countEl) {
+                const cartItem = emeiData.cart.find(c => c.id === item.id);
+                countEl.innerText = cartItem ? cartItem.count : 0;
+            }
+        });
+    }
+    
+    // 更新总价
+    const total = emeiData.cart.reduce((sum, item) => sum + item.price * item.count, 0);
+    const totalEl = document.getElementById('emei-total-price');
+    if (totalEl) totalEl.innerText = total.toFixed(2);
+}
+
+
+// 显示结算页面
+async function showEmeiCheckout() {
+    if (emeiData.cart.length === 0) {
+        alert('购物车是空的，快去选点吃的吧！');
+        return;
+    }
+    
+    const recipientSelect = document.getElementById('emei-recipient-select');
+    emeiData.selectedRecipient = recipientSelect ? recipientSelect.value : 'self';
+    
+    // 切换视图
+    document.getElementById('emei-store-detail-view').style.display = 'none';
+    document.getElementById('emei-checkout-view').style.display = 'block';
+    
+    // 渲染收货人信息
+    await renderCheckoutRecipient();
+    
+    // 渲染订单详情
+    renderCheckoutItems();
+    
+    // 计算价格
+    calculateCheckoutPrice();
+    
+    // 加载钱包余额
+    await loadEmeiWalletBalance();
+}
+
+// 返回店铺页面
+function backToEmeiStore() {
+    document.getElementById('emei-store-detail-view').style.display = 'block';
+    document.getElementById('emei-checkout-view').style.display = 'none';
+}
+
+// 渲染收货人信息
+async function renderCheckoutRecipient() {
+    const avatar = document.getElementById('emei-recipient-avatar');
+    const name = document.getElementById('emei-recipient-name');
+    
+    if (emeiData.selectedRecipient === 'self') {
+        name.innerText = '我自己';
+        avatar.style.backgroundImage = 'url(https://api.dicebear.com/7.x/avataaars/svg?seed=self)';
+    } else {
+        const char = await db.characters.get(parseInt(emeiData.selectedRecipient));
+        if (char) {
+            name.innerText = char.name;
+            avatar.style.backgroundImage = `url(${char.avatar})`;
+            avatar.style.backgroundSize = 'cover';
+        }
+    }
+}
+
+// 渲染订单详情
+function renderCheckoutItems() {
+    const container = document.getElementById('emei-checkout-items');
+    if (!container) return;
+    
+    container.innerHTML = emeiData.cart.map(item => `
+        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f5f5f5;">
+            <div style="flex: 1;">
+                <span style="font-size: 14px; color: #333;">${item.name}</span>
+                <span style="font-size: 12px; color: #999; margin-left: 8px;">x${item.count}</span>
+            </div>
+            <div style="font-size: 14px; color: #333;">¥${(item.price * item.count).toFixed(2)}</div>
+        </div>
+    `).join('');
+}
+
+// 计算价格
+function calculateCheckoutPrice() {
+    const subtotal = emeiData.cart.reduce((sum, item) => sum + item.price * item.count, 0);
+    const delivery = 3;
+    let discount = 0;
+    
+    // 计算优惠券折扣
+    if (emeiData.selectedCoupon) {
+        if (subtotal >= emeiData.selectedCoupon.threshold) {
+            discount = emeiData.selectedCoupon.amount;
+        } else {
+            emeiData.selectedCoupon = null;
+            document.getElementById('emei-selected-coupon-text').innerText = '未使用';
+        }
+    }
+    
+    const total = Math.max(subtotal + delivery - discount, 0.01);
+    
+    // 更新显示
+    document.getElementById('emei-checkout-subtotal').innerText = subtotal.toFixed(2);
+    document.getElementById('emei-checkout-delivery').innerText = delivery.toFixed(2);
+    document.getElementById('emei-checkout-total').innerText = total.toFixed(2);
+    
+    if (discount > 0) {
+        document.getElementById('emei-checkout-discount').innerText = discount.toFixed(2);
+        document.getElementById('emei-checkout-discount-row').style.display = 'flex';
+    } else {
+        document.getElementById('emei-checkout-discount-row').style.display = 'none';
+    }
+}
+
+// 选择优惠券
+function selectEmeiCoupon() {
+    const modal = document.getElementById('emei-coupon-modal');
+    const list = document.getElementById('emei-coupon-list');
+    
+    if (!modal || !list) return;
+    
+    const subtotal = emeiData.cart.reduce((sum, item) => sum + item.price * item.count, 0);
+    
+    if (emeiData.myCoupons.length === 0) {
+        alert('暂无可用优惠券');
+        return;
+    }
+    
+    list.innerHTML = emeiData.myCoupons.map((coupon, index) => {
+        const canUse = subtotal >= coupon.threshold;
+        return `
+            <div onclick="${canUse ? `useEmeiCoupon(${index})` : ''}" style="padding: 16px; background: ${canUse ? '#fff' : '#f5f5f5'}; border: 2px solid ${emeiData.selectedCoupon === coupon ? 'var(--ins-pink)' : '#e5e5e5'}; border-radius: 12px; margin-bottom: 12px; cursor: ${canUse ? 'pointer' : 'not-allowed'}; opacity: ${canUse ? '1' : '0.5'};">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div style="font-size: 18px; font-weight: 600; color: var(--ins-pink);">${coupon.threshold}减${coupon.amount}</div>
+                        <div style="font-size: 12px; color: #999; margin-top: 4px;">满${coupon.threshold}可用 | 有效期至${coupon.expireDate}</div>
+                    </div>
+                    ${canUse ? `<svg width="20" height="20" fill="${emeiData.selectedCoupon === coupon ? 'var(--ins-pink)' : '#ccc'}" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>` : '<span style="font-size: 11px; color: #999;">不可用</span>'}
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    modal.style.display = 'flex';
+}
+
+// 使用优惠券
+function useEmeiCoupon(index) {
+    emeiData.selectedCoupon = emeiData.myCoupons[index];
+    document.getElementById('emei-selected-coupon-text').innerText = `${emeiData.selectedCoupon.threshold}减${emeiData.selectedCoupon.amount}`;
+    closeEmeiCouponModal();
+    calculateCheckoutPrice();
+}
+
+// 关闭优惠券弹窗
+function closeEmeiCouponModal() {
+    const modal = document.getElementById('emei-coupon-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+// 加载钱包余额
+async function loadEmeiWalletBalance() {
+    const accountId = getCurrentAccountId();
+    let balance = 0;
+    
+    try {
+        const account = await db.accounts.get(accountId);
+        balance = account?.balance || 0;
+    } catch (err) {
+        console.error('加载钱包余额失败:', err);
+    }
+    
+    const balanceEl = document.getElementById('emei-wallet-balance');
+    if (balanceEl) balanceEl.innerText = balance.toFixed(2);
+    
+    // 加载亲属卡信息
+    await loadFamilyCardInfo();
+}
+
+// 加载亲属卡信息
+async function loadFamilyCardInfo() {
+    const info = document.getElementById('emei-family-card-info');
+    if (!info) return;
+    
+    try {
+        const cards = await db.family_cards.toArray();
+        if (cards.length > 0) {
+            info.innerText = `可用 ${cards.length} 张`;
+        } else {
+            info.innerText = '未绑定';
+        }
+    } catch (err) {
+        info.innerText = '未绑定';
+    }
+}
+
+
+// 显示支付方式弹窗
+function showEmeiPaymentModal() {
+    const modal = document.getElementById('emei-payment-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+        emeiData.selectedPaymentMethod = null;
+        
+        // 清除所有选中状态
+        document.querySelectorAll('.emei-payment-option').forEach(opt => {
+            opt.style.borderColor = '#f0f0f0';
+        });
+        document.querySelectorAll('input[name="emei-payment"]').forEach(input => {
+            input.checked = false;
+        });
+    }
+}
+
+// 关闭支付方式弹窗
+function closeEmeiPaymentModal() {
+    const modal = document.getElementById('emei-payment-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+// 选择支付方式
+function selectEmeiPaymentMethod(method) {
+    emeiData.selectedPaymentMethod = method;
+    
+    // 更新选中状态
+    document.querySelectorAll('.emei-payment-option').forEach(opt => {
+        opt.style.borderColor = '#f0f0f0';
+    });
+    document.querySelectorAll('input[name="emei-payment"]').forEach(input => {
+        input.checked = input.value === method;
+        if (input.checked) {
+            input.closest('.emei-payment-option').style.borderColor = 'var(--ins-pink)';
+        }
+    });
+}
+
+// 确认支付
+async function confirmEmeiPayment() {
+    if (!emeiData.selectedPaymentMethod) {
+        alert('请选择支付方式');
+        return;
+    }
+    
+    const subtotal = emeiData.cart.reduce((sum, item) => sum + item.price * item.count, 0);
+    const delivery = 3;
+    const discount = emeiData.selectedCoupon ? emeiData.selectedCoupon.amount : 0;
+    const total = subtotal + delivery - discount;
+    
+    closeEmeiPaymentModal();
+    
+    // 根据不同支付方式处理
+    if (emeiData.selectedPaymentMethod === 'wallet') {
+        await payWithWallet(total);
+    } else if (emeiData.selectedPaymentMethod === 'family') {
+        await payWithFamilyCard(total);
+    } else if (emeiData.selectedPaymentMethod === 'request') {
+        await requestPayment(total);
+    }
+}
+
+// 零钱支付
+async function payWithWallet(amount) {
+    const accountId = getCurrentAccountId();
+    const account = await db.accounts.get(accountId);
+    
+    if (!account || account.balance < amount) {
+        alert('余额不足，请选择其他支付方式');
+        return;
+    }
+    
+    // 扣款
+    account.balance -= amount;
+    await db.accounts.put(account);
+    
+    // 添加账单记录
+    await db.bills.add({
+        account_id: accountId,
+        type: 'expense',
+        category: '餐饮',
+        amount: amount,
+        description: `饿美了 - ${emeiData.currentStore.name}`,
+        time: Date.now()
+    });
+    
+    // 发送订单卡片
+    await sendEmeiOrderCard();
+    
+    alert('支付成功！');
+    hideEmeiPage();
+}
+
+// 亲属卡支付
+async function payWithFamilyCard(amount) {
+    const cards = await db.family_cards.toArray();
+    
+    if (cards.length === 0) {
+        alert('未绑定亲属卡，请先绑定');
+        return;
+    }
+    
+    // 使用第一张亲属卡
+    const card = cards[0];
+    
+    // 扣款逻辑（这里简化处理）
+    // 实际应该从卡主账户扣款
+    
+    // 发送订单卡片和通知
+    await sendEmeiOrderCard();
+    
+    alert('支付成功！已使用亲属卡支付');
+    hideEmeiPage();
+}
+
+// 申请代付
+async function requestPayment(amount) {
+    if (emeiData.selectedRecipient === 'self') {
+        alert('给自己点单无法申请代付哦');
+        return;
+    }
+    
+    // 获取收货人信息
+    const recipient = await db.characters.get(parseInt(emeiData.selectedRecipient));
+    if (!recipient) {
+        alert('收货人信息不存在');
+        return;
+    }
+    
+    // 发送代付请求卡片到聊天
+    await sendPaymentRequestCard(recipient, amount);
+    
+    alert(`已向 ${recipient.name} 发送代付请求`);
+    hideEmeiPage();
+}
+
+// 发送订单卡片到聊天
+async function sendEmeiOrderCard() {
+    if (!currentChatCharId && emeiData.selectedRecipient === 'self') {
+        return; // 给自己点单且没有打开聊天，不发送卡片
+    }
+    
+    const accountId = getCurrentAccountId();
+    let chatCharId = currentChatCharId;
+    
+    // 如果是给角色点单，发送到该角色的聊天
+    if (emeiData.selectedRecipient !== 'self') {
+        chatCharId = parseInt(emeiData.selectedRecipient);
+    }
+    
+    if (!chatCharId) return;
+    
+    const char = await db.characters.get(chatCharId);
+    if (!char) return;
+    
+    // 构建订单信息
+    const orderInfo = {
+        store: emeiData.currentStore.name,
+        items: emeiData.cart.map(item => `${item.name} x${item.count}`).join('、'),
+        total: (emeiData.cart.reduce((sum, item) => sum + item.price * item.count, 0) + 3 - (emeiData.selectedCoupon ? emeiData.selectedCoupon.amount : 0)).toFixed(2),
+        recipient: emeiData.selectedRecipient === 'self' ? '我自己' : char.name
+    };
+    
+    // 创建卡片HTML
+    const cardHtml = `
+        <div style="max-width: 280px; background: linear-gradient(135deg, #fff5f7 0%, #ffeef2 100%); border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                <div style="font-size: 20px;">🍔</div>
+                <div style="font-size: 14px; font-weight: 600; color: #333;">饿美了订单</div>
+            </div>
+            <div style="font-size: 12px; color: #666; line-height: 1.6;">
+                <div style="margin-bottom: 4px;"><span style="color: #999;">店铺：</span>${orderInfo.store}</div>
+                <div style="margin-bottom: 4px;"><span style="color: #999;">商品：</span>${orderInfo.items}</div>
+                <div style="margin-bottom: 4px;"><span style="color: #999;">收货人：</span>${orderInfo.recipient}</div>
+                <div style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed rgba(255,107,157,0.2);"><span style="color: #999;">总计：</span><span style="font-size: 16px; font-weight: 600; color: var(--ins-pink);">¥${orderInfo.total}</span></div>
+            </div>
+            <div style="margin-top: 12px; font-size: 11px; color: #999; text-align: center;">预计30分钟送达</div>
+        </div>
+    `;
+    
+    // 添加到聊天记录
+    if (!char.chat_history) char.chat_history = [];
+    char.chat_history.push({
+        role: 'user',
+        content: `[emei_order]${cardHtml}`,
+        time: Date.now()
+    });
+    char.updated_at = Date.now();
+    await db.characters.put(char);
+    
+    // 如果当前在该聊天窗口，刷新显示
+    if (currentChatCharId === chatCharId) {
+        renderChatMessages();
+    }
+}
+
+// 发送代付请求卡片
+async function sendPaymentRequestCard(recipient, amount) {
+    if (!recipient) return;
+    
+    const cardHtml = `
+        <div style="max-width: 280px; background: linear-gradient(135deg, #fff9e6 0%, #fff5e6 100%); border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                <div style="font-size: 20px;">💰</div>
+                <div style="font-size: 14px; font-weight: 600; color: #333;">代付请求</div>
+            </div>
+            <div style="font-size: 13px; color: #666; line-height: 1.6;">
+                <div style="margin-bottom: 8px;">我在饿美了给你点了外卖，请帮忙支付~</div>
+                <div style="padding: 12px; background: rgba(255,255,255,0.8); border-radius: 8px;">
+                    <div style="margin-bottom: 4px;"><span style="color: #999;">店铺：</span>${emeiData.currentStore.name}</div>
+                    <div style="margin-bottom: 8px;"><span style="color: #999;">商品：</span>${emeiData.cart.map(i => i.name).join('、')}</div>
+                    <div style="font-size: 16px; font-weight: 600; color: #ff9500;">¥${amount.toFixed(2)}</div>
+                </div>
+            </div>
+            <div onclick="handlePaymentRequest(this)" style="margin-top: 12px; padding: 10px; background: linear-gradient(135deg, #ff9500 0%, #ffb300 100%); color: #fff; text-align: center; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;">立即支付</div>
+        </div>
+    `;
+    
+    if (!recipient.chat_history) recipient.chat_history = [];
+    recipient.chat_history.push({
+        role: 'user',
+        content: `[payment_request]${cardHtml}`,
+        time: Date.now()
+    });
+    recipient.updated_at = Date.now();
+    await db.characters.put(recipient);
+    
+    if (currentChatCharId === recipient.id) {
+        renderChatMessages();
+    }
+}
+
+// 处理代付请求（角色点击支付按钮）
+async function handlePaymentRequest(btn) {
+    // 这里可以添加角色支付的逻辑
+    alert('该功能需要角色确认支付');
+    btn.innerText = '已支付';
+    btn.style.background = '#ccc';
+    btn.onclick = null;
+}
+
+// 注册全局函数
+window.showEmeiPage = showEmeiPage;
+window.hideEmeiPage = hideEmeiPage;
+window.claimEmeiCoupon = claimEmeiCoupon;
+window.openEmeiStore = openEmeiStore;
+window.backToEmeiMain = backToEmeiMain;
+window.increaseEmeiItem = increaseEmeiItem;
+window.decreaseEmeiItem = decreaseEmeiItem;
+window.showEmeiCheckout = showEmeiCheckout;
+window.backToEmeiStore = backToEmeiStore;
+window.selectEmeiCoupon = selectEmeiCoupon;
+window.useEmeiCoupon = useEmeiCoupon;
+window.closeEmeiCouponModal = closeEmeiCouponModal;
+window.showEmeiPaymentModal = showEmeiPaymentModal;
+window.closeEmeiPaymentModal = closeEmeiPaymentModal;
+window.selectEmeiPaymentMethod = selectEmeiPaymentMethod;
+window.confirmEmeiPayment = confirmEmeiPayment;
+window.handlePaymentRequest = handlePaymentRequest;
