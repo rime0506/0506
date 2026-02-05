@@ -11623,6 +11623,28 @@ ${loreContext}
                                     message: textBeforeFamilyCard || ''
                                 }));
                                 
+                                // ✅ 在发送方这边也保存亲属卡消息到聊天记录
+                                const familyCardMsg = {
+                                    role: 'user',
+                                    type: 'familyCard',
+                                    content: JSON.stringify({
+                                        fromName: onlineUserChar.name,
+                                        monthlyLimit: monthlyLimit,
+                                        status: 'sent',
+                                        isOnline: true
+                                    }),
+                                    time: Date.now()
+                                };
+                                
+                                history = getChatHistory(freshChar, accountId);
+                                history.push(familyCardMsg);
+                                await setChatHistory(freshChar, accountId, history);
+                                
+                                // 刷新聊天界面
+                                if (currentChatCharId === freshChar.id) {
+                                    renderChatBody(freshChar);
+                                }
+                                
                                 console.log('[Online] 亲属卡已发送到服务器');
                                 showToast('亲属卡已赠送');
                             } else {
@@ -20786,68 +20808,121 @@ async function renderFamilyCardList() {
     const user = await db.characters.get(parseInt(currentMyCharId));
     if (!user) return;
     
-    // 我赠送的亲属卡
-    const givenCards = user.identity?.familyCardsGiven || [];
+    // ========== 我赠送的亲属卡 ==========
     const givenListEl = document.getElementById('family-card-given-list');
+    let givenHtml = '';
     
-    if (givenCards.length === 0) {
-        givenListEl.innerHTML = '';
-    } else {
-        let html = '';
-        for (const card of givenCards) {
-            const char = await db.characters.get(card.charId);
-            if (char) {
-                const usedThisMonth = card.usedThisMonth || 0;
-                const limitText = card.monthlyLimit > 0 ? `已用 ¥${usedThisMonth.toFixed(2)} / ¥${card.monthlyLimit}` : `已用 ¥${usedThisMonth.toFixed(2)} (不限额)`;
-                html += `
-                    <div class="family-card-item">
-                        <div class="family-card-avatar" style="background-image:url(${char.avatar})"></div>
-                        <div class="family-card-info">
-                            <div class="family-card-name">${char.name}</div>
-                            <div class="family-card-detail">${limitText}</div>
-                        </div>
-                        <div class="family-card-actions">
-                            <button class="family-card-btn view" onclick="showFamilyCardRecords(${card.charId}, 'given')">记录</button>
-                            <button class="family-card-btn cancel" onclick="cancelFamilyCard(${card.charId}, 'given')">解绑</button>
-                        </div>
+    // 1. 本地亲属卡
+    const localGivenCards = user.identity?.familyCardsGiven || [];
+    for (const card of localGivenCards) {
+        const char = await db.characters.get(card.charId);
+        if (char) {
+            const usedThisMonth = card.usedThisMonth || 0;
+            const limitText = card.monthlyLimit > 0 ? `已用 ¥${usedThisMonth.toFixed(2)} / ¥${card.monthlyLimit}` : `已用 ¥${usedThisMonth.toFixed(2)} (不限额)`;
+            givenHtml += `
+                <div class="family-card-item">
+                    <div class="family-card-avatar" style="background-image:url(${char.avatar})"></div>
+                    <div class="family-card-info">
+                        <div class="family-card-name">${char.name}</div>
+                        <div class="family-card-detail">${limitText}</div>
                     </div>
-                `;
-            }
+                    <div class="family-card-actions">
+                        <button class="family-card-btn view" onclick="showFamilyCardRecords(${card.charId}, 'given')">记录</button>
+                        <button class="family-card-btn cancel" onclick="cancelFamilyCard(${card.charId}, 'given')">解绑</button>
+                    </div>
+                </div>
+            `;
         }
-        givenListEl.innerHTML = html;
     }
     
-    // 我收到的亲属卡
-    const receivedCards = user.identity?.familyCardsReceived || [];
+    // 2. 联机亲属卡
+    const onlineGivenCards = JSON.parse(localStorage.getItem('online_family_cards_given') || '[]');
+    for (const card of onlineGivenCards) {
+        // 查找对应的联机好友
+        const allChars = await db.characters.where('type').equals('online_friend').toArray();
+        const friendChar = allChars.find(c => c.onlineData?.wx_account === card.to_wx_account);
+        
+        if (friendChar) {
+            const usedThisMonth = parseFloat(card.used_this_month) || 0;
+            const monthlyLimit = card.monthly_limit || 0;
+            const limitText = monthlyLimit > 0 ? `已用 ¥${usedThisMonth.toFixed(2)} / ¥${monthlyLimit}` : `已用 ¥${usedThisMonth.toFixed(2)} (不限额)`;
+            givenHtml += `
+                <div class="family-card-item">
+                    <div class="family-card-avatar" style="background-image:url(${friendChar.avatar})"></div>
+                    <div class="family-card-info">
+                        <div class="family-card-name">${friendChar.name} <span style="font-size:12px;color:#999;">(联机)</span></div>
+                        <div class="family-card-detail">${limitText}</div>
+                    </div>
+                    <div class="family-card-actions">
+                        <button class="family-card-btn view" onclick="showToast('联机亲属卡记录查看功能开发中')">记录</button>
+                    </div>
+                </div>
+            `;
+        }
+    }
+    
+    givenListEl.innerHTML = givenHtml || '';
+    
+    // ========== 我收到的亲属卡 ==========
     const receivedListEl = document.getElementById('family-card-received-list');
     const receivedEmptyEl = document.getElementById('family-card-received-empty');
+    let receivedHtml = '';
     
-    if (receivedCards.length === 0) {
+    // 1. 本地亲属卡
+    const localReceivedCards = user.identity?.familyCardsReceived || [];
+    for (const card of localReceivedCards) {
+        const char = await db.characters.get(card.charId);
+        if (char) {
+            const usedThisMonth = card.usedThisMonth || 0;
+            const monthlyLimit = card.monthlyLimit || 0;
+            const limitText = monthlyLimit > 0 ? `本月可用 ¥${(monthlyLimit - usedThisMonth).toFixed(2)}` : '不限额';
+            receivedHtml += `
+                <div class="family-card-item">
+                    <div class="family-card-avatar" style="background-image:url(${char.avatar})"></div>
+                    <div class="family-card-info">
+                        <div class="family-card-name">${char.name} 的亲属卡</div>
+                        <div class="family-card-detail">${limitText}</div>
+                    </div>
+                    <div class="family-card-actions">
+                        <button class="family-card-btn view" onclick="showFamilyCardRecords(${card.charId}, 'received')">记录</button>
+                    </div>
+                </div>
+            `;
+        }
+    }
+    
+    // 2. 联机亲属卡
+    const onlineReceivedCards = JSON.parse(localStorage.getItem('online_family_cards_received') || '[]');
+    for (const card of onlineReceivedCards) {
+        // 查找对应的联机好友
+        const allChars = await db.characters.where('type').equals('online_friend').toArray();
+        const friendChar = allChars.find(c => c.onlineData?.wx_account === card.from_wx_account);
+        
+        if (friendChar) {
+            const usedThisMonth = parseFloat(card.used_this_month) || 0;
+            const monthlyLimit = card.monthly_limit || 0;
+            const limitText = monthlyLimit > 0 ? `本月可用 ¥${(monthlyLimit - usedThisMonth).toFixed(2)}` : '不限额';
+            receivedHtml += `
+                <div class="family-card-item">
+                    <div class="family-card-avatar" style="background-image:url(${friendChar.avatar})"></div>
+                    <div class="family-card-info">
+                        <div class="family-card-name">${friendChar.name} 的亲属卡 <span style="font-size:12px;color:#999;">(联机)</span></div>
+                        <div class="family-card-detail">${limitText}</div>
+                    </div>
+                    <div class="family-card-actions">
+                        <button class="family-card-btn view" onclick="showToast('联机亲属卡记录查看功能开发中')">记录</button>
+                    </div>
+                </div>
+            `;
+        }
+    }
+    
+    if (receivedHtml) {
+        receivedEmptyEl.style.display = 'none';
+        receivedListEl.innerHTML = receivedHtml;
+    } else {
         receivedListEl.innerHTML = '';
         receivedEmptyEl.style.display = 'block';
-    } else {
-        receivedEmptyEl.style.display = 'none';
-        let html = '';
-        for (const card of receivedCards) {
-            const char = await db.characters.get(card.charId);
-            if (char) {
-                const usedThisMonth = card.usedThisMonth || 0;
-                const limitText = card.monthlyLimit > 0 ? `本月可用 ¥${(card.monthlyLimit - usedThisMonth).toFixed(2)}` : '不限额';
-                html += `
-                    <div class="family-card-item">
-                        <div class="family-card-avatar" style="background-image:url(${char.avatar})"></div>
-                        <div class="family-card-info">
-                            <div class="family-card-name">${char.name} 的亲属卡</div>
-                            <div class="family-card-detail">${limitText}</div>
-                        </div>
-                        <div class="family-card-actions">
-                            <button class="family-card-btn view" onclick="showFamilyCardRecords(${card.charId}, 'received')">记录</button>
-                        </div>
-                    </div>
-                `;
-            }
-        }
-        receivedListEl.innerHTML = html;
     }
 }
 
@@ -27811,6 +27886,14 @@ async function handleOnlineMessage(data) {
         case 'family_card_sent':
             // 亲属卡发送成功
             showToast('亲属卡已赠送');
+            // 重新获取亲属卡列表
+            const onlineUserChar = await getOrCreateOnlineUserChar();
+            if (onlineUserChar && onlineSocket) {
+                onlineSocket.send(JSON.stringify({
+                    type: 'get_family_cards',
+                    my_wx_account: onlineUserChar.identity.account
+                }));
+            }
             break;
         
         case 'family_card_used':
@@ -28417,6 +28500,15 @@ async function handleFamilyCardReceived(data) {
     // 发送通知
     showToast(`${data.from_nickname} 赠送了亲属卡`);
     sendSystemNotification(friendChar.name, '[亲属卡]');
+    
+    // 重新获取亲属卡列表
+    const onlineUserChar = await getOrCreateOnlineUserChar();
+    if (onlineUserChar && onlineSocket) {
+        onlineSocket.send(JSON.stringify({
+            type: 'get_family_cards',
+            my_wx_account: onlineUserChar.identity.account
+        }));
+    }
 }
 
 // 处理亲属卡被使用
@@ -28466,6 +28558,12 @@ async function handleFamilyCardsList(data) {
     // 保存到本地缓存
     localStorage.setItem('online_family_cards_given', JSON.stringify(data.given || []));
     localStorage.setItem('online_family_cards_received', JSON.stringify(data.received || []));
+    
+    // 如果亲属卡页面打开着，刷新显示
+    const familyCardPage = document.getElementById('family-card-page');
+    if (familyCardPage && familyCardPage.style.display !== 'none') {
+        renderFamilyCardList();
+    }
 }
 
 // ==================== 亲属卡处理函数结束 ====================
