@@ -198,6 +198,31 @@ async function initDB() {
         
         console.log('✅ 群聊表结构正确');
         
+        // ✅ 检查 online_group_members 表的列是否正确
+        try {
+            const [columns] = await db.execute(`
+                SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH 
+                FROM INFORMATION_SCHEMA.COLUMNS 
+                WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'online_group_members'
+                ORDER BY ORDINAL_POSITION
+            `, [dbConfig.database]);
+            
+            console.log('📋 online_group_members 表结构:');
+            columns.forEach(col => {
+                console.log(`   - ${col.COLUMN_NAME}: ${col.DATA_TYPE}${col.CHARACTER_MAXIMUM_LENGTH ? `(${col.CHARACTER_MAXIMUM_LENGTH})` : ''}`);
+            });
+            
+            // 检查是否有 character_avatar 字段且类型正确
+            const avatarCol = columns.find(c => c.COLUMN_NAME === 'character_avatar');
+            if (!avatarCol) {
+                console.log('⚠️  缺少 character_avatar 字段，需要修复表结构');
+            } else if (avatarCol.DATA_TYPE === 'varchar' && avatarCol.CHARACTER_MAXIMUM_LENGTH < 1000) {
+                console.log('⚠️  character_avatar 字段类型不正确，需要修复为 TEXT 或 LONGTEXT');
+            }
+        } catch (checkError) {
+            console.log('ℹ️ 表结构检查:', checkError.message);
+        }
+        
         console.log('✅ 数据表创建完成');
         
         // ✅ 数据库迁移：修改avatar字段为TEXT类型（防止"Data too long"错误）
@@ -242,8 +267,9 @@ async function initDB() {
             // 删除可能存在的旧表（如果表结构有问题）
             // 检查 online_group_members 表结构
             const [columns] = await db.execute(`
-                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+                SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS 
                 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'online_group_members'
+                ORDER BY ORDINAL_POSITION
             `, [dbConfig.database]);
             
             const columnNames = columns.map(c => c.COLUMN_NAME);
@@ -252,8 +278,17 @@ async function initDB() {
             // 检查是否缺少必要字段
             const missingColumns = requiredColumns.filter(col => !columnNames.includes(col));
             
-            if (missingColumns.length > 0) {
-                console.log(`⚠️  检测到 online_group_members 表缺少字段: ${missingColumns.join(', ')}`);
+            // 检查 character_avatar 的数据类型
+            const avatarCol = columns.find(c => c.COLUMN_NAME === 'character_avatar');
+            const needsRebuild = missingColumns.length > 0 || (avatarCol && !['text', 'mediumtext', 'longtext'].includes(avatarCol.DATA_TYPE.toLowerCase()));
+            
+            if (needsRebuild) {
+                if (missingColumns.length > 0) {
+                    console.log(`⚠️  检测到 online_group_members 表缺少字段: ${missingColumns.join(', ')}`);
+                }
+                if (avatarCol && !['text', 'mediumtext', 'longtext'].includes(avatarCol.DATA_TYPE.toLowerCase())) {
+                    console.log(`⚠️  character_avatar 字段类型错误: ${avatarCol.DATA_TYPE} (应为 TEXT)`);
+                }
                 console.log('🔄 正在重建表...');
                 
                 // 删除旧表并重建
@@ -1676,6 +1711,8 @@ async function handleGetGroupMembers(ws, data) {
     const clientData = clients.get(ws);
     const { group_id, my_wx_account } = data;
     
+    console.log('[获取群成员] 请求:', { group_id, my_wx_account });
+    
     if (!clientData.wxAccounts.has(my_wx_account)) {
         sendError(ws, '你没有使用该微信号上线');
         return;
@@ -1684,14 +1721,20 @@ async function handleGetGroupMembers(ws, data) {
     let member, members;
     try {
         // 检查是否是群成员
+        console.log('[获取群成员] 查询成员:', { group_id, my_wx_account });
         [member] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ? AND user_wx = ?', [group_id, my_wx_account]);
         if (member.length === 0) {
             sendError(ws, '你不是该群的成员');
             return;
         }
         
+        console.log('[获取群成员] 查询所有成员:', { group_id });
         [members] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ?', [group_id]);
+        console.log('[获取群成员] 查询成功，成员数:', members.length);
     } catch (queryError) {
+        console.error('[获取群成员] 查询失败:', queryError.message);
+        console.error('[获取群成员] 完整错误:', queryError);
+        
         if (queryError.message.includes('Incorrect arguments')) {
             console.error('[获取群成员] 表结构错误，正在修复...');
             // 重建表
