@@ -28000,6 +28000,14 @@ async function handleOnlineIncomingMessage(data) {
         return;
     }
     
+    // ✅ 更新好友的头像（如果服务器发送了新头像）
+    if (data.from_avatar && data.from_avatar !== targetChar.avatar) {
+        console.log('[Online] 更新好友头像:', data.from_wx_account);
+        targetChar.avatar = data.from_avatar;
+        await db.characters.put(targetChar);
+        targetChar = await db.characters.get(targetChar.id);
+    }
+    
     // ✅ 确保联机好友在当前账号下的好友状态是 'friend'
     // 这样切换账号后消息也能正常显示
     const currentFriendStatus = getFriendStatus(targetChar, accountId);
@@ -28056,7 +28064,9 @@ async function handleOnlineIncomingMessage(data) {
         if (msgObj.type === 'transfer' || msgObj.type === 'audio') {
             renderChatBody(targetChar);
         } else {
-            appendMessageToUI('char', data.content, targetChar.avatar);
+            // ✅ 使用服务器发送的头像，如果没有则使用本地头像
+            const avatarToUse = data.from_avatar || targetChar.avatar;
+            appendMessageToUI('char', data.content, avatarToUse);
         }
     } else {
         // 发送通知
