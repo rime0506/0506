@@ -1539,7 +1539,9 @@ async function handleGetGroupMessages(ws, data) {
     if (since) {
         [messages] = await db.execute('SELECT * FROM online_group_messages WHERE group_id = ? AND created_at > ? ORDER BY created_at ASC', [group_id, since]);
     } else if (limit) {
-        [messages] = await db.execute('SELECT * FROM online_group_messages WHERE group_id = ? ORDER BY created_at DESC LIMIT ?', [group_id, limit]);
+        // ✅ MySQL 预处理语句不支持 LIMIT 占位符，需要直接拼接
+        const limitValue = parseInt(limit) || 100;
+        [messages] = await db.execute(`SELECT * FROM online_group_messages WHERE group_id = ? ORDER BY created_at DESC LIMIT ${limitValue}`, [group_id]);
         messages.reverse();
     } else {
         [messages] = await db.execute('SELECT * FROM online_group_messages WHERE group_id = ? ORDER BY created_at ASC', [group_id]);
