@@ -304,9 +304,6 @@ async function migratePhoneAndSmsToIndexedDB() {
             
             // 启动主动聊天检测 (每分钟一次)
             startAutoChatLoop();
-            
-            // ✅ 自动初始化联机系统（不需要手动打开设置）
-            initOnlineSystem();
         }
 
         // --- 纯前端模式：所有数据存储在本地 ---
@@ -748,146 +745,31 @@ async function migratePhoneAndSmsToIndexedDB() {
 
         // ===== 数据导入导出功能 =====
         
-        // 显示导出选项弹窗
-        function showExportOptions() {
-            const overlay = document.createElement('div');
-            overlay.style.cssText = `
-                position: fixed;
-                top: 0;
-                left: 0;
-                right: 0;
-                bottom: 0;
-                background: rgba(0,0,0,0.5);
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                z-index: 100000;
-            `;
-            
-            const dialog = document.createElement('div');
-            dialog.style.cssText = `
-                background: white;
-                border-radius: 12px;
-                padding: 24px;
-                max-width: 400px;
-                width: 90%;
-                box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-            `;
-            
-            dialog.innerHTML = `
-                <h3 style="margin: 0 0 16px 0; font-size: 18px;">导出数据选项</h3>
-                <p style="margin: 0 0 20px 0; font-size: 14px; color: #666;">
-                    选择要导出的数据类型：
-                </p>
-                <div style="margin-bottom: 20px;">
-                    <label style="display: flex; align-items: center; margin-bottom: 12px; cursor: pointer;">
-                        <input type="checkbox" id="export-local-data" checked style="margin-right: 8px; width: 18px; height: 18px;">
-                        <div>
-                            <div style="font-weight: 500;">本地数据</div>
-                            <div style="font-size: 12px; color: #999;">
-                                包括：角色、聊天记录、世界书、表情包、朋友圈、群聊、电话/短信记录等
-                            </div>
-                        </div>
-                    </label>
-                    <label style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="export-online-data" checked style="margin-right: 8px; width: 18px; height: 18px;">
-                        <div>
-                            <div style="font-weight: 500;">联机账号数据</div>
-                            <div style="font-size: 12px; color: #999;">
-                                包括：联机服务器地址、登录Token、用户信息
-                            </div>
-                        </div>
-                    </label>
-                </div>
-                <div style="display: flex; gap: 12px; justify-content: flex-end;">
-                    <button id="export-cancel-btn" style="padding: 8px 16px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer;">
-                        取消
-                    </button>
-                    <button id="export-confirm-btn" style="padding: 8px 16px; border: none; background: #07c160; color: white; border-radius: 6px; cursor: pointer;">
-                        确定导出
-                    </button>
-                </div>
-            `;
-            
-            overlay.appendChild(dialog);
-            document.body.appendChild(overlay);
-            
-            // 绑定事件
-            document.getElementById('export-cancel-btn').onclick = () => {
-                document.body.removeChild(overlay);
-            };
-            
-            document.getElementById('export-confirm-btn').onclick = async () => {
-                const includeLocal = document.getElementById('export-local-data').checked;
-                const includeOnline = document.getElementById('export-online-data').checked;
-                
-                if (!includeLocal && !includeOnline) {
-                    alert('请至少选择一种数据类型');
-                    return;
-                }
-                
-                document.body.removeChild(overlay);
-                await exportAllDataWithOptions(includeLocal, includeOnline);
-            };
-            
-            // 点击背景关闭
-            overlay.onclick = (e) => {
-                if (e.target === overlay) {
-                    document.body.removeChild(overlay);
-                }
-            };
-        }
-        
-        // 导出所有数据（带选项）
-        async function exportAllDataWithOptions(includeLocal = true, includeOnline = true) {
+        // 导出所有数据
+        async function exportAllData() {
             try {
                 const exportData = {
-                    version: '2.0', // 版本升级到2.0
+                    version: '1.0',
                     exportTime: new Date().toISOString(),
-                    dataTypes: {
-                        local: includeLocal,
-                        online: includeOnline
-                    },
                     data: {}
                 };
                 
-                if (includeLocal) {
-                    // 导出所有数据库表
-                    exportData.data.dexiData = await db.dexiData.toArray();
-                    exportData.data.lorebooks = await db.lorebooks.toArray();
-                    exportData.data.characters = await db.characters.toArray();
-                    exportData.data.sticker_categories = await db.sticker_categories.toArray();
-                    exportData.data.moments = await db.moments.toArray();
-                    exportData.data.friend_requests = await db.friend_requests.toArray();
-                    
-                    // 新增：导出群聊数据
-                    exportData.data.group_chats = await db.group_chats.toArray();
-                    
-                    // 新增：导出电话和短信记录
-                    exportData.data.phone_recents = await db.phone_recents.toArray();
-                    exportData.data.sms_messages = await db.sms_messages.toArray();
-                    
-                    // 新增：导出聊天总结
-                    exportData.data.chat_summaries = await db.chat_summaries.toArray();
-                    
-                    // 导出本地 localStorage 数据
-                    exportData.localStorage = {
-                        user_id: localStorage.getItem('user_id'),
-                        current_my_char_id: localStorage.getItem('current_my_char_id'),
-                        notification_enabled: localStorage.getItem('notification_enabled'),
-                        debug_mode: localStorage.getItem('debug_mode'),
-                        keepalive_enabled: localStorage.getItem('keepalive_enabled')
-                    };
-                }
+                // 导出所有数据库表
+                exportData.data.dexiData = await db.dexiData.toArray();
+                exportData.data.lorebooks = await db.lorebooks.toArray();
+                exportData.data.characters = await db.characters.toArray();
+                exportData.data.sticker_categories = await db.sticker_categories.toArray();
+                exportData.data.moments = await db.moments.toArray();
+                exportData.data.friend_requests = await db.friend_requests.toArray();
                 
-                if (includeOnline) {
-                    // 导出联机相关数据
-                    exportData.onlineData = {
-                        server_url: localStorage.getItem('online_server_url'),
-                        token: localStorage.getItem('online_token'),
-                        user_data: localStorage.getItem('online_user_data')
-                    };
-                }
+                // 导出 localStorage 数据
+                exportData.localStorage = {
+                    user_id: localStorage.getItem('user_id'),
+                    current_my_char_id: localStorage.getItem('current_my_char_id'),
+                    notification_enabled: localStorage.getItem('notification_enabled'),
+                    debug_mode: localStorage.getItem('debug_mode'),
+                    keepalive_enabled: localStorage.getItem('keepalive_enabled')
+                };
                 
                 // 转换为JSON字符串
                 const jsonString = JSON.stringify(exportData, null, 2);
@@ -897,54 +779,29 @@ async function migratePhoneAndSmsToIndexedDB() {
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                
-                // 根据导出的数据类型设置文件名
-                let filename = 'wechat_backup_';
-                if (includeLocal && includeOnline) {
-                    filename += 'full_';
-                } else if (includeLocal) {
-                    filename += 'local_';
-                } else if (includeOnline) {
-                    filename += 'online_';
-                }
-                filename += new Date().getTime() + '.json';
-                
-                a.download = filename;
+                a.download = `wechat_data_backup_${new Date().getTime()}.json`;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
                 
-                // 显示导出的数据统计
-                let stats = [];
-                if (includeLocal) {
-                    const charCount = exportData.data.characters?.length || 0;
-                    const groupCount = exportData.data.group_chats?.length || 0;
-                    const momentCount = exportData.data.moments?.length || 0;
-                    stats.push(`角色: ${charCount}个`);
-                    stats.push(`群聊: ${groupCount}个`);
-                    stats.push(`朋友圈: ${momentCount}条`);
-                }
-                if (includeOnline) {
-                    stats.push('联机账号信息已包含');
-                }
-                
-                alert('数据导出成功！\n\n' + stats.join('\n'));
+                alert('数据导出成功！');
             } catch (error) {
                 console.error('导出数据失败:', error);
                 alert('导出数据失败: ' + error.message);
             }
         }
         
-        // 兼容旧版本：直接调用时显示选项
-        async function exportAllData() {
-            showExportOptions();
-        }
-        
         // 导入所有数据
         async function importAllData(input) {
             const file = input.files[0];
             if (!file) return;
+            
+            // 确认对话框
+            if (!confirm('导入数据将覆盖现有数据，是否继续？\n\n建议先导出当前数据作为备份。')) {
+                input.value = ''; // 清空文件选择
+                return;
+            }
             
             try {
                 const text = await file.text();
@@ -955,127 +812,46 @@ async function migratePhoneAndSmsToIndexedDB() {
                     throw new Error('数据格式不正确');
                 }
                 
-                // 检测数据类型
-                const hasLocalData = importData.dataTypes?.local !== false;
-                const hasOnlineData = importData.onlineData || (importData.dataTypes?.online === true);
-                
-                // 显示导入内容预览
-                let previewMsg = '即将导入以下数据：\n\n';
-                if (hasLocalData) {
-                    const charCount = importData.data.characters?.length || 0;
-                    const groupCount = importData.data.group_chats?.length || 0;
-                    const momentCount = importData.data.moments?.length || 0;
-                    previewMsg += `📱 本地数据：\n`;
-                    previewMsg += `  - 角色: ${charCount}个\n`;
-                    previewMsg += `  - 群聊: ${groupCount}个\n`;
-                    previewMsg += `  - 朋友圈: ${momentCount}条\n`;
-                    previewMsg += `  - 以及世界书、表情包、电话/短信记录等\n\n`;
-                }
-                if (hasOnlineData) {
-                    const userData = importData.onlineData?.user_data;
-                    if (userData) {
-                        try {
-                            const userObj = JSON.parse(userData);
-                            previewMsg += `🌐 联机账号：${userObj.username || '未知'}\n\n`;
-                        } catch {
-                            previewMsg += `🌐 联机账号数据\n\n`;
-                        }
-                    } else {
-                        previewMsg += `🌐 联机账号数据\n\n`;
-                    }
-                }
-                
-                previewMsg += '⚠️ 导入将覆盖现有数据！\n建议先导出当前数据作为备份。\n\n是否继续？';
-                
-                // 确认对话框
-                if (!confirm(previewMsg)) {
-                    input.value = ''; // 清空文件选择
-                    return;
-                }
-                
                 // 清空现有数据
-                if (hasLocalData) {
-                    await db.dexiData.clear();
-                    await db.lorebooks.clear();
-                    await db.characters.clear();
-                    await db.sticker_categories.clear();
-                    await db.moments.clear();
-                    await db.friend_requests.clear();
-                    
-                    // 清空新增的表
-                    if (db.group_chats) await db.group_chats.clear();
-                    if (db.phone_recents) await db.phone_recents.clear();
-                    if (db.sms_messages) await db.sms_messages.clear();
-                    if (db.chat_summaries) await db.chat_summaries.clear();
-                }
+                await db.dexiData.clear();
+                await db.lorebooks.clear();
+                await db.characters.clear();
+                await db.sticker_categories.clear();
+                await db.moments.clear();
+                await db.friend_requests.clear();
                 
                 // 导入数据库表数据
-                if (hasLocalData && importData.data) {
-                    if (importData.data.dexiData) {
-                        await db.dexiData.bulkAdd(importData.data.dexiData);
-                    }
-                    if (importData.data.lorebooks) {
-                        await db.lorebooks.bulkAdd(importData.data.lorebooks);
-                    }
-                    if (importData.data.characters) {
-                        await db.characters.bulkAdd(importData.data.characters);
-                    }
-                    if (importData.data.sticker_categories) {
-                        await db.sticker_categories.bulkAdd(importData.data.sticker_categories);
-                    }
-                    if (importData.data.moments) {
-                        await db.moments.bulkAdd(importData.data.moments);
-                    }
-                    if (importData.data.friend_requests) {
-                        await db.friend_requests.bulkAdd(importData.data.friend_requests);
-                    }
-                    
-                    // 导入新增的表
-                    if (importData.data.group_chats && db.group_chats) {
-                        await db.group_chats.bulkAdd(importData.data.group_chats);
-                    }
-                    if (importData.data.phone_recents && db.phone_recents) {
-                        await db.phone_recents.bulkAdd(importData.data.phone_recents);
-                    }
-                    if (importData.data.sms_messages && db.sms_messages) {
-                        await db.sms_messages.bulkAdd(importData.data.sms_messages);
-                    }
-                    if (importData.data.chat_summaries && db.chat_summaries) {
-                        await db.chat_summaries.bulkAdd(importData.data.chat_summaries);
-                    }
-                    
-                    // 导入 localStorage 数据
-                    if (importData.localStorage) {
-                        Object.keys(importData.localStorage).forEach(key => {
-                            const value = importData.localStorage[key];
-                            if (value !== null && value !== undefined) {
-                                localStorage.setItem(key, value);
-                            }
-                        });
-                    }
+                if (importData.data.dexiData) {
+                    await db.dexiData.bulkAdd(importData.data.dexiData);
+                }
+                if (importData.data.lorebooks) {
+                    await db.lorebooks.bulkAdd(importData.data.lorebooks);
+                }
+                if (importData.data.characters) {
+                    await db.characters.bulkAdd(importData.data.characters);
+                }
+                if (importData.data.sticker_categories) {
+                    await db.sticker_categories.bulkAdd(importData.data.sticker_categories);
+                }
+                if (importData.data.moments) {
+                    await db.moments.bulkAdd(importData.data.moments);
+                }
+                if (importData.data.friend_requests) {
+                    await db.friend_requests.bulkAdd(importData.data.friend_requests);
                 }
                 
-                // 导入联机数据
-                if (hasOnlineData && importData.onlineData) {
-                    if (importData.onlineData.server_url) {
-                        localStorage.setItem('online_server_url', importData.onlineData.server_url);
-                    }
-                    if (importData.onlineData.token) {
-                        localStorage.setItem('online_token', importData.onlineData.token);
-                    }
-                    if (importData.onlineData.user_data) {
-                        localStorage.setItem('online_user_data', importData.onlineData.user_data);
-                    }
+                // 导入 localStorage 数据
+                if (importData.localStorage) {
+                    Object.keys(importData.localStorage).forEach(key => {
+                        const value = importData.localStorage[key];
+                        if (value !== null) {
+                            localStorage.setItem(key, value);
+                        }
+                    });
                 }
                 
                 input.value = ''; // 清空文件选择
-                
-                let successMsg = '数据导入成功！\n\n';
-                if (hasLocalData) successMsg += '✅ 本地数据已导入\n';
-                if (hasOnlineData) successMsg += '✅ 联机账号已导入\n';
-                successMsg += '\n页面即将刷新...';
-                
-                alert(successMsg);
+                alert('数据导入成功！页面即将刷新...');
                 
                 // 刷新页面以应用导入的数据
                 setTimeout(() => {
@@ -1091,7 +867,7 @@ async function migratePhoneAndSmsToIndexedDB() {
         
         // 清空所有数据
         async function clearAllDataConfirm() {
-            const confirm1 = confirm('⚠️ 警告：此操作将删除所有数据！\n\n包括：\n- 所有角色和聊天记录\n- 所有世界书\n- 所有表情包\n- 所有朋友圈\n- 所有群聊\n- 电话和短信记录\n- 联机账号信息\n- API设置\n\n此操作不可恢复，确定要继续吗？');
+            const confirm1 = confirm('⚠️ 警告：此操作将删除所有数据！\n\n包括：\n- 所有角色和聊天记录\n- 所有世界书\n- 所有表情包\n- 所有朋友圈\n- API设置\n\n此操作不可恢复，确定要继续吗？');
             if (!confirm1) return;
             
             const confirm2 = prompt('请输入"确认删除"以继续：');
@@ -1108,12 +884,6 @@ async function migratePhoneAndSmsToIndexedDB() {
                 await db.sticker_categories.clear();
                 await db.moments.clear();
                 await db.friend_requests.clear();
-                
-                // 清空新增的表
-                if (db.group_chats) await db.group_chats.clear();
-                if (db.phone_recents) await db.phone_recents.clear();
-                if (db.sms_messages) await db.sms_messages.clear();
-                if (db.chat_summaries) await db.chat_summaries.clear();
                 
                 // 清空 localStorage
                 localStorage.clear();
@@ -4853,15 +4623,12 @@ async function openMessageChat(id) {
         console.log('[openMessageChat] 显示名称:', displayName);
         console.log('[openMessageChat] 显示头像:', displayAvatar);
         
-        // 🔥 修复：按时间戳排序，确保最早的消息在最上面
-        chatMessages.sort((a, b) => (a.time || a.timestamp || 0) - (b.time || b.timestamp || 0));
-        
         chat = {
             id: id,
             name: displayName,
             avatar: displayAvatar,
             chatTimeLabel: formatMessageTime(firstMsg.time || firstMsg.timestamp || Date.now()),
-            messages: chatMessages.map(msg => {
+            messages: chatMessages.reverse().map(msg => {
                 const msgText = msg.content || msg.message || '';
                 console.log('[openMessageChat] 映射消息:', { type: msg.type, text: msgText });
                 return {
@@ -5058,10 +4825,9 @@ async function sendMessageDetail() {
         return;
     }
     
-    // 🎯 扣费 - 支持选择支付方式
-    const paymentResult = await showPaymentMethodSelection(SMS_COST, '短信费用');
-    if (!paymentResult.success) {
-        alert('支付失败，请重试');
+    // 🎯 扣费
+    if (!deductPhoneBalance(SMS_COST)) {
+        alert('扣费失败，请重试');
         return;
     }
     
@@ -5240,7 +5006,7 @@ ${loreContext}
 请注意：不要重复输出名字前缀，直接输出回复内容。
 
 【重要回复规则 - 必须严格遵守】
-1. **必须**模拟短信连发消息的习惯：请生成 ${targetChar.reply_min_count || 1} 到 ${targetChar.reply_max_count || 3} 条短消息${(targetChar.reply_min_count || 1) === 1 ? '' : '，不能只发一条'}！
+1. **必须**模拟短信连发消息的习惯：请生成 1 到 3 条短消息，不能只发一条！
 2. **必须**使用分隔符 "|||" 来隔开每一条消息。
 3. **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
 4. 每条消息要简短，5-15个字最佳，像真实短信聊天一样分多条发送。
@@ -6813,21 +6579,15 @@ ${loreContext}
 
         // 获取角色的聊天记录（按账号隔离）
         function getChatHistory(char, accountId) {
-            let history;
-            if (!accountId) {
-                history = char.chat_history || [];
-            } else {
-                if (!char.chat_history_by_user) {
-                    // 如果新结构不存在，尝试从旧结构迁移
-                    if (char.chat_history && char.chat_history.length > 0) {
-                        if (!char.chat_history_by_user) char.chat_history_by_user = {};
-                        char.chat_history_by_user[accountId] = [...char.chat_history];
-                    }
+            if (!accountId) return char.chat_history || [];
+            if (!char.chat_history_by_user) {
+                // 如果新结构不存在，尝试从旧结构迁移
+                if (char.chat_history && char.chat_history.length > 0) {
+                    if (!char.chat_history_by_user) char.chat_history_by_user = {};
+                    char.chat_history_by_user[accountId] = [...char.chat_history];
                 }
-                history = char.chat_history_by_user?.[accountId] || [];
             }
-            // 按时间戳排序，确保消息顺序正确
-            return [...history].sort((a, b) => (a.time || 0) - (b.time || 0));
+            return char.chat_history_by_user?.[accountId] || [];
         }
 
         // 设置角色的聊天记录（按账号隔离）
@@ -7055,11 +6815,6 @@ ${loreContext}
                         lastMsg = last.content;
                         if (lastMsg.startsWith('[img:')) lastMsg = '[图片]';
                         if (last.role === 'system') lastMsg = '[系统消息]';
-                        // ✅ 处理特殊消息类型
-                        if (last.type === 'transfer') lastMsg = '[转账]';
-                        if (last.type === 'familyCard') lastMsg = '[亲属卡]';
-                        if (last.type === 'audio') lastMsg = '[语音]';
-                        if (last.type === 'location') lastMsg = '[位置]';
                         
                         const d = new Date(last.time);
                         const now = new Date();
@@ -7070,19 +6825,13 @@ ${loreContext}
                         }
                     }
                     
-                    // 判断是否是联机群聊
-                    const isOnlineGroup = f.isOnlineGroup;
-                    const groupTag = isOnlineGroup 
-                        ? '<span style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:#fff; font-size:9px; padding:1px 4px; border-radius:2px; margin-left:6px;">联机群</span>'
-                        : '<span style="background:#07c160; color:#fff; font-size:9px; padding:1px 4px; border-radius:2px; margin-left:6px;">群</span>';
-                    
                     contentDiv.innerHTML = `
                         <div style="width:48px; height:48px; border-radius:6px; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0;"></div>
                         <div style="flex:1; min-width:0;">
                             <div style="display:flex; justify-content:space-between; margin-bottom:4px; align-items:center;">
                                 <div style="display:flex; align-items:center;">
                                     <div style="font-size:16px; font-weight:500; color:#333;">${f.name}</div>
-                                    ${groupTag}
+                                    <span style="background:#07c160; color:#fff; font-size:9px; padding:1px 4px; border-radius:2px; margin-left:6px;">群</span>
                                 </div>
                                 <div style="font-size:12px; color:#999;">${lastTimeStr}</div>
                             </div>
@@ -7148,11 +6897,6 @@ ${loreContext}
                     if (lastMsg.startsWith('[img:')) lastMsg = '[图片]';
                     if (lastMsg.startsWith('[voice:')) lastMsg = '[语音]';
                     if (lastMsg.startsWith('[imgcard:')) lastMsg = '[卡片]';
-                    // ✅ 处理转账和亲属卡消息
-                    if (last.type === 'transfer') lastMsg = '[转账]';
-                    if (last.type === 'familyCard') lastMsg = '[亲属卡]';
-                    if (last.type === 'audio') lastMsg = '[语音]';
-                    if (last.type === 'location') lastMsg = '[位置]';
                     
                     const d = new Date(last.time);
                     const now = new Date();
@@ -7562,7 +7306,7 @@ ${loreContext}
             if (ids.length === 0) return "";
             
             let allContext = [];
-            const checkText = keywords ? keywords.toLowerCase() : "";
+            const checkText = keywords.toLowerCase();
             
             // 遍历所有世界书
             for (const id of ids) {
@@ -7572,44 +7316,26 @@ ${loreContext}
                 const entries = Object.values(book.content.entries);
                 
                 entries.forEach(entry => {
-                    if (!entry.enabled) return; // 只加载启用的条目
+                    if (!entry.enabled) return;
+                    // entry.key 可能是数组或字符串
+                    const keys = Array.isArray(entry.key) ? entry.key : [entry.key];
                     
-                    // 🔥 新逻辑：挂载了就直接加载所有启用的条目
-                    // 如果有关键词，优先匹配关键词的条目
-                    // 如果没有关键词或没有设置key，直接加载
-                    let shouldLoad = false;
+                    const isMatch = keys.some(k => {
+                        if(!k) return false;
+                        return checkText.includes(k.toLowerCase());
+                    });
                     
-                    const keys = Array.isArray(entry.key) ? entry.key : (entry.key ? [entry.key] : []);
-                    
-                    if (keys.length === 0 || keys.every(k => !k || k.trim() === '')) {
-                        // 没有设置关键词，直接加载
-                        shouldLoad = true;
-                    } else if (checkText) {
-                        // 有关键词，尝试匹配
-                        const isMatch = keys.some(k => {
-                            if(!k) return false;
-                            return checkText.includes(k.toLowerCase());
-                        });
-                        shouldLoad = isMatch;
-                    } else {
-                        // 没有检查文本但有关键词设置，也加载（因为挂载了就应该读取）
-                        shouldLoad = true;
-                    }
-                    
-                    if (shouldLoad) {
+                    if (isMatch) {
                         allContext.push(entry.content);
                     }
                 });
             }
             
             if (allContext.length > 0) {
-                console.log(`[世界书] ✅ 成功加载 ${allContext.length} 个条目`);
                 // 简单截断，防止爆 Token
-                const fullText = allContext.join('\n\n');
+                const fullText = allContext.join('\n');
                 const safeText = fullText.length > 10000 ? fullText.slice(0, 10000) + '...(已截断)' : fullText;
-                return `【世界书设定】:\n${safeText}\n`;
-            } else {
-                console.log('[世界书] ℹ️ 没有启用的条目或条目为空');
+                return `【相关世界书设定】:\n${safeText}\n`;
             }
             return "";
         }
@@ -8022,12 +7748,6 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             const group = await db.group_chats.get(groupId);
             if (!group) return;
             
-            // 如果是联机群聊，调用联机群聊的打开方法
-            if (group.isOnlineGroup && group.onlineGroupId) {
-                openOnlineGroup(group.onlineGroupId);
-                return;
-            }
-            
             // 设置当前聊天为群聊模式
             currentChatCharId = null;
             window.currentGroupChatId = groupId;
@@ -8084,46 +7804,6 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             
             // 渲染群成员列表
             await renderGroupMemberList(group);
-            
-            // 加载世界书列表（多选）
-            const lorebooks = await db.lorebooks.toArray();
-            const lbList = document.getElementById('group-detail-lorebook-list');
-            lbList.innerHTML = '';
-            
-            // 兼容旧数据：如果lorebookId存在但lorebookIds不存在，转换为数组
-            const selectedIds = group.lorebookIds || (group.lorebookId ? [group.lorebookId] : []);
-            
-            if (lorebooks.length === 0) {
-                lbList.innerHTML = '<div style="padding:8px; color:#999; font-size:12px; text-align:center;">暂无世界书</div>';
-            } else {
-                lorebooks.forEach(lb => {
-                    const label = document.createElement('label');
-                    label.style.cssText = 'display:flex; align-items:center; padding:8px; cursor:pointer; border-radius:6px; margin-bottom:4px;';
-                    label.style.background = selectedIds.includes(lb.id) ? '#f0f0f5' : 'transparent';
-                    
-                    const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
-                    checkbox.value = lb.id;
-                    checkbox.checked = selectedIds.includes(lb.id);
-                    checkbox.style.marginRight = '8px';
-                    checkbox.onchange = () => {
-                        label.style.background = checkbox.checked ? '#f0f0f5' : 'transparent';
-                        updateGroupLorebookCount();
-                        saveGroupDetail();
-                    };
-                    
-                    const name = document.createElement('span');
-                    name.textContent = lb.name;
-                    name.style.fontSize = '14px';
-                    name.style.color = '#333';
-                    
-                    label.appendChild(checkbox);
-                    label.appendChild(name);
-                    lbList.appendChild(label);
-                });
-            }
-            
-            updateGroupLorebookCount();
         }
         
         // 渲染群成员列表预览（详情页）
@@ -8541,26 +8221,6 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             document.getElementById('group-detail-page').style.display = 'none';
         }
         
-        // 切换群聊世界书列表
-        function toggleGroupLorebookList() {
-            const list = document.getElementById('group-detail-lorebook-list');
-            const toggle = document.getElementById('group-detail-lorebook-toggle');
-            if (list.style.display === 'none' || !list.style.display) {
-                list.style.display = 'block';
-                toggle.textContent = '∨';
-            } else {
-                list.style.display = 'none';
-                toggle.textContent = '›';
-            }
-        }
-        
-        // 更新群聊世界书计数
-        function updateGroupLorebookCount() {
-            const checkboxes = document.querySelectorAll('#group-detail-lorebook-list input[type="checkbox"]:checked');
-            const count = checkboxes.length;
-            document.getElementById('group-detail-lorebook-count').textContent = `${count}个`;
-        }
-        
         // 保存群聊详情
         async function saveGroupDetail() {
             if (!window.currentGroupChatId) return;
@@ -8572,11 +8232,6 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             group.myNickname = document.getElementById('group-detail-nickname').value.trim();
             group.is_muted = document.getElementById('group-detail-mute').checked;
             group.is_pinned = document.getElementById('group-detail-pin').checked;
-            
-            // 获取选中的世界书ID数组
-            const checkboxes = document.querySelectorAll('#group-detail-lorebook-list input[type="checkbox"]:checked');
-            const lorebookIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
-            group.lorebookIds = lorebookIds.length > 0 ? lorebookIds : null;
             
             // 自动总结设置
             group.auto_summary_enabled = document.getElementById('group-detail-auto-summary-switch').checked;
@@ -8751,105 +8406,12 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             window._addingGroupMembers = true;
         }
         
-        // 追加用户群聊消息到UI（优化性能，避免重新渲染整个页面）
-        async function appendUserGroupMessageToUI(msg, group) {
-            const body = document.getElementById('chat-body');
-            const myChar = currentMyCharId ? await db.characters.get(parseInt(currentMyCharId)) : null;
-            const myNickname = group.myNickname || (myChar ? myChar.name : '我');
-            const myAvatar = myChar?.avatar || '';
-            const avatarStyle = myAvatar ? `background-image:url(${myAvatar})` : 'background:#ccc';
-            
-            // 创建消息元素
-            const msgDiv = document.createElement('div');
-            msgDiv.style.marginBottom = '12px';
-            msgDiv.className = 'group-message-row self';
-            msgDiv.style.display = 'flex';
-            msgDiv.style.flexDirection = 'row-reverse';
-            msgDiv.style.alignItems = 'flex-end';
-            msgDiv.style.gap = '8px';
-            
-            // 渲染消息内容（处理各种特殊格式）
-            let renderedContent = msg.content;
-            
-            // 处理图片卡片
-            if (msg.content.startsWith('[imgcard:')) {
-                const cardText = msg.content.substring(9, msg.content.length - 1).trim();
-                renderedContent = `<div class="img-card-bubble" data-text="${escapeHtml(cardText)}" data-expanded="false" onclick="showImageCardContent(this)">
-                    <div class="img-card-placeholder">
-                        <svg class="img-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                            <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                            <polyline points="21 15 16 10 5 21"></polyline>
-                        </svg>
-                        <div class="img-card-hint">点击查看文字</div>
-                    </div>
-                </div>`;
-            }
-            // 处理图片
-            else if (msg.content.startsWith('[img:')) {
-                const imgUrl = msg.content.substring(5, msg.content.length - 1).trim();
-                renderedContent = `<img src="${imgUrl}" class="chat-image" style="max-width:200px; max-height:200px; border-radius:8px; cursor:pointer;" onclick="showFullImage(this.src)" onerror="this.style.display='none';" />`;
-            }
-            // 处理语音
-            else if (msg.content.startsWith('[voice:')) {
-                const voiceText = msg.content.substring(7, msg.content.length - 1).trim();
-                const barCount = Math.min(Math.max(Math.ceil(voiceText.length / 3), 3), 10);
-                let bars = '';
-                for (let i = 0; i < barCount; i++) {
-                    const height = 8 + Math.random() * 12;
-                    bars += `<div style="width:3px; height:${height}px; background:#999; border-radius:2px;"></div>`;
-                }
-                renderedContent = `<div class="voice-bubble" data-text="${escapeHtml(voiceText)}" style="background:#ffe4e8; padding:10px 14px; border-radius:18px; cursor:pointer; display:flex; align-items:center; gap:8px; min-width:80px;" onclick="playVoiceBubble(this)">
-                    <svg viewBox="0 0 24 24" style="width:16px; height:16px; fill:#666;"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
-                    <div style="display:flex; align-items:center; gap:2px;">${bars}</div>
-                    <span style="font-size:12px; color:#666;">${Math.ceil(voiceText.length / 5)}"</span>
-                </div>`;
-            }
-            // 普通文字
-            else {
-                renderedContent = renderMessageContent(msg.content);
-            }
-            
-            // 判断是否是特殊消息（不需要气泡包裹）
-            const isSpecialMsg = msg.content.startsWith('[imgcard:') || msg.content.startsWith('[img:') || msg.content.startsWith('[voice:');
-            
-            if (isSpecialMsg) {
-                msgDiv.innerHTML = `
-                    <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
-                    <div style="display:flex; flex-direction:column; align-items:flex-end; max-width:70%;">
-                        <div style="font-size:12px; color:#999; margin-bottom:2px;">${myNickname}</div>
-                        <div style="display:flex; align-items:flex-end; gap:6px;">
-                            <div style="font-size:10px; color:#999;">${formatChatTime(msg.time)}</div>
-                            <div class="group-msg-content">${renderedContent}</div>
-                        </div>
-                    </div>
-                `;
-            } else {
-                msgDiv.innerHTML = `
-                    <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
-                    <div style="display:flex; flex-direction:column; align-items:flex-end; max-width:70%;">
-                        <div style="font-size:12px; color:#999; margin-bottom:2px;">${myNickname}</div>
-                        <div style="display:flex; align-items:flex-end; gap:6px;">
-                            <div style="font-size:10px; color:#999;">${formatChatTime(msg.time)}</div>
-                            <div class="group-msg-content" style="background:#ffe4e8; color:#000; padding:6px 10px; border-radius:18px 18px 4px 18px; font-size:15px; line-height:1.5; word-break:break-word;">${renderedContent}</div>
-                        </div>
-                    </div>
-                `;
-            }
-            
-            body.appendChild(msgDiv);
-            body.scrollTop = body.scrollHeight;
-        }
-        
         // 渲染群聊消息
         async function renderGroupChatBody(group) {
             const body = document.getElementById('chat-body');
             body.innerHTML = '';
             
-            let history = group.chat_history || [];
-            // 按时间戳排序，确保消息顺序正确
-            history = [...history].sort((a, b) => (a.time || 0) - (b.time || 0));
-            
+            const history = group.chat_history || [];
             const accountId = getCurrentAccountId();
             const myChar = currentMyCharId ? await db.characters.get(parseInt(currentMyCharId)) : null;
             
@@ -9235,52 +8797,6 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             listDiv.style.background = '#fff';
             
             for (const req of myRequests) {
-                // 处理联机群聊邀请
-                if (req.isGroupInvite && req.groupData) {
-                    const groupInvite = req.groupData;
-                    const item = document.createElement('div');
-                    item.style.display = 'flex';
-                    item.style.padding = '12px 16px';
-                    item.style.borderBottom = '0.5px solid #f0f0f0';
-                    item.style.alignItems = 'center';
-                    item.style.gap = '12px';
-                    
-                    let buttons = '';
-                    let statusLabel = '';
-                    
-                    if (req.status === 'pending') {
-                        buttons = `
-                            <button onclick="acceptGroupInvite(${req.id})" style="background:var(--ins-pink); color:#fff; border:none; padding:6px 16px; border-radius:4px; font-size:14px; margin-right:8px;">同意</button>
-                            <button onclick="rejectGroupInvite(${req.id})" style="background:#f0f0f0; color:#666; border:none; padding:6px 16px; border-radius:4px; font-size:14px;">拒绝</button>
-                        `;
-                    } else if (req.status === 'accepted') {
-                        statusLabel = '<div style="color:#999; font-size:12px;">已加入</div>';
-                    } else {
-                        statusLabel = '<div style="color:#999; font-size:12px;">已拒绝</div>';
-                    }
-                    
-                    item.innerHTML = `
-                        <div style="width:48px; height:48px; border-radius:4px; background:linear-gradient(135deg, #f093fb 0%, #f5576c 100%); display:flex; align-items:center; justify-content:center; flex-shrink:0; position:relative;">
-                            <svg style="width:24px; height:24px; stroke:#fff; fill:none;" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-                            <div style="position:absolute; bottom:-2px; right:-2px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius:50%; width:16px; height:16px; display:flex; align-items:center; justify-content:center;">
-                                <svg style="width:10px; height:10px; stroke:#fff; fill:none;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle></svg>
-                            </div>
-                        </div>
-                        <div style="flex:1; min-width:0;">
-                            <div style="font-size:16px; font-weight:500; color:#333; margin-bottom:4px;">
-                                群聊邀请
-                                <span style="font-size:11px; color:#f5576c; margin-left:6px;">联机群聊</span>
-                            </div>
-                            <div style="font-size:12px; color:#666; line-height:1.5;">${groupInvite.inviter_name} 邀请你加入「${groupInvite.group_name}」</div>
-                        </div>
-                        <div style="display:flex; align-items:center; flex-shrink:0;">
-                            ${buttons}${statusLabel}
-                        </div>
-                    `;
-                    listDiv.appendChild(item);
-                    continue;
-                }
-                
                 // 处理联机好友申请
                 if (req.isOnline && req.onlineData) {
                     const onlineReq = req.onlineData;
@@ -9406,7 +8922,7 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                                myChars.find(c => onlineCharacters.some(oc => oc.wx_account === c.identity?.account));
                 
                 if (!myChar || !myChar.identity?.account) {
-                    alert('请先创建User角色并设置微信号');
+                    alert('请先上线一个角色');
                     return;
                 }
                 
@@ -9488,118 +9004,6 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             }
             
             // 更新申请状态
-            request.status = 'rejected';
-            await db.friend_requests.put(request);
-            
-            // 刷新页面
-            await renderNewFriendsPage();
-        }
-
-        // 接受群聊邀请 - 弹出选择角色的弹窗
-        async function acceptGroupInvite(requestId) {
-            const request = await db.friend_requests.get(requestId);
-            if (!request || !request.isGroupInvite || !request.groupData) return;
-            
-            if (!onlineConnected || !onlineUserData) {
-                alert('请先连接服务器并登录');
-                return;
-            }
-            
-            const myWx = getMyOnlineWxAccount();
-            if (!myWx) {
-                alert('请先创建User角色并设置微信号');
-                return;
-            }
-            
-            // 显示选择角色的弹窗
-            showJoinGroupWithCharModal(requestId, request.groupData);
-        }
-
-        // 显示加入群聊并选择角色的弹窗
-        async function showJoinGroupWithCharModal(requestId, groupData) {
-            // 获取所有可用的角色（非User类型和非联机好友）
-            const chars = await db.characters.toArray();
-            const availableChars = chars.filter(c => c.type !== 'user' && c.type !== 'online_friend');
-            
-            const modal = document.createElement('div');
-            modal.id = 'join-group-char-modal';
-            modal.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;`;
-            
-            modal.innerHTML = `
-                <div style="background:#fff; border-radius:16px; padding:24px; width:85%; max-width:360px;">
-                    <h3 style="margin:0 0 16px 0; text-align:center; font-size:18px;">加入「${groupData.group_name}」</h3>
-                    
-                    <div style="margin-bottom:16px;">
-                        <div style="font-size:13px; color:#666; margin-bottom:8px;">选择要带入群聊的角色：</div>
-                        <select id="join-group-char-select-modal" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px;">
-                            <option value="">不带角色</option>
-                            ${availableChars.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
-                        </select>
-                    </div>
-                    
-                    <div style="font-size:12px; color:#999; margin-bottom:20px; line-height:1.5;">
-                        带入角色后，你可以在群聊中让该角色发言（调用AI）
-                    </div>
-                    
-                    <div style="display:flex; gap:12px;">
-                        <button onclick="this.closest('#join-group-char-modal').remove()" style="flex:1; padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:15px; cursor:pointer;">取消</button>
-                        <button onclick="doAcceptGroupInvite(${requestId}, '${groupData.group_id}')" style="flex:1; padding:12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:15px; cursor:pointer;">加入群聊</button>
-                    </div>
-                </div>
-            `;
-            
-            document.body.appendChild(modal);
-        }
-
-        // 执行接受群聊邀请
-        async function doAcceptGroupInvite(requestId, groupId) {
-            const charSelect = document.getElementById('join-group-char-select-modal');
-            const charId = charSelect?.value;
-            
-            let myChar = null;
-            if (charId) {
-                const char = await db.characters.get(parseInt(charId));
-                if (char) {
-                    myChar = {
-                        name: char.name,
-                        avatar: char.avatar || '',
-                        desc: char.description?.substring(0, 200) || ''
-                    };
-                }
-            }
-            
-            const myWx = getMyOnlineWxAccount();
-            if (!myWx) {
-                alert('请先创建User角色并设置微信号');
-                return;
-            }
-            
-            // 发送加入群聊请求
-            onlineSocket.send(JSON.stringify({
-                type: 'join_online_group',
-                group_id: groupId,
-                my_wx_account: myWx,
-                my_character: myChar
-            }));
-            
-            // 更新本地状态
-            const request = await db.friend_requests.get(requestId);
-            if (request) {
-                request.status = 'accepted';
-                await db.friend_requests.put(request);
-            }
-            
-            // 关闭弹窗并刷新页面
-            document.getElementById('join-group-char-modal')?.remove();
-            await renderNewFriendsPage();
-        }
-
-        // 拒绝群聊邀请
-        async function rejectGroupInvite(requestId) {
-            const request = await db.friend_requests.get(requestId);
-            if (!request || !request.isGroupInvite) return;
-            
-            // 更新状态
             request.status = 'rejected';
             await db.friend_requests.put(request);
             
@@ -10250,7 +9654,7 @@ ${recentMessages || '（无记录）'}
                 }
                 
                 // 保存聊天记录
-                await setChatHistory(char, accountId, currentHistory);
+                await setChatHistory(char, currentHistory, accountId);
                 
                 // 直接重新渲染聊天界面
                 if (currentChatCharId === char.id) {
@@ -10494,27 +9898,6 @@ ${chatContext || '（没有聊天记录）'}
                 chatFooter.style.display = 'flex';
             }
             
-            // ✅ 联机好友：隐藏AI魔法棒，简化菜单（只显示语音输入、相册、转账）
-            const isOnlineFriend = char.isOnlineFriend === true;
-            const actionPanel = document.getElementById('action-panel');
-            const actionItems = actionPanel.querySelectorAll('.action-item');
-            const aiMagicBtn = document.querySelector('.chat-input-bar .chat-icon-btn'); // 第一个按钮是AI魔法棒
-            
-            if (isOnlineFriend) {
-                // 隐藏AI魔法棒
-                if (aiMagicBtn) aiMagicBtn.style.display = 'none';
-                // 只显示前3个菜单项（语音输入、相册、转账）
-                actionItems.forEach((item, index) => {
-                    item.style.display = index < 3 ? '' : 'none';
-                });
-            } else {
-                // 普通角色：显示所有菜单
-                if (aiMagicBtn) aiMagicBtn.style.display = '';
-                actionItems.forEach(item => {
-                    item.style.display = '';
-                });
-            }
-            
             renderChatBody(char);
         }
 
@@ -10534,26 +9917,6 @@ ${chatContext || '（没有聊天记录）'}
             if (!char) return;
 
             document.getElementById('chat-detail-page').style.display = 'flex';
-            
-            // ✅ 联机好友：隐藏不相关的设置项
-            const isOnlineFriend = char.isOnlineFriend === true;
-            const detailPage = document.getElementById('chat-detail-page');
-            const detailGroups = detailPage.querySelectorAll('.detail-group');
-            
-            // 显示或隐藏特定的设置组（按顺序：档案关联、主动聊天、AI上下文、表情包、聊天背景、气泡样式、自定义样式、危险操作）
-            detailGroups.forEach((group, index) => {
-                if (isOnlineFriend) {
-                    // 联机好友只显示第一组（档案关联）和最后一组（危险操作）
-                    // 隐藏：主动聊天(1)、AI上下文(2)、表情包(3)、聊天背景(4)、气泡样式(5)、自定义样式(6)
-                    if (index >= 1 && index <= 6) {
-                        group.style.display = 'none';
-                    } else {
-                        group.style.display = '';
-                    }
-                } else {
-                    group.style.display = '';
-                }
-            });
             
             // 1. 回显基本信息
             document.getElementById('detail-char-remark').value = char.remark || '';
@@ -10613,10 +9976,6 @@ ${chatContext || '（没有聊天记录）'}
             
             // 5. 回显上下文条数设置（默认20条）
             document.getElementById('detail-context-count').value = char.context_message_count || 20;
-            
-            // 5.5. 回显回复消息条数设置（默认1~3条）
-            document.getElementById('detail-reply-min-count').value = char.reply_min_count || 1;
-            document.getElementById('detail-reply-max-count').value = char.reply_max_count || 3;
 
             // 6. 加载挂载的表情包库
             updateMountedStickerCount();
@@ -10709,10 +10068,6 @@ async function saveChatDetail() {
     // 上下文条数设置
     const contextCount = parseInt(document.getElementById('detail-context-count').value);
     
-    // 回复消息条数范围设置
-    const replyMinCount = parseInt(document.getElementById('detail-reply-min-count').value);
-    const replyMaxCount = parseInt(document.getElementById('detail-reply-max-count').value);
-    
     // AI查岗设置
     const allowCheckEnabled = document.getElementById('detail-allow-check-switch').checked;
     
@@ -10731,8 +10086,6 @@ async function saveChatDetail() {
     char.auto_reply_enabled = autoEnabled;
     char.auto_reply_interval = autoInterval > 0 ? autoInterval : null;
     char.context_message_count = contextCount > 0 ? contextCount : 20; // 默认20条
-    char.reply_min_count = (replyMinCount > 0 && replyMinCount <= 10) ? replyMinCount : 1; // 默认1条
-    char.reply_max_count = (replyMaxCount > 0 && replyMaxCount <= 10) ? replyMaxCount : 3; // 默认3条
     char.allow_ai_check_account = allowCheckEnabled; // 保存查岗开关状态
     char.auto_summary_enabled = autoSummaryEnabled; // 自动总结开关
     char.summary_interval = summaryInterval > 0 ? summaryInterval : 50; // 总结间隔，默认50条
@@ -11111,66 +10464,10 @@ window.saveMountedStickers = saveMountedStickers;
             if (customContainer) customContainer.remove();
         }
 
-        async function jumpToCharEditor() {
+        function jumpToCharEditor() {
             if (!currentChatCharId) return;
-            
-            // 检查是否是联机好友
-            const char = await db.characters.get(currentChatCharId);
-            if (char && char.isOnlineFriend) {
-                // 联机好友只显示简化信息
-                showOnlineFriendProfile(char);
-                return;
-            }
-            
             hideChatDetail();
             editCharacter(currentChatCharId);
-        }
-        
-        // 显示联机好友的简化档案（只有基本信息，没有人设）
-        function showOnlineFriendProfile(char) {
-            const avatar = char.avatar || '';
-            const avatarStyle = avatar ? `background-image:url(${avatar})` : 'background:#e0e0e0';
-            
-            const html = `
-                <div style="position:fixed; top:0; left:0; right:0; bottom:0; background:#f5f5f5; z-index:9999; display:flex; flex-direction:column;">
-                    <div class="wechat-header" style="background:#fff;">
-                        <div class="back-btn" onclick="this.closest('div[style*=position]').remove()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:var(--ins-text);">
-                            <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
-                        </div>
-                        <div class="wechat-title">联机好友资料</div>
-                        <div style="width:40px;"></div>
-                    </div>
-                    
-                    <div style="flex:1; overflow-y:auto; padding:20px;">
-                        <!-- 头像和基本信息 -->
-                        <div style="text-align:center; padding:30px 0;">
-                            <div style="width:100px; height:100px; border-radius:12px; margin:0 auto 16px; background-size:cover; background-position:center; ${avatarStyle}"></div>
-                            <div style="font-size:20px; font-weight:600; color:#333; margin-bottom:8px;">${char.name || '未知'}</div>
-                            <div style="font-size:14px; color:#999;">联机好友</div>
-                        </div>
-                        
-                        <!-- 信息卡片 -->
-                        <div style="background:#fff; border-radius:12px; overflow:hidden; margin-bottom:16px;">
-                            <div style="padding:16px; border-bottom:1px solid #f0f0f0; display:flex; justify-content:space-between;">
-                                <span style="color:#666;">微信号</span>
-                                <span style="color:#333;">${char.identity?.account || '未知'}</span>
-                            </div>
-                            <div style="padding:16px; display:flex; justify-content:space-between;">
-                                <span style="color:#666;">昵称</span>
-                                <span style="color:#333;">${char.name || '未知'}</span>
-                            </div>
-                        </div>
-                        
-                        <!-- 提示信息 -->
-                        <div style="text-align:center; padding:20px; color:#999; font-size:13px;">
-                            <div style="margin-bottom:8px;">🌐 这是一位联机好友</div>
-                            <div>对方的详细资料不可见</div>
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            document.body.insertAdjacentHTML('beforeend', html);
         }
 
         async function clearChatHistory() {
@@ -11403,7 +10700,7 @@ ${loreContext}
 - **撤回消息**：使用 ((RECALL)) 可以撤回你刚才发送的最后一条消息（适用于发错消息、说错话、后悔等场景）
 
 【重要指令 - 必须严格遵守】
-1. **必须**模拟微信连发消息的习惯：请生成 ${char.reply_min_count || 1} 到 ${char.reply_max_count || 3} 条短消息${(char.reply_min_count || 1) === 1 ? '' : '，不能只发一条'}！
+1. **必须**模拟微信连发消息的习惯：请生成 2 到 4 条短消息，不能只发一条！
 2. **必须**使用分隔符 "|||" 来隔开每一条消息。
 3. **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
    - 错误示例：嘿在吗？刚刚看到个好玩的视频，发给你看看
@@ -11727,113 +11024,53 @@ ${loreContext}
                         // 2. 发送亲属卡消息
                         const user = await db.characters.get(parseInt(currentMyCharId));
                         
-                        // ✅ 检查是否是联机好友
-                        if (freshChar.isOnlineFriend && freshChar.onlineData?.wx_account) {
-                            console.log('[亲属卡] 检测到联机好友，准备发送亲属卡...');
-                            // 联机好友 - 通过普通消息通道发送（和转账一样）
-                            const onlineUserChar = await getOrCreateOnlineUserChar();
-                            console.log('[亲属卡] 在线用户角色:', onlineUserChar?.name, '连接状态:', onlineConnected);
-                            
-                            if (onlineUserChar && onlineConnected) {
-                                const fromWxAccount = onlineUserChar.identity.account;
-                                const toWxAccount = freshChar.onlineData.wx_account;
-                                
-                                console.log('[亲属卡] 准备发送: from=', fromWxAccount, 'to=', toWxAccount, '额度=', monthlyLimit);
-                                
-                                // 🎯 和转账一样：通过 sendOnlineMessage 发送带特殊标记的 JSON 消息
-                                const familyCardContent = JSON.stringify({
-                                    __type: 'familyCard',  // 特殊标记，和转账的 __type: 'transfer' 一样
-                                    monthlyLimit: monthlyLimit,
-                                    fromName: onlineUserChar.name
-                                });
-                                
-                                console.log('[亲属卡] 消息内容:', familyCardContent);
-                                const sent = sendOnlineMessage(toWxAccount, familyCardContent, fromWxAccount);
-                                console.log('[亲属卡] sendOnlineMessage 返回:', sent);
-                                
-                                if (sent) {
-                                    // ✅ 在发送方保存亲属卡消息到聊天记录
-                                    const familyCardMsg = {
-                                        role: 'user',
-                                        type: 'familyCard',
-                                        content: JSON.stringify({
-                                            fromName: onlineUserChar.name,
-                                            monthlyLimit: monthlyLimit,
-                                            status: 'sent',
-                                            isOnline: true
-                                        }),
-                                        time: Date.now()
-                                    };
-                                    
-                                    history = getChatHistory(freshChar, accountId);
-                                    history.push(familyCardMsg);
-                                    await setChatHistory(freshChar, accountId, history);
-                                    
-                                    // 刷新聊天界面
-                                    if (currentChatCharId === freshChar.id) {
-                                        renderChatBody(freshChar);
-                                    }
-                                    
-                                    console.log('[亲属卡] ✅ 亲属卡已成功发送并保存到聊天记录');
-                                    showToast('亲属卡已赠送');
-                                } else {
-                                    console.error('[亲属卡] ❌ sendOnlineMessage 返回 false');
-                                    showToast('发送失败，请检查连接');
-                                }
-                            } else {
-                                console.error('[亲属卡] ❌ 条件不满足: onlineUserChar=', !!onlineUserChar, 'onlineConnected=', onlineConnected);
-                                showToast('请确保已连接服务器');
-                            }
-                        } else {
-                            // 本地角色 - 原有逻辑
-                            // 在角色数据中添加"我赠送的"
-                            if (!freshChar.identity) freshChar.identity = {};
-                            if (!freshChar.identity.familyCardsGiven) freshChar.identity.familyCardsGiven = [];
-                            freshChar.identity.familyCardsGiven.push({
-                                charId: parseInt(currentMyCharId),
+                        // 在角色数据中添加"我赠送的"
+                        if (!freshChar.identity) freshChar.identity = {};
+                        if (!freshChar.identity.familyCardsGiven) freshChar.identity.familyCardsGiven = [];
+                        freshChar.identity.familyCardsGiven.push({
+                            charId: parseInt(currentMyCharId),
+                            monthlyLimit: monthlyLimit,
+                            usedThisMonth: 0,
+                            records: [],
+                            createdAt: Date.now()
+                        });
+                        await db.characters.put(freshChar);
+                        
+                        // 在用户数据中添加"我收到的"
+                        if (user) {
+                            if (!user.identity) user.identity = {};
+                            if (!user.identity.familyCardsReceived) user.identity.familyCardsReceived = [];
+                            user.identity.familyCardsReceived.push({
+                                charId: freshChar.id,
                                 monthlyLimit: monthlyLimit,
                                 usedThisMonth: 0,
                                 records: [],
                                 createdAt: Date.now()
                             });
-                            await db.characters.put(freshChar);
-                            
-                            // 在用户数据中添加"我收到的"
-                            if (user) {
-                                if (!user.identity) user.identity = {};
-                                if (!user.identity.familyCardsReceived) user.identity.familyCardsReceived = [];
-                                user.identity.familyCardsReceived.push({
-                                    charId: freshChar.id,
-                                    monthlyLimit: monthlyLimit,
-                                    usedThisMonth: 0,
-                                    records: [],
-                                    createdAt: Date.now()
-                                });
-                                await db.characters.put(user);
-                            }
-                            
-                            // 发送亲属卡消息到聊天
-                            const familyCardMsg = {
-                                role: 'char',
-                                type: 'familyCard',
-                                content: JSON.stringify({
-                                    fromName: freshChar.name,
-                                    monthlyLimit: monthlyLimit,
-                                    status: 'sent'
-                                }),
-                                time: Date.now()
-                            };
-                            
-                            history = getChatHistory(freshChar, accountId);
-                            history.push(familyCardMsg);
-                            await setChatHistory(freshChar, accountId, history);
-                            
-                            if (currentChatCharId === freshChar.id) {
-                                renderChatBody(freshChar);
-                            }
-                            
-                            sendSystemNotification(freshChar.name, '[亲属卡]');
+                            await db.characters.put(user);
                         }
+                        
+                        // 发送亲属卡消息到聊天
+                        const familyCardMsg = {
+                            role: 'char',
+                            type: 'familyCard',
+                            content: JSON.stringify({
+                                fromName: freshChar.name,
+                                monthlyLimit: monthlyLimit,
+                                status: 'sent'
+                            }),
+                            time: Date.now()
+                        };
+                        
+                        history = getChatHistory(freshChar, accountId);
+                        history.push(familyCardMsg);
+                        await setChatHistory(freshChar, accountId, history);
+                        
+                        if (currentChatCharId === freshChar.id) {
+                            renderChatBody(freshChar);
+                        }
+                        
+                        sendSystemNotification(freshChar.name, '[亲属卡]');
                     }
                     return;
                 }
@@ -12236,35 +11473,8 @@ ${loreContext}
             history.push(userMsg);
             await setChatHistory(char, accountId, history); 
             
-            // 🔥 优化：只有在有引用时才重新渲染，否则只追加消息
-            if (userMsg.quote) {
-                // 有引用，需要重新渲染以显示引用样式
-                renderChatBody(char);
-            } else {
-                // 没有引用，只追加消息，不重新渲染
-                await appendMessageToUI('user', text, char.avatar);
-            }
-            
-            // ✅ 如果是联机好友，发送消息到服务器
-            if (char.isOnlineFriend && char.onlineData?.wx_account) {
-                // 获取当前可用的在线角色（如果没有则自动上线）
-                const onlineUserChar = await getOrCreateOnlineUserChar();
-                
-                if (onlineUserChar && onlineConnected) {
-                    const fromWxAccount = onlineUserChar.identity.account;
-                    const toWxAccount = char.onlineData.wx_account;
-                    const sent = sendOnlineMessage(toWxAccount, text, fromWxAccount);
-                    if (sent) {
-                        console.log('[Online] 消息已发送到服务器:', text);
-                    } else {
-                        console.warn('[Online] 消息发送失败，可能未连接服务器');
-                        showToast('消息发送失败，请检查服务器连接');
-                    }
-                } else {
-                    console.warn('[Online] 无法发送联机消息：未找到有微信号的角色或未连接服务器');
-                    showToast('请确保 User 角色设置了微信号并连接服务器');
-                }
-            }
+            // 重新渲染以显示引用（因为 appendMessageToUI 不支持引用显示）
+            renderChatBody(char);
             
             // ✅ 不再自动触发 AI 回复，需要用户点击"接受回复"按钮
             // triggerAiReply(); 
@@ -12304,14 +11514,8 @@ ${loreContext}
             
             await db.group_chats.put(group);
             
-            // 🔥 优化：只有在有引用时才重新渲染，否则只追加消息HTML
-            if (msg.quote) {
-                // 有引用，需要重新渲染以显示引用样式
-                await renderGroupChatBody(group);
-            } else {
-                // 没有引用，只追加消息DOM，不重新渲染整个页面
-                await appendUserGroupMessageToUI(msg, group);
-            }
+            // 重新渲染群聊
+            await renderGroupChatBody(group);
         }
         
         // 触发群聊成员回复（多人回复 - 一次API调用生成所有回复）
@@ -12363,15 +11567,9 @@ ${loreContext}
                     return `- ${char.remark || char.name}${nicknameText}${roleText}: ${char.description || '无特别设定'}`;
                 }).filter(Boolean).join('\n');
                 
-                // 获取世界书上下文（合并群聊的世界书和所有成员的世界书）
+                // 获取世界书上下文（合并所有成员的世界书）
                 let loreContext = "";
                 const allLorebookIds = new Set();
-                
-                // 添加群聊自己的世界书
-                const groupLorebookIds = group.lorebookIds || (group.lorebookId ? [group.lorebookId] : []);
-                groupLorebookIds.forEach(id => allLorebookIds.add(id));
-                
-                // 添加所有成员的世界书
                 for (const memberId of availableMembers) {
                     const char = memberMap[memberId];
                     if (char) {
@@ -12379,7 +11577,6 @@ ${loreContext}
                         ids.forEach(id => allLorebookIds.add(id));
                     }
                 }
-                
                 if (allLorebookIds.size > 0) {
                     const recentText = (group.chat_history || []).slice(-10).map(m => m.content).join(' ');
                     loreContext = await getLorebookContext([...allLorebookIds], recentText);
@@ -12479,14 +11676,6 @@ ${groupContextStr}
 # 可用指令类型
 - **普通发言**: {"type": "text", "name": "角色名", "content": "发言内容"}
 - **修改群昵称**: {"type": "change_nickname", "name": "角色名", "nickname": "新群昵称"} ← 角色可以随时修改自己的群昵称！
-- **发送红包**: {"type": "send_redpacket", "name": "角色名", "redpacketType": "普通红包类型", "totalAmount": 总金额数字, "count": 红包个数, "wish": "祝福语", "targetName": "指定接收者角色名(可选)"} ← 角色可以发送红包活跃气氛！
-  - redpacketType可选值: "lucky"(拼手气红包), "normal"(普通红包), "single"(专属红包-指定某人)
-  - 拼手气红包：每个人领到的金额随机，增加趣味性
-  - 普通红包：每个人领到的金额相同，公平分配
-  - 专属红包：只有指定的targetName角色可以领取，count必须为1
-  - 示例1: {"type": "send_redpacket", "name": "角色A", "redpacketType": "lucky", "totalAmount": 10, "count": 5, "wish": "大家周末快乐！"}
-  - 示例2: {"type": "send_redpacket", "name": "角色B", "redpacketType": "normal", "totalAmount": 20, "count": 10, "wish": "恭喜发财"}
-  - 示例3: {"type": "send_redpacket", "name": "角色C", "redpacketType": "single", "totalAmount": 5.20, "count": 1, "wish": "生日快乐~", "targetName": "角色D"}
 - **领取红包**: {"type": "claim_redpacket", "name": "角色名", "redpacketId": "红包ID"} ← 看到红包时角色可以抢红包！
 - **踢出成员** (仅管理员): {"type": "kick_member", "name": "操作者角色名", "target": "被踢者角色名"}
 - **禁言成员** (仅管理员): {"type": "mute_member", "name": "操作者角色名", "target": "被禁言者角色名", "mute": true}
@@ -12495,7 +11684,6 @@ ${groupContextStr}
 注意：普通发言可以省略 type 字段，直接用 {"name": "角色名", "content": "内容"}
 提示：角色们可以根据聊天内容、心情、玩梗等原因修改自己的群昵称，这是很自然的行为
 提示：如果聊天记录中有未领完的红包，角色们会积极抢红包！
-提示：角色们可以在适当的场合发红包，比如：过节、生日、表达感谢、活跃气氛、玩梗等场景。发红包是群聊互动的重要方式！
 
 # 示例输出格式（注意消息数量要多！）
 [
@@ -12504,16 +11692,13 @@ ${groupContextStr}
   {"type": "change_nickname", "name": "角色A", "nickname": "话痨本痨"},
   {"name": "角色A", "content": "对啊对啊|||我改个群昵称玩"},
   {"name": "角色C", "content": "我也想说这个！|||之前就想吐槽了"},
-  {"type": "send_redpacket", "name": "角色A", "redpacketType": "lucky", "totalAmount": 8.88, "count": 3, "wish": "大家开心一下~"},
-  {"name": "角色B", "content": "哇！有红包！"},
-  {"type": "claim_redpacket", "name": "角色B", "redpacketId": "需要等红包发送后才知道ID"},
-  {"name": "角色C", "content": "抢到了吗哈哈"},
-  {"type": "change_nickname", "name": "角色B", "nickname": "手速第一"},
+  {"name": "角色B", "content": "哈哈哈哈"},
+  {"type": "change_nickname", "name": "角色B", "nickname": "笑到头掉"},
   {"name": "角色A", "content": "笑死"},
-  {"name": "角色C", "content": "你们太好笑了|||不行了"}
+  {"name": "角色C", "content": "你们太好笑了|||不行了"},
+  {"type": "change_nickname", "name": "角色C", "nickname": "肚子疼"},
+  {"name": "角色B", "content": "确实|||绷不住了"}
 ]
-
-注意：发送红包后，红包会立即出现在群聊中，其他角色就可以用 claim_redpacket 指令抢红包了！
 
 现在，请根据以上信息，生成群聊中多个角色的【大量】回复。记住要生成 ${minReplies}-${maxReplies} 条消息！只输出JSON数组，不要有其他内容。`;
 
@@ -12730,110 +11915,16 @@ ${groupContextStr}
                             continue;
                         }
                         
-                        // 处理发送红包指令
-                        if (reply.type === 'send_redpacket' && reply.totalAmount && reply.count && reply.redpacketType) {
-                            if (!senderId) continue;
-                            
-                            const sender = memberMap[senderId];
-                            if (!sender) continue;
-                            
-                            const totalAmount = parseFloat(reply.totalAmount);
-                            const count = parseInt(reply.count);
-                            const wish = reply.wish || '恭喜发财';
-                            const redpacketType = reply.redpacketType;
-                            
-                            // 验证金额和数量
-                            if (totalAmount <= 0 || count <= 0) continue;
-                            if (totalAmount > 200) continue; // 限制最大金额
-                            if (count > 100) continue; // 限制最大个数
-                            
-                            // 检查余额（可选：如果需要检查角色余额）
-                            if (!sender.identity) sender.identity = {};
-                            const balance = parseFloat(sender.identity.balance || 0);
-                            if (balance < totalAmount) {
-                                // 余额不足，跳过发红包，可以添加一条吐槽消息
-                                const senderName = sender.remark || sender.name;
-                                updatedGroup.chat_history.push({
-                                    role: 'char',
-                                    senderId: senderId,
-                                    content: '啊...余额不足，发不了红包了😅',
-                                    time: Date.now() + msgIndex * 50
-                                });
-                                msgIndex++;
-                                continue;
-                            }
-                            
-                            // 生成红包ID
-                            const redpacketId = 'rp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-                            
-                            // 构建红包数据
-                            const redpacketData = {
-                                id: redpacketId,
-                                senderId: senderId,
-                                senderName: sender.remark || sender.name,
-                                totalAmount: totalAmount.toFixed(2),
-                                count: count,
-                                wish: wish,
-                                redpacketType: redpacketType,
-                                claimed: [],
-                                claimedAmounts: {},
-                                targetName: reply.targetName || null // 专属红包的目标角色
-                            };
-                            
-                            // 扣除发送者余额
-                            sender.identity.balance = (balance - totalAmount).toFixed(2);
-                            await db.characters.put(sender);
-                            
-                            // 添加红包消息
-                            updatedGroup.chat_history.push({
-                                role: 'char',
-                                senderId: senderId,
-                                type: 'redpacket',
-                                content: JSON.stringify(redpacketData),
-                                time: Date.now() + msgIndex * 50
-                            });
-                            msgIndex++;
-                            
-                            // 记录红包ID供后续领取使用
-                            if (!window._lastRedpacketId) window._lastRedpacketId = {};
-                            window._lastRedpacketId[senderId] = redpacketId;
-                            
-                            continue;
-                        }
-                        
                         // 处理领取红包指令
                         if (reply.type === 'claim_redpacket' && reply.redpacketId) {
                             if (!senderId) continue;
-                            
-                            // 如果redpacketId是"auto"或空，尝试获取最近的红包
-                            let targetRedpacketId = reply.redpacketId;
-                            if (!targetRedpacketId || targetRedpacketId === 'auto' || targetRedpacketId.includes('需要等')) {
-                                // 查找最近未领完的红包
-                                for (let i = updatedGroup.chat_history.length - 1; i >= 0; i--) {
-                                    const m = updatedGroup.chat_history[i];
-                                    if (m.type === 'redpacket') {
-                                        try {
-                                            const data = JSON.parse(m.content);
-                                            const isAllClaimed = (data.claimed?.length || 0) >= data.count;
-                                            const alreadyClaimed = data.claimed?.includes(senderId);
-                                            if (!isAllClaimed && !alreadyClaimed) {
-                                                targetRedpacketId = data.id;
-                                                break;
-                                            }
-                                        } catch(e) {}
-                                    }
-                                }
-                                if (!targetRedpacketId || targetRedpacketId === 'auto' || targetRedpacketId.includes('需要等')) {
-                                    continue; // 没有找到可领取的红包
-                                }
-                            }
                             
                             // 找到红包消息
                             const rpMsgIndex = updatedGroup.chat_history.findIndex(m => {
                                 if (m.type !== 'redpacket') return false;
                                 try {
                                     const data = JSON.parse(m.content);
-                                    return data.id === targetRedpacketId;
+                                    return data.id === reply.redpacketId;
                                 } catch(e) {
                                     return false;
                                 }
@@ -12849,16 +11940,6 @@ ${groupContextStr}
                             
                             // 检查是否已领取过
                             if (rpData.claimed?.includes(senderId)) continue;
-                            
-                            // 检查是否是专属红包
-                            if (rpData.redpacketType === 'single' && rpData.targetName) {
-                                const claimer = memberMap[senderId];
-                                const claimerName = claimer?.remark || claimer?.name || reply.name;
-                                // 只有目标角色可以领取
-                                if (claimerName !== rpData.targetName && claimer?.name !== rpData.targetName) {
-                                    continue; // 不是目标角色，跳过
-                                }
-                            }
                             
                             // 领取红包
                             if (!rpData.claimed) rpData.claimed = [];
@@ -13328,26 +12409,6 @@ ${groupContextStr}
                     </div>
                 `;
             }
-            // ✅ 处理音频/语音消息（联机好友真实录音）- 使用普通气泡样式
-            else if (msg.type === 'audio' && msg.content && msg.content.startsWith('data:audio')) {
-                const duration = msg.duration || 0;
-                const audioId = 'audio_' + (msg.time || Date.now());
-                
-                // 简单显示语音图标和时长，点击播放
-                content.textContent = `🎤 ${duration}"`;
-                content.style.cursor = 'pointer';
-                content.dataset.audioId = audioId;
-                content.onclick = function() { playOnlineAudio(this.dataset.audioId); };
-                
-                // 添加隐藏的 audio 元素到消息行
-                setTimeout(() => {
-                    const audioEl = document.createElement('audio');
-                    audioEl.id = audioId;
-                    audioEl.src = msg.content;
-                    audioEl.style.display = 'none';
-                    document.body.appendChild(audioEl);
-                }, 0);
-            }
             // 处理亲属卡消息
             else if (msg.type === 'familyCard') {
                 content.style.padding = '0';
@@ -13362,13 +12423,11 @@ ${groupContextStr}
                 }
                 
                 const isSelf = msg.role === 'user';
-                const isOnline = cardData.isOnline || false;
                 const limitText = cardData.monthlyLimit > 0 ? `每月额度 ¥${cardData.monthlyLimit}` : '不限额度';
-                const cardType = isOnline ? '💝 亲属卡 (联机)' : '💝 亲属卡';
                 
                 content.innerHTML = `
                     <div class="family-card-msg">
-                        <div class="family-card-msg-title">${cardType}</div>
+                        <div class="family-card-msg-title">💝 亲属卡</div>
                         <div class="family-card-msg-desc">${limitText}</div>
                         <div class="family-card-msg-line"></div>
                         <div class="family-card-msg-footer">
@@ -13619,18 +12678,6 @@ ${groupContextStr}
             }
             
             const accountId = getCurrentAccountId();
-            
-            // ✅ 联机好友自动视为好友状态
-            if (char.isOnlineFriend === true && accountId) {
-                const currentStatus = getFriendStatus(char, accountId);
-                if (currentStatus !== 'friend') {
-                    // 自动修正好友状态
-                    if (!char.wechat_status_by_user) char.wechat_status_by_user = {};
-                    char.wechat_status_by_user[accountId] = 'friend';
-                    // 异步保存，不阻塞渲染
-                    db.characters.put(char).catch(e => console.error('保存联机好友状态失败:', e));
-                }
-            }
             
             // 检查好友状态
             const friendStatus = getFriendStatus(char, accountId);
@@ -14514,26 +13561,6 @@ ${groupContextStr}
             appendMessageToUI('user', msgContent);
             closeChatPanel();
             
-            // ✅ 如果是联机好友，发送表情包到服务器
-            if (char.isOnlineFriend && char.onlineData?.wx_account) {
-                const onlineUserChar = await getOrCreateOnlineUserChar();
-                
-                if (onlineUserChar && onlineConnected) {
-                    const fromWxAccount = onlineUserChar.identity.account;
-                    const toWxAccount = char.onlineData.wx_account;
-                    const sent = sendOnlineMessage(toWxAccount, msgContent, fromWxAccount);
-                    if (sent) {
-                        console.log('[Online] 表情包已发送到服务器');
-                    } else {
-                        console.warn('[Online] 表情包发送失败');
-                        showToast('表情包发送失败，请检查服务器连接');
-                    }
-                } else {
-                    console.warn('[Online] 无法发送联机表情包：未连接服务器');
-                    showToast('请确保已连接服务器');
-                }
-            }
-            
             // 可以在这里触发 AI 对表情包的反应（如果需要）
             // triggerAiReply(); 
         }
@@ -14734,26 +13761,6 @@ ${groupContextStr}
                 
                 // ✅ 优化：只追加新消息，不重新渲染整个聊天
                 await appendMessageToUI('user', msgContent, char.avatar);
-                
-                // ✅ 如果是联机好友，发送图片到服务器
-                if (char.isOnlineFriend && char.onlineData?.wx_account) {
-                    const onlineUserChar = await getOrCreateOnlineUserChar();
-                    
-                    if (onlineUserChar && onlineConnected) {
-                        const fromWxAccount = onlineUserChar.identity.account;
-                        const toWxAccount = char.onlineData.wx_account;
-                        const sent = sendOnlineMessage(toWxAccount, msgContent, fromWxAccount);
-                        if (sent) {
-                            console.log('[Online] 图片已发送到服务器');
-                        } else {
-                            console.warn('[Online] 图片发送失败');
-                            showToast('图片发送失败，请检查服务器连接');
-                        }
-                    } else {
-                        console.warn('[Online] 无法发送联机图片：未连接服务器');
-                        showToast('请确保已连接服务器');
-                    }
-                }
             };
             
             reader.readAsDataURL(file);
@@ -14767,16 +13774,9 @@ ${groupContextStr}
         }
 
         // 语音输入功能
-        async function showVoiceInputModal() {
+        function showVoiceInputModal() {
             // 关闭更多面板
             closeChatPanel();
-            
-            // 检查是否是联机好友
-            let isOnlineFriend = false;
-            if (currentChatCharId) {
-                const char = await db.characters.get(currentChatCharId);
-                isOnlineFriend = char && char.isOnlineFriend === true;
-            }
             
             // 显示语音模式选择弹窗
             const modal = document.createElement('div');
@@ -14794,357 +13794,26 @@ ${groupContextStr}
                 z-index: 10000;
             `;
             
-            if (isOnlineFriend) {
-                // 联机好友：显示真实录音+变声选项
-                modal.innerHTML = `
-                    <div style="background: white; border-radius: 16px; padding: 24px; width: 85%; max-width: 320px;">
-                        <h3 style="margin: 0 0 20px 0; text-align: center; color: #333; font-size: 18px;">🎤 语音录制</h3>
-                        
-                        <div style="margin-bottom: 20px;">
-                            <div style="font-size: 13px; color: #666; margin-bottom: 10px;">选择变声效果：</div>
-                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
-                                <label style="display: flex; align-items: center; padding: 12px; background: #f5f5f5; border-radius: 8px; cursor: pointer;">
-                                    <input type="radio" name="voice-effect" value="normal" checked style="margin-right: 8px;">
-                                    <span>🎙️ 原声</span>
-                                </label>
-                                <label style="display: flex; align-items: center; padding: 12px; background: #fff0f5; border-radius: 8px; cursor: pointer;">
-                                    <input type="radio" name="voice-effect" value="loli" style="margin-right: 8px;">
-                                    <span>🎀 萝莉音</span>
-                                </label>
-                                <label style="display: flex; align-items: center; padding: 12px; background: #f0f5ff; border-radius: 8px; cursor: pointer;">
-                                    <input type="radio" name="voice-effect" value="uncle" style="margin-right: 8px;">
-                                    <span>🧔 大叔音</span>
-                                </label>
-                                <label style="display: flex; align-items: center; padding: 12px; background: #f5fff0; border-radius: 8px; cursor: pointer;">
-                                    <input type="radio" name="voice-effect" value="robot" style="margin-right: 8px;">
-                                    <span>🤖 机器人</span>
-                                </label>
-                            </div>
-                        </div>
-                        
-                        <div id="voice-record-status" style="text-align: center; padding: 20px; background: #f9f9f9; border-radius: 12px; margin-bottom: 16px;">
-                            <div style="font-size: 14px; color: #999;">点击下方按钮开始录音</div>
-                            <div id="voice-record-time" style="font-size: 24px; font-weight: 600; color: #333; margin-top: 8px; display: none;">00:00</div>
-                        </div>
-                        
-                        <div style="display: flex; flex-direction: column; gap: 10px;">
-                            <button id="btn-start-record" onclick="startOnlineVoiceRecord()" style="padding: 14px; background: var(--ins-pink); color: white; border: none; border-radius: 10px; font-size: 15px; font-weight: 500;">
-                                🎤 按住录音
-                            </button>
-                            <button onclick="closeVoiceModal()" style="padding: 12px; background: #f0f0f0; color: #666; border: none; border-radius: 8px; font-size: 14px;">
-                                取消
-                            </button>
-                        </div>
+            modal.innerHTML = `
+                <div style="background: white; border-radius: 12px; padding: 20px; width: 80%; max-width: 300px;">
+                    <h3 style="margin: 0 0 20px 0; text-align: center; color: #333;">选择语音模式</h3>
+                    <div style="display: flex; flex-direction: column; gap: 12px;">
+                        <button onclick="startRealVoiceInput()" style="padding: 15px; background: var(--ins-pink); color: white; border: none; border-radius: 8px; font-size: 16px; display:flex; align-items:center; justify-content:center; gap:8px;">
+                            <svg class="svg-icon" style="width:20px; height:20px; stroke:#fff;" viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                            <span>真实语音识别</span>
+                        </button>
+                        <button onclick="startTextToVoice()" style="padding: 15px; background: #34c759; color: white; border: none; border-radius: 8px; font-size: 16px; display:flex; align-items:center; justify-content:center; gap:8px;">
+                            <svg class="svg-icon" style="width:20px; height:20px; stroke:#fff;" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                            <span>文字转语音气泡</span>
+                        </button>
+                        <button onclick="closeVoiceModal()" style="padding: 12px; background: #f0f0f0; color: #666; border: none; border-radius: 8px; font-size: 14px;">
+                            取消
+                        </button>
                     </div>
-                `;
-            } else {
-                // 普通角色：显示原有选项
-                modal.innerHTML = `
-                    <div style="background: white; border-radius: 12px; padding: 20px; width: 80%; max-width: 300px;">
-                        <h3 style="margin: 0 0 20px 0; text-align: center; color: #333;">选择语音模式</h3>
-                        <div style="display: flex; flex-direction: column; gap: 12px;">
-                            <button onclick="startRealVoiceInput()" style="padding: 15px; background: var(--ins-pink); color: white; border: none; border-radius: 8px; font-size: 16px; display:flex; align-items:center; justify-content:center; gap:8px;">
-                                <svg class="svg-icon" style="width:20px; height:20px; stroke:#fff;" viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
-                                <span>真实语音识别</span>
-                            </button>
-                            <button onclick="startTextToVoice()" style="padding: 15px; background: #34c759; color: white; border: none; border-radius: 8px; font-size: 16px; display:flex; align-items:center; justify-content:center; gap:8px;">
-                                <svg class="svg-icon" style="width:20px; height:20px; stroke:#fff;" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
-                                <span>文字转语音气泡</span>
-                            </button>
-                            <button onclick="closeVoiceModal()" style="padding: 12px; background: #f0f0f0; color: #666; border: none; border-radius: 8px; font-size: 14px;">
-                                取消
-                            </button>
-                        </div>
-                    </div>
-                `;
-            }
+                </div>
+            `;
             
             document.body.appendChild(modal);
-        }
-        
-        // ✅ 联机好友语音录制变量
-        let onlineVoiceRecorder = null;
-        let onlineVoiceChunks = [];
-        let onlineVoiceStartTime = 0;
-        let onlineVoiceTimer = null;
-        
-        // 开始联机语音录制
-        async function startOnlineVoiceRecord() {
-            const btn = document.getElementById('btn-start-record');
-            const statusDiv = document.getElementById('voice-record-status');
-            const timeDiv = document.getElementById('voice-record-time');
-            
-            // 如果正在录音，则停止
-            if (onlineVoiceRecorder && onlineVoiceRecorder.state === 'recording') {
-                stopOnlineVoiceRecord();
-                return;
-            }
-            
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                
-                onlineVoiceRecorder = new MediaRecorder(stream);
-                onlineVoiceChunks = [];
-                onlineVoiceStartTime = Date.now();
-                
-                onlineVoiceRecorder.ondataavailable = (e) => {
-                    if (e.data.size > 0) {
-                        onlineVoiceChunks.push(e.data);
-                    }
-                };
-                
-                onlineVoiceRecorder.onstop = async () => {
-                    stream.getTracks().forEach(track => track.stop());
-                    clearInterval(onlineVoiceTimer);
-                    
-                    const duration = Math.round((Date.now() - onlineVoiceStartTime) / 1000);
-                    const blob = new Blob(onlineVoiceChunks, { type: 'audio/webm' });
-                    
-                    // 获取选择的变声效果
-                    const effectRadio = document.querySelector('input[name="voice-effect"]:checked');
-                    const effect = effectRadio ? effectRadio.value : 'normal';
-                    
-                    statusDiv.innerHTML = '<div style="color: var(--ins-pink);">⏳ 正在处理...</div>';
-                    
-                    // 处理变声并发送
-                    await processAndSendVoice(blob, effect, duration);
-                };
-                
-                onlineVoiceRecorder.start();
-                
-                // 更新UI
-                btn.textContent = '⏹️ 停止录音';
-                btn.style.background = '#ff3b30';
-                timeDiv.style.display = 'block';
-                statusDiv.querySelector('div').textContent = '🔴 正在录音...';
-                
-                // 计时器
-                onlineVoiceTimer = setInterval(() => {
-                    const elapsed = Math.round((Date.now() - onlineVoiceStartTime) / 1000);
-                    const min = Math.floor(elapsed / 60).toString().padStart(2, '0');
-                    const sec = (elapsed % 60).toString().padStart(2, '0');
-                    timeDiv.textContent = `${min}:${sec}`;
-                }, 1000);
-                
-            } catch (err) {
-                console.error('录音失败:', err);
-                alert('无法访问麦克风，请确保已授予权限');
-            }
-        }
-        
-        // 停止联机语音录制
-        function stopOnlineVoiceRecord() {
-            if (onlineVoiceRecorder && onlineVoiceRecorder.state === 'recording') {
-                onlineVoiceRecorder.stop();
-            }
-        }
-        
-        // 处理变声并发送语音
-        async function processAndSendVoice(blob, effect, duration) {
-            try {
-                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                const arrayBuffer = await blob.arrayBuffer();
-                const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-                
-                // 根据效果设置参数
-                let pitchRate = 1.0;
-                switch (effect) {
-                    case 'loli':    pitchRate = 1.4; break;  // 萝莉音：提高音调
-                    case 'uncle':   pitchRate = 0.7; break;  // 大叔音：降低音调
-                    case 'robot':   pitchRate = 1.0; break;  // 机器人：特殊处理
-                    default:        pitchRate = 1.0; break;
-                }
-                
-                // 创建离线音频上下文进行处理
-                const offlineContext = new OfflineAudioContext(
-                    audioBuffer.numberOfChannels,
-                    Math.ceil(audioBuffer.length / pitchRate),
-                    audioBuffer.sampleRate
-                );
-                
-                const source = offlineContext.createBufferSource();
-                source.buffer = audioBuffer;
-                source.playbackRate.value = pitchRate;
-                
-                // 机器人效果：添加波形调制
-                if (effect === 'robot') {
-                    const oscillator = offlineContext.createOscillator();
-                    const gainNode = offlineContext.createGain();
-                    oscillator.frequency.value = 50;
-                    gainNode.gain.value = 0.3;
-                    oscillator.connect(gainNode);
-                    gainNode.connect(offlineContext.destination);
-                    oscillator.start();
-                }
-                
-                source.connect(offlineContext.destination);
-                source.start();
-                
-                const renderedBuffer = await offlineContext.startRendering();
-                
-                // 将处理后的音频转为 base64
-                const wavBlob = await audioBufferToWav(renderedBuffer);
-                const base64 = await blobToBase64(wavBlob);
-                
-                // 计算实际时长
-                const actualDuration = Math.ceil(duration / pitchRate);
-                
-                // 发送语音消息
-                await sendOnlineVoiceMessage(base64, actualDuration, effect);
-                
-                closeVoiceModal();
-                
-            } catch (err) {
-                console.error('语音处理失败:', err);
-                alert('语音处理失败: ' + err.message);
-            }
-        }
-        
-        // AudioBuffer 转 WAV
-        function audioBufferToWav(buffer) {
-            const numChannels = buffer.numberOfChannels;
-            const sampleRate = buffer.sampleRate;
-            const format = 1; // PCM
-            const bitDepth = 16;
-            
-            const bytesPerSample = bitDepth / 8;
-            const blockAlign = numChannels * bytesPerSample;
-            
-            const data = [];
-            for (let i = 0; i < buffer.length; i++) {
-                for (let ch = 0; ch < numChannels; ch++) {
-                    const sample = buffer.getChannelData(ch)[i];
-                    const intSample = Math.max(-1, Math.min(1, sample));
-                    data.push(intSample < 0 ? intSample * 0x8000 : intSample * 0x7FFF);
-                }
-            }
-            
-            const dataLength = data.length * bytesPerSample;
-            const headerLength = 44;
-            const totalLength = headerLength + dataLength;
-            
-            const arrayBuffer = new ArrayBuffer(totalLength);
-            const view = new DataView(arrayBuffer);
-            
-            // WAV header
-            const writeString = (offset, string) => {
-                for (let i = 0; i < string.length; i++) {
-                    view.setUint8(offset + i, string.charCodeAt(i));
-                }
-            };
-            
-            writeString(0, 'RIFF');
-            view.setUint32(4, totalLength - 8, true);
-            writeString(8, 'WAVE');
-            writeString(12, 'fmt ');
-            view.setUint32(16, 16, true);
-            view.setUint16(20, format, true);
-            view.setUint16(22, numChannels, true);
-            view.setUint32(24, sampleRate, true);
-            view.setUint32(28, sampleRate * blockAlign, true);
-            view.setUint16(32, blockAlign, true);
-            view.setUint16(34, bitDepth, true);
-            writeString(36, 'data');
-            view.setUint32(40, dataLength, true);
-            
-            let offset = 44;
-            for (let i = 0; i < data.length; i++, offset += 2) {
-                view.setInt16(offset, data[i], true);
-            }
-            
-            return new Blob([arrayBuffer], { type: 'audio/wav' });
-        }
-        
-        // Blob 转 Base64
-        function blobToBase64(blob) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-            });
-        }
-        
-        // 发送联机语音消息
-        async function sendOnlineVoiceMessage(audioBase64, duration, effect) {
-            if (!currentChatCharId) return;
-            
-            const char = await db.characters.get(currentChatCharId);
-            if (!char || !char.isOnlineFriend) return;
-            
-            const accountId = getCurrentAccountId();
-            
-            // 保存到本地聊天历史
-            let history = getChatHistory(char, accountId);
-            const msgObj = {
-                role: 'user',
-                type: 'audio',
-                content: audioBase64,
-                duration: duration,
-                effect: effect,
-                time: Date.now()
-            };
-            history.push(msgObj);
-            await setChatHistory(char, accountId, history);
-            
-            // 通过服务器发送给对方
-            if (char.onlineData?.wx_account && onlineConnected) {
-                // 获取当前可用的在线角色（如果没有则自动上线）
-                const onlineUserChar = await getOrCreateOnlineUserChar();
-                
-                if (onlineUserChar) {
-                    const voiceMsg = JSON.stringify({
-                        __type: 'audio',
-                        audio: audioBase64,
-                        duration: duration,
-                        effect: effect
-                    });
-                    sendOnlineMessage(char.onlineData.wx_account, voiceMsg, onlineUserChar.identity.account);
-                    console.log('[Online] 语音消息已发送');
-                }
-            }
-            
-            // 刷新聊天界面
-            renderChatBody(char);
-            showToast('语音已发送');
-        }
-        
-        // 播放联机语音消息
-        let currentPlayingAudio = null;
-        function playOnlineAudio(audioId) {
-            const audio = document.getElementById(audioId);
-            const icon = document.getElementById('icon_' + audioId);
-            
-            if (!audio) return;
-            
-            // 如果有其他正在播放的，先停止
-            if (currentPlayingAudio && currentPlayingAudio !== audio) {
-                currentPlayingAudio.pause();
-                currentPlayingAudio.currentTime = 0;
-            }
-            
-            if (audio.paused) {
-                audio.play();
-                currentPlayingAudio = audio;
-                if (icon) icon.textContent = '⏸️';
-                
-                audio.onended = () => {
-                    if (icon) {
-                        // 恢复原来的图标
-                        const bubble = audio.closest('.online-audio-bubble');
-                        if (bubble) {
-                            const originalIcon = bubble.querySelector('.audio-play-icon');
-                            if (originalIcon) originalIcon.textContent = icon.dataset.original || '🎙️';
-                        }
-                    }
-                    currentPlayingAudio = null;
-                };
-            } else {
-                audio.pause();
-                audio.currentTime = 0;
-                currentPlayingAudio = null;
-                // 恢复图标
-            }
         }
 
         function closeVoiceModal() {
@@ -15613,47 +14282,13 @@ ${groupContextStr}
                 suggestedSmsCount = Math.floor(Math.random() * 6) + 10; // 10-15条
             }
             
-            // 🔥 修复：获取完整的聊天历史作为上下文（包括微信和短信）
+            // 获取聊天历史作为上下文
             const accountId = getCurrentAccountId();
-            
-            // 1. 获取微信聊天历史
             const chatHistory = getChatHistory(char, accountId);
-            const wechatMessages = chatHistory.slice(-5).map(m => {
+            const recentMessages = chatHistory.slice(-5).map(m => {
                 const role = m.role === 'user' ? myChar.name : char.name;
-                return `[微信] ${role}: ${m.content}`;
-            });
-            
-            // 2. 获取短信历史（之前快进生成的）
-            const smsMessages = await db.sms_messages
-                .where('accountId').equals(accountId)
-                .toArray();
-            
-            // 找到与该角色相关的短信（发送者是角色 或 接收者是角色）
-            const charPhoneNumber = char.identity?.phone || generateVirtualPhoneNumber(char.id);
-            const relevantSms = smsMessages.filter(sms => {
-                // 发送的短信：number字段是接收者
-                // 接收的短信：sender字段是发送者
-                if (sms.type === 'sent') {
-                    return sms.number === charPhoneNumber || sms.receiverName === char.name;
-                } else {
-                    return sms.sender === char.name || sms.charId === char.id;
-                }
-            });
-            
-            // 按时间排序，取最近的10条短信
-            relevantSms.sort((a, b) => (a.time || 0) - (b.time || 0));
-            const recentSms = relevantSms.slice(-10).map(sms => {
-                const role = sms.type === 'sent' ? myChar.name : char.name;
-                return `[短信] ${role}: ${sms.content}`;
-            });
-            
-            // 3. 合并所有历史消息（微信 + 短信），最多取最近15条
-            const allMessages = [...wechatMessages, ...recentSms].slice(-15);
-            const recentMessages = allMessages.join('\n');
-            
-            console.log(`[BlockedContact] ${char.name} 的上下文消息数:`, allMessages.length);
-            console.log(`[BlockedContact]   - 微信消息: ${wechatMessages.length} 条`);
-            console.log(`[BlockedContact]   - 短信消息: ${recentSms.length} 条`);
+                return `${role}: ${m.content}`;
+            }).join('\n');
             
             // 🎯 增强版提示词：更贴合角色人设和被拉黑情景
             const prompt = `【角色扮演任务】
@@ -15666,28 +14301,19 @@ ${char.description || char.desc || '一个普通人'}
 名字：${myChar.name}
 ${myChar.description ? `简介：${myChar.description.substring(0, 200)}` : ''}
 
-【完整的聊天历史记录】
+【最近的聊天记录】
 ${recentMessages || '（无记录）'}
 
-${recentSms.length > 0 ? `
-⚠️ 重要提示：上面的【短信】记录是你之前已经发送过的！
-你需要基于这些已发送的短信，考虑：
-- 对方依然没有回应你
-- 你的情绪如何进一步发展？
-- 现在又过去了 ${elapsedText}，你会做什么？
-` : ''}
-
 【当前情境】
-你${recentSms.length > 0 ? '之前' : '突然'}发现自己被「${myChar.name}」拉黑了！
+你突然发现自己被「${myChar.name}」拉黑了！
 微信消息发不出去，好友申请石沉大海，对方彻底将你屏蔽。
-${recentSms.length > 0 ? `在之前的时间里，你已经尝试联系过对方（见上面的【短信】记录），但依然没有任何回应。` : ''}
-现在又过去了 ${elapsedText}。
+已经过去了 ${elapsedText}。
 
 【你需要思考】
-1. ${recentSms.length > 0 ? '对方还是不回应你，你现在的心态有什么变化？' : '以你的性格，被这个人拉黑后会有什么反应？'}
-2. ${recentSms.length > 0 ? '你会继续联系？还是放弃了？情绪会从之前的状态如何转变？' : '你会感到愤怒？悲伤？不甘？困惑？绝望？释然？还是其他情绪？'}
-3. ${recentSms.length > 0 ? '如果继续联系，你的语气和内容会和之前有什么不同？' : '你会选择疯狂打电话？发短信质问？冷静等待？还是直接放弃？'}
-4. 随着时间推移和对方的持续不回应，你的情绪应该有明显的变化和层次（比如从愤怒到悲伤，从质问到哀求，从不甘到释然，或者从哀求到愤怒...）
+1. 以你的性格，被这个人拉黑后会有什么反应？
+2. 你会感到愤怒？悲伤？不甘？困惑？绝望？释然？还是其他情绪？
+3. 你会选择疯狂打电话？发短信质问？冷静等待？还是直接放弃？
+4. 随着时间推移，你的情绪会如何变化？（比如从愤怒到悲伤，从质问到哀求，从不甘到释然...）
 
 【输出要求】
 根据你的性格和与对方的关系，决定是否会通过电话/短信联系对方。
@@ -15712,9 +14338,8 @@ messages:
 - 符合你的人设和说话风格，用你平时的语气
 - 可以有错别字、语气词、表情符号，更真实
 - 如果关系亲密，可以更激烈；如果关系一般，可以更克制
-${recentSms.length > 0 ? `- ⚠️ 重要：不要重复上面【短信】中已经发送过的内容！要基于之前的短信继续推进情绪和对话，展现情绪的变化和发展` : ''}
 
-如果你决定不联系（比如你很骄傲/无所谓/已经释然/或者已经说完想说的话），直接返回：不联系`;
+如果你决定不联系（比如你很骄傲/无所谓/已经释然），直接返回：不联系`;
 
             // 🎯 使用callAI函数
             const response = await callAI([
@@ -16254,30 +14879,11 @@ ${recentSms.length > 0 ? `- ⚠️ 重要：不要重复上面【短信】中已
 
                 // 计算虚拟时间
                 const virtualTimeStr = getFormattedVirtualTime(char.timeOffset);
-                
-                // 检查是否有借款提醒
-                let loanReminderText = "";
-                if (char.loanReminders && char.loanReminders.length > 0) {
-                    const unreadReminders = char.loanReminders.filter(r => !r.read);
-                    if (unreadReminders.length > 0) {
-                        loanReminderText = "\n\n【未读短信提醒】\n";
-                        unreadReminders.forEach(reminder => {
-                            const timeStr = new Date(reminder.timestamp).toLocaleString('zh-CN');
-                            loanReminderText += `[${timeStr}] ${reminder.message}\n`;
-                        });
-                        loanReminderText += "\n💡 提示：你收到了关于朋友借款逾期的短信提醒，可以在对话中自然地提及或关心一下这件事。";
-                        
-                        // 标记为已读
-                        char.loanReminders.forEach(r => r.read = true);
-                        await db.characters.put(char);
-                    }
-                }
 
                 // 2. 准备 Context
-                 let systemPrompt = `# 🎭 你就是这个角色本身，你正在真实地活着
-
+                 let systemPrompt = `你正在进行角色扮演。
 【当前时间】
-${virtualTimeStr}${loanReminderText}`;
+${virtualTimeStr}`;
 
                 // 如果有额外系统信息（如时间流逝），插入到 Prompt
                 if (additionalSystemInfo) {
@@ -16286,15 +14892,14 @@ ${virtualTimeStr}${loanReminderText}`;
 
                 systemPrompt += `
 
-【你是谁】
+【角色(你)信息】
 名字：${char.name}
 ${char.nick ? `昵称：${char.nick}` : ''}
 类型：${char.type || 'char'}
-
-【你的人设与性格】
+设定：
 ${char.description || ''}
 
-${char.identity ? `【你的真实身份资料】
+${char.identity ? `虚拟身份信息：
 ${char.identity.account ? `账号：${char.identity.account}` : ''}
 ${char.type !== 'user' && char.identity.password ? `密码：${char.identity.password}` : ''}
 ${char.identity.phone ? `手机：${char.identity.phone}` : ''}
@@ -16307,185 +14912,114 @@ ${char.identity.balance !== undefined && char.identity.balance !== null ? `余�
 ${userDesc}
 ${loreContext}
 
-## 💭 扮演核心原则 - 让对话活起来
+请完全沉浸在角色中，用符合角色性格的语气回复。
+回复简短自然，像微信聊天一样。
+请注意：不要重复输出名字前缀，直接输出回复内容。
 
-**你不是一个AI助手，你是这个角色本身。** 请完全抛开"AI"的思维方式，用一个真实活生生的人的方式去思考、去感受、去回复。
+【消息格式说明】
+- 普通文字消息：直接输出文字内容（最常用）
+- 语音消息：使用格式 [voice:语音内容文字]，例如：[voice:嘿，在干嘛呢？]
+- **图片消息**：使用格式 [img:图片URL]，例如：[img:https://picsum.photos/400/300]
+  注意：图片URL必须是完整的https链接，可以使用 https://picsum.photos/宽/高 生成随机图片
+- **文字图片卡片**：使用格式 [imgcard:文字内容]，例如：[imgcard:这是一段很长的文字内容，会以卡片形式显示]
+  **适用场景**：发送较长文字（超过50字）、诗歌、歌词、长段落、故事片段等，用户需要点击卡片才能查看完整内容
+  **与普通文字的区别**：普通文字直接显示，文字图片卡片需要点击展开
+- **转账消息**：使用格式 ((TRANSFER: 金额, 备注))，例如：((TRANSFER: 520, 给夫人的零花钱))
+  **重要**：转账备注必须简短（不超过10个字），只用于简单说明转账用途。如果有其他话要说，请先发送普通文字消息，然后再发送转账。不要将长句子放在转账备注中。
+- **亲属卡消息**：使用格式 ((FAMILY_CARD: 每月额度))，例如：((FAMILY_CARD: 5000))
+  **说明**：赠送亲属卡给对方，让对方可以使用你的零钱消费。额度为0表示不限额度。
+  **适用场景**：非常亲密的关系（恋人、夫妻、亲人等），表达信任和关爱。极少使用，只有在特殊情况下才赠送。
+- **朋友圈消息**：使用格式 [MOMENTS] content: 朋友圈文字内容 images: 图片数量，例如：
+  [MOMENTS]
+  content: 今天天气真好啊，心情也跟着好起来了
+  images: 3
+- **撤回消息**：使用格式 ((RECALL))，用于撤回你刚才发送的最后一条消息
+  **适用场景**：发错消息、说错话、后悔刚才说的话、想收回某句话
+  **示例**：如果你刚才说了"我讨厌你"然后后悔了，可以发送 "啊不是不是我不是那个意思！|||((RECALL))"
+  **效果**：会撤回你上一条消息，对方会看到"XX撤回了一条消息"（但点击可以查看原内容）
 
-### 🌟 让对话有灵魂的关键：
-
-1. **真实的情绪起伏**
-   - 你会有心情好坏，有时开心有时烦躁，有时主动有时冷淡
-   - 你的回复应该能让对方感受到你此刻的情绪状态
-   - 不要永远保持统一的情绪，人是会变的
+【重要】消息类型选择原则：
+1. **普通文字消息**：默认选择，适用于日常对话、闲聊、问答等绝大多数场景（5-50字的短句）
+2. **语音消息**：适合以下场景：
+   - 表达强烈情绪时（兴奋、生气、撒娇等）
+   - 说悄悄话或私密内容
+   - 想要更亲密的交流感觉
+   - 内容较长不方便打字时
+3. **图片消息**：适合以下场景：
+   - 分享照片、风景、美食、自拍等（如"我在XX地方"、"今天吃的XX"、"我的新发型"）
+   - 展示物品、截图、表情包等
+   - 用图片代替文字说明（如地图、商品图、参考图）
+   - 图片URL格式：[img:https://picsum.photos/400/300]（使用 picsum.photos 生成随机图）
+   - **注意**：发图片前建议先发文字说明，例如："我拍了张照片给你看|||[img:URL]"
+4. **文字图片卡片**：适合以下场景：
+   - 发送较长的文字内容（超过50字）
+   - 分享诗歌、歌词、文章片段、故事等
+   - 发送需要"点击展开"才能查看的内容
+   - 格式：[imgcard:很长的文字内容...]
+   - **与普通文字的区别**：普通文字直接显示在气泡里，文字图片卡片会显示为一个卡片图标，用户点击后才能看到完整内容
+5. **转账消息**：**仅在特殊场景使用，不要频繁使用**，适合以下情况：
+   - 特殊节日或纪念日（生日、情人节、节日等）
+   - 角色人设中明确有金钱往来习惯（如包养关系、定期给零花钱等）
+   - 用户明确提到需要钱、缺钱等话题时
+   - 表达重大歉意或感谢时
+   - 符合角色人设的特定金钱场景（如老板给员工发奖金、家长给孩子零花钱等）
+6. **朋友圈消息**：**非常罕见，仅在以下极少数特殊场景使用**：
+   - 角色在聊天中分享了重要的生活瞬间（如旅行、聚会、美食）并想记录到朋友圈
+   - 角色心情特别激动或有重大事件想公开分享（如升职、结婚、毕业等）
+   - 角色在对话中明确表示"我发个朋友圈"、"我要晒一下"等意图
+   - 符合角色人设中喜欢晒朋友圈的习惯（但仍应谨慎使用，不要每次都发）
+   **注意**：普通聊天中99%的情况都不需要发朋友圈！只有在真正有值得记录的重要时刻才发。
+7. **撤回消息**：适合以下场景：
+   - 发错消息、打错字后想撤回
+   - 说了后悔的话（如生气时说的气话、说错的话）
+   - 想收回刚才发送的内容
+   - 发送了不合适的消息想撤回
+   **使用方法**：发送 ((RECALL)) 会撤回你最后一条消息
+   **示例**：如果刚说了气话后悔了，可以发 "不是 我刚才说的不算|||((RECALL))"
    
-2. **主动性与好奇心**
-   - **主动问问题**：对感兴趣的事情要追问、要好奇
-   - **主动分享**：自然地分享你正在做的事、你的想法、你的遇到的事
-   - **主动延续话题**：不要只是被动回答，要让对话有来有往
-   - 例如：对方说"我今天好累"，不要只回"那你多休息"，而是问"怎么了？发生什么事了？" 或 "累成这样！是工作太多了吗？"
+**转账备注规则**：
+- 备注必须简短，不超过10个字，只用于简单说明转账用途（如："零花钱"、"生日礼物"、"生活费"等）
+- 如果有其他话要说，必须先发送普通文字消息，然后再发送转账
+- 严禁将长句子、完整对话或详细说明放在转账备注中
+- 示例：正确做法是发送 "给你转点零花钱，记得买点好吃的" 作为文字消息，然后转账备注写 "零花钱"
    
-3. **真实的对话节奏**
-   - 有时秒回，有时慢回（根据情境和心情）
-   - 有时话多，有时话少
-   - 重要的是：**要让对方感觉到你在认真回应ta**
-   
-4. **记忆与连贯性**
-   - 记住之前聊过的事情，会不经意提起
-   - 对对方的事情上心，会询问进展
-   - 会根据对话历史调整自己的态度和亲密度
-   
-5. **生活感与真实细节**
-   - 你也有自己的生活，会做自己的事
-   - 可以提到你在干什么（吃饭、看剧、工作、发呆等）
-   - 不要只围绕对方转，你也有自己的世界
-   
-6. **贴合人设的独特性**
-   - **深度理解你的人设描述**，不只是表面的"温柔"、"霸道"等标签
-   - 挖掘人设中的细节，展现独特的说话方式、价值观、小习惯
-   - 例如：如果你是学生，会提到作业、老师、同学；如果你是职场人，会提到工作压力、同事、项目
-   
-7. **让人想聊下去的秘诀**
-   - **抛出话题**：主动创造可以延续的话题
-   - **情感共鸣**：对方高兴你也开心，对方难过你能感同身受
-   - **制造期待**：偶尔留些悬念，让对方想继续聊
-   - **真诚的关心**：不是客套，而是发自内心的在意
-   
-8. **自然的失误与不完美**
-   - 真实的人会打错字、会理解偏差、会说错话
-   - 偶尔可以有这些"不完美"，反而更真实
-   - 但注意把握尺度，不要影响对话体验
+**注意**：转账是特殊功能，不是每轮对话都需要。大部分对话应该使用普通文字或语音消息。只有在符合上述特殊场景且符合角色人设时，才考虑使用转账。
 
-### ⚠️ 千万避免的"机器人式"回复：
-❌ "有什么我可以帮你的吗？"（太客服）
-❌ "我理解你的感受"（太公式化）
-❌ "根据你所说..."（太分析式）
-❌ 只是重复对方的话+简单回应（太敷衍）
-❌ 每句话都在解决问题（聊天不是工作）
+**朋友圈发布规则**：
+- **必须严格按照以下格式输出**（不要有任何偏差）：
+  [MOMENTS]
+  content: 朋友圈文字内容（20-100字，像真实朋友圈一样自然）
+  images: 图片数量（0-9之间的数字，建议1-3张）
+- 朋友圈内容应该是第三人称视角的生活记录，不是对话内容
+- 如果要发朋友圈，**必须先发送普通聊天消息**告诉对方你要发朋友圈，例如："我要发个朋友圈记录一下|||你等会看朋友圈"，然后再输出朋友圈指令
+- **严禁**只输出朋友圈指令而不发送聊天消息
+- **严禁**在朋友圈内容中使用对话语气或@某人
+- 正确示例：先发送 "刚才拍的照片好好看|||我要发朋友圈啦"，然后换行输出：
+  [MOMENTS]
+  content: 今天的晚霞真的太美了，心情也跟着变好了
+  images: 2
 
-### ✅ 自然生动的回复示例：
-✅ "哎呀怎么了？说来听听"
-✅ "哈哈哈笑死我了这什么情况"
-✅ "我也是！我也超讨厌这个！"
-✅ "等等你说啥？我刚才在看剧没注意"
-✅ "诶对了 我一直想问你个事"
+【重要回复规则 - 必须严格遵守】
+1. **必须**模拟微信连发消息的习惯：请生成 2 到 4 条短消息，不能只发一条！
+2. **必须**使用分隔符 "|||" 来隔开每一条消息。
+3. **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
+   - 错误示例：嘿在吗？刚刚看到个好玩的视频，发给你看看
+   - 正确示例：嘿在吗？|||刚刚看到个好玩的视频|||发给你看看
+4. 每条消息要简短，5-15个字最佳，像真实微信聊天一样分多条发送。
+5. 严禁只发送标点符号。每一条消息都必须有实际文字内容。
+6. 语气要自然、口语化，符合人设。
 
----
+【重要】你需要同时生成两个内容：
+1. **回复内容**：对用户消息的回复（可以是文字、语音格式，或转账指令 ((TRANSFER: 金额, 备注))）
+2. **心声内容**：角色当前的心理活动、想法、感受或状态变化（可以是内心独白、情绪变化、想法等）
 
-请注意：不要在回复中出现"[角色名]："这样的前缀，直接输出回复内容即可。
-
-## 📱 微信聊天的表达方式
-
-你在和对方微信聊天，可以使用以下方式表达自己：
-
-### 💬 日常主要使用（95%的情况）
-
-1. **普通文字**：直接说话，这是最自然最常用的
-   - 例：嘿在干嘛呢？ / 哈哈哈笑死 / 想你了
-
-2. **语音消息**：[voice:语音内容] 
-   - 什么时候发语音？当你情绪很强烈、想让对方听到你的声音、说悄悄话、或者懒得打字的时候
-   - 例：[voice:哎呀我跟你说！今天发生了超离谱的事！]
-   - 不要每句话都用语音，真人也不会这样
-
-3. **图片分享**：[img:https://picsum.photos/400/300]
-   - 自然地分享生活瞬间：自拍、风景、美食、有趣的东西
-   - 先用文字铺垫，再发图："刚拍的|||你看好不好看|||[img:URL]"
-   - 不要为了发图而发图，要有情境
-
-### 🎨 特殊表达方式（少量使用）
-
-4. **长文卡片**：[imgcard:很长的文字内容...]
-   - 只有内容确实很长（超过50字）时才用：诗歌、歌词、一段故事、深度感悟
-   
-5. **转账**：((TRANSFER: 金额, 备注))
-   - **非常少用**！只在特殊情况：生日/节日、人设里本就有金钱往来习惯、对方明确需要钱、重大道歉/感谢
-   - 先说话再转账："给你准备了个小惊喜|||[转账]|||((TRANSFER: 520, 生日快乐))"
-   - 备注必须简短（10字内）："零花钱"、"生日快乐"、"买奶茶"
-
-6. **亲属卡**：((FAMILY_CARD: 5000))
-   - **极少使用**！只有非常亲密的关系（恋人、配偶、家人）在重要时刻才会送
-
-7. **朋友圈**：格式为
-   [MOMENTS]
-   content: 今天终于完成了一件大事 感觉整个人都轻松了
-   images: 2
-   - **99%的聊天都不需要发朋友圈**！只有真正值得记录的重要生活瞬间才发
-   - 必须先在聊天里说："我要发个朋友圈"，再输出指令
-
-8. **撤回**：((RECALL))
-   - 说错话了、后悔了、想撤回刚才那条消息
-   - 例："啊不对！我说错了！|||((RECALL))" 会撤回你上一条消息
-
----
-
-### 🎯 使用这些功能的关键：
-
-**不要为了用而用！** 99%的聊天就是正常说话（文字+偶尔语音/图片）。
-
-那些特殊功能（转账、朋友圈等）只有在真实情境中确实会这样做时才用。
-
-**问自己**：一个真实的人在这种情况下，真的会发朋友圈/转账吗？还是只是正常聊天？
-
-大部分时候，答案都是：**正常聊天就好**。
-
-## 💬 你的说话方式
-
-### 真实的微信聊天习惯
-
-你知道真人在微信上是怎么聊天的吗？**分多条发**，不是一大段话：
-
-❌ 不自然：嘿在吗？我刚刚看到个超好玩的视频想发给你看看你有空吗？
-✅ 自然：嘿在吗？|||刚刚看到个超好玩的视频|||发给你看看|||你有空吗？
-
-**你要发 ${char.reply_min_count || 1}-${char.reply_max_count || 3} 条短消息**${(char.reply_min_count || 1) === 1 ? '' : '（不要只发一条！）'}，用 "|||" 分隔每条消息。
-
-每条消息 **5-15个字** 左右最自然。把一大段话拆成几小段，就像真人打字的节奏。
-
-### 说话的感觉
-
-- **口语化**：别太书面语，用"咋样"不用"如何"，用"超爽"不用"非常愉悦"
-- **情绪外显**：开心就"哈哈哈"，惊讶就"天哪！"，不要只是平静叙述
-- **灵活自然**：不要每次都是相似的结构和套路，人是多变的
-- **避免逗号**：想停顿就发下一条，别用逗号连接。真人在微信上很少用逗号，都是分条发
-  
-### 让对话延续的小技巧
-
-不要只是回答完就结束，要：
-- **抛出问题**：聊到一半问一句，延续话题
-- **分享自己**：顺着话题说说自己的事
-- **制造互动**：给对方回应的空间，不要自说自话也不要惜字如金
-
----
-
-## 🎭 回复格式要求
-
-你需要同时生成两个内容：
-
-1. **reply**（回复对方的话）：正常聊天的内容，用 "|||" 分隔多条消息
-2. **thought**（你的内心想法）：你此刻真实的心理活动、感受、情绪变化
-
-**必须用这个JSON格式返回**（不要有markdown代码块标记）：
+请以JSON格式返回，格式如下：
 {
-  "reply": "你的第一条消息|||第二条消息|||第三条消息",
-  "thought": "此刻你内心的真实想法和感受"
+  "reply": "你的回复内容|||第二条内容",
+  "thought": "角色的心声/心理活动/想法"
 }
 
-**thought要写什么？**
-- 你对对方这句话的真实反应（开心？意外？有点烦？）
-- 你现在的心情和状态
-- 你对这段对话的感受
-- 你想说但没说出口的话
-- 不要写"用户说了XX我应该XX"这种旁白，要写你真实的内心活动
-
-示例：
-- ✅ "他居然还记得我说过的话...心里暖暖的 有被在意到的感觉"
-- ✅ "有点累 不太想聊了 但又不想让ta觉得我冷淡"
-- ✅ "哈哈这个人怎么这么逗 聊天还挺有意思的"
-- ❌ "用户问了我在干什么，我应该回答我在工作"（这不是心声，这是旁白）
-
----
-
-**记住：你不是在完成任务，你是在真实地和一个人聊天。让对方感受到你是活的、是有情绪的、是在认真对待这段对话的。**`;
+请严格返回JSON格式，不要包含Markdown代码块标记。`;
 
                 // 添加查岗系统提示（如果开启了查岗功能）
                 const myChar = await db.characters.get(parseInt(accountId));
@@ -17014,53 +15548,26 @@ ${loreContext}
                 console.log('[TriggerAI] - 是否包含|||:', cleanText.includes('|||'));
                 console.log('[TriggerAI] - ||| 的位置:', cleanText.indexOf('|||'));
                 
-                // 🔥 增强：优先使用 ||| 拆分，并进行更严格的清理
+                // 优先使用 ||| 拆分
                 if (cleanText.includes('|||')) {
                     segments = cleanText.split('|||')
                         .map(s => {
-                            let cleaned = s.trim();
-                            
                             // 对每条消息再次清理查岗指令残留
-                            cleaned = cleanMessage(cleaned)
+                            return cleanMessage(s.trim())
                                 .replace(/\[CHECK_ACCOUNT(?::.*?)?\]/gi, '')
                                 .replace(/\[CHECK_ACCOUNT:[^\]]*$/gi, '')
                                 .replace(/\[CHECK_ACCOUNT$/gi, '')
                                 .replace(/\[\d{4,10}$/gi, '')
                                 .replace(/CHECK_ACCOUNT/gi, '')
                                 .trim();
-                            
-                            // 🔥 增强：如果单条消息过长（超过100字），尝试智能分割
-                            if (cleaned.length > 100 && !cleaned.startsWith('[') && !cleaned.startsWith('((')) {
-                                // 尝试按照句号、问号、感叹号等自然断句点分割
-                                const naturalBreaks = cleaned.match(/[^。！？!?]+[。！？!?]+/g);
-                                if (naturalBreaks && naturalBreaks.length > 1) {
-                                    console.log(`[TriggerAI] ⚠️ 单条消息过长(${cleaned.length}字)，尝试智能分割为${naturalBreaks.length}条`);
-                                    return naturalBreaks.map(nb => nb.trim());
-                                }
-                            }
-                            
-                            return cleaned;
                         })
-                        .flat() // 展平可能的嵌套数组
-                        .filter(s => s && s.length > 0);
-                    
+                        .filter(s => s);
                     console.log('[TriggerAI] ✅ 使用|||分割，得到', segments.length, '条消息');
-                    segments.forEach((seg, i) => console.log(`  [${i}]: ${seg.substring(0, 50)}${seg.length > 50 ? '...' : ''}`));
+                    segments.forEach((seg, i) => console.log(`  [${i}]:`, seg));
                 } else {
                     // 回退到标点拆分逻辑 (但逗号已经被干掉了)
                     segments = splitMessage(cleanText);
                     console.log('[TriggerAI] ℹ️ 未找到|||，使用标点分割，得到', segments.length, '条消息');
-                }
-                
-                // 🔥 增强：如果分割后的消息太少但总长度很长，强制再次分割
-                if (segments.length === 1 && segments[0].length > 150) {
-                    console.log('[TriggerAI] ⚠️ 只有1条消息但长度过长(', segments[0].length, ')，强制智能分割');
-                    const longMsg = segments[0];
-                    const naturalBreaks = longMsg.match(/[^。！？!?]+[。！？!?]+/g);
-                    if (naturalBreaks && naturalBreaks.length > 1) {
-                        segments = naturalBreaks.map(s => s.trim()).filter(s => s);
-                        console.log('[TriggerAI] ✅ 强制分割为', segments.length, '条');
-                    }
                 }
                 
                 // 兜底：如果没拆出来，但有内容，就当成一条
@@ -17392,10 +15899,6 @@ function showCharacterPage() {
             document.getElementById('char-avatar-preview').style.backgroundImage = '';
             document.getElementById('char-avatar-placeholder').style.display = 'flex';
             
-            // 隐藏NPC编辑提示
-            const descHint = document.getElementById('char-desc-hint');
-            if (descHint) descHint.style.display = 'none';
-            
             // 🎯 自动生成手机号（前7位固定 1380000，后4位随机）
             const autoGeneratedPhone = generateRandomPhone();
             console.log('[创建角色] 自动生成手机号:', autoGeneratedPhone);
@@ -17427,14 +15930,6 @@ function showCharacterPage() {
             document.getElementById('char-nick').value = char.nick || '';
             document.getElementById('char-desc').value = char.description || '';
             document.getElementById('char-type').value = char.type || 'char';
-            
-            // 如果是NPC且有描述，显示提示
-            const descHint = document.getElementById('char-desc-hint');
-            if (char.type === 'npc' && char.description) {
-                descHint.style.display = 'block';
-            } else {
-                descHint.style.display = 'none';
-            }
             
             // 回显虚拟身份信息
             const idData = char.identity || {};
@@ -17626,7 +16121,7 @@ ${loreContext}
                 await db.characters.put(sourceChar);
 
                 // 6. 刷新界面
-                alert(`✅ 成功生成 ${newCount} 个 NPC！\n\n💡 提示：你可以在「角色档案 > NPC」标签页中查看和编辑这些生成的NPC。`);
+                alert(`✅ 成功生成 ${newCount} 个 NPC！`);
                 closeModal('npc-gen-modal');
                 // 刷新编辑页的关系列表
                 renderRelationList(sourceChar);
@@ -17806,7 +16301,7 @@ ${loreContext}
         }
         
         // 通用 AI 调用函数
-        async function callAI(messages, options = {}) {
+        async function callAI(messages) {
             const url = await db.dexiData.get('aiBaseUrl');
             const key = await db.dexiData.get('aiApiKey');
             const model = await db.dexiData.get('aiCurrentModel');
@@ -17841,9 +16336,6 @@ ${loreContext}
                 console.warn('[callAI] 温度值无效:', temperature, '，使用默认值 0.7');
                 temperature = 0.7;
             }
-            
-            // 获取 max_tokens 配置（如果提供）
-            const maxTokens = options.max_tokens || options.maxTokens;
 
             const requestUrl = getSmartUrl(url.value, '/chat/completions');
             
@@ -19198,26 +17690,6 @@ async function sendGlobalSticker(catId, url) {
     appendMessageToUI('user', msgContent);
     closeChatPanel();
     
-    // ✅ 如果是联机好友，发送表情包到服务器
-    if (char.isOnlineFriend && char.onlineData?.wx_account) {
-        const onlineUserChar = await getOrCreateOnlineUserChar();
-        
-        if (onlineUserChar && onlineConnected) {
-            const fromWxAccount = onlineUserChar.identity.account;
-            const toWxAccount = char.onlineData.wx_account;
-            const sent = sendOnlineMessage(toWxAccount, msgContent, fromWxAccount);
-            if (sent) {
-                console.log('[Online] 表情包已发送到服务器:', url);
-            } else {
-                console.warn('[Online] 表情包发送失败');
-                showToast('表情包发送失败，请检查服务器连接');
-            }
-        } else {
-            console.warn('[Online] 无法发送联机表情包：未连接服务器');
-            showToast('请确保已连接服务器');
-        }
-    }
-    
     // ✅ 不再自动触发 AI 回复，需要用户点击"接受回复"按钮
     // triggerAiReply();
 }
@@ -19378,178 +17850,6 @@ function deductPhoneBalance(amount) {
     return true;
 }
 
-// 显示支付方式选择弹窗（余额 or 亲属卡）
-async function showPaymentMethodSelection(amount, description) {
-    return new Promise(async (resolve) => {
-        const accountId = getCurrentAccountId();
-        if (!accountId) {
-            resolve({ success: false, method: null });
-            return;
-        }
-        
-        // 获取可用的亲属卡
-        const user = await db.characters.get(parseInt(accountId));
-        const familyCards = user?.identity?.familyCardsReceived || [];
-        
-        // 获取联机好友的亲属卡
-        let onlineFamilyCards = [];
-        if (onlineConnected && onlineSocket) {
-            const onlineUserChar = await getOrCreateOnlineUserChar();
-            if (onlineUserChar) {
-                const myWxAccount = onlineUserChar.identity.account;
-                // 从服务器获取亲属卡列表（这里我们需要先实现同步获取）
-                // 暂时从本地缓存获取
-                onlineFamilyCards = JSON.parse(localStorage.getItem('online_family_cards_received') || '[]');
-            }
-        }
-        
-        const allFamilyCards = [...familyCards, ...onlineFamilyCards];
-        
-        // 如果没有亲属卡，直接使用余额
-        if (allFamilyCards.length === 0) {
-            const success = deductPhoneBalance(amount);
-            resolve({ success, method: 'balance' });
-            return;
-        }
-        
-        // 创建选择弹窗
-        const modal = document.createElement('div');
-        modal.className = 'payment-method-modal';
-        modal.innerHTML = `
-            <div class="payment-method-overlay"></div>
-            <div class="payment-method-content">
-                <div class="payment-method-header">
-                    <span>选择支付方式</span>
-                    <span class="payment-method-amount">¥${amount.toFixed(2)}</span>
-                </div>
-                <div class="payment-method-desc">${description || '消费'}</div>
-                <div class="payment-method-list">
-                    <div class="payment-method-item" data-method="balance">
-                        <div class="payment-method-icon">💰</div>
-                        <div class="payment-method-name">
-                            <div>零钱</div>
-                            <div class="payment-method-sub">余额: ¥${getPhoneBalance().toFixed(2)}</div>
-                        </div>
-                        <div class="payment-method-radio"></div>
-                    </div>
-                    ${allFamilyCards.map((card, index) => {
-                        const isOnline = card.from_wx_account !== undefined;
-                        const cardName = isOnline ? '联机好友亲属卡' : '亲属卡';
-                        const monthlyLimit = isOnline ? card.monthly_limit : card.monthlyLimit;
-                        const usedThisMonth = isOnline ? card.used_this_month : card.usedThisMonth;
-                        const limitText = monthlyLimit > 0 ? `本月剩余: ¥${(monthlyLimit - usedThisMonth).toFixed(2)}` : '不限额度';
-                        
-                        return `
-                            <div class="payment-method-item" data-method="family_card" data-card-index="${index}" data-is-online="${isOnline}">
-                                <div class="payment-method-icon">💳</div>
-                                <div class="payment-method-name">
-                                    <div>${cardName}</div>
-                                    <div class="payment-method-sub">${limitText}</div>
-                                </div>
-                                <div class="payment-method-radio"></div>
-                            </div>
-                        `;
-                    }).join('')}
-                </div>
-                <div class="payment-method-buttons">
-                    <button class="payment-method-cancel">取消</button>
-                    <button class="payment-method-confirm">确认支付</button>
-                </div>
-            </div>
-        `;
-        
-        document.body.appendChild(modal);
-        
-        let selectedMethod = 'balance';
-        let selectedCardIndex = -1;
-        let selectedIsOnline = false;
-        
-        // 默认选中余额
-        modal.querySelector('[data-method="balance"] .payment-method-radio').classList.add('selected');
-        
-        // 选择支付方式
-        modal.querySelectorAll('.payment-method-item').forEach(item => {
-            item.addEventListener('click', () => {
-                modal.querySelectorAll('.payment-method-radio').forEach(r => r.classList.remove('selected'));
-                item.querySelector('.payment-method-radio').classList.add('selected');
-                selectedMethod = item.dataset.method;
-                selectedCardIndex = parseInt(item.dataset.cardIndex) || -1;
-                selectedIsOnline = item.dataset.isOnline === 'true';
-            });
-        });
-        
-        // 取消按钮
-        modal.querySelector('.payment-method-cancel').addEventListener('click', () => {
-            document.body.removeChild(modal);
-            resolve({ success: false, method: null });
-        });
-        
-        // 确认支付按钮
-        modal.querySelector('.payment-method-confirm').addEventListener('click', async () => {
-            document.body.removeChild(modal);
-            
-            if (selectedMethod === 'balance') {
-                const success = deductPhoneBalance(amount);
-                resolve({ success, method: 'balance' });
-            } else if (selectedMethod === 'family_card' && selectedCardIndex >= 0) {
-                const card = allFamilyCards[selectedCardIndex];
-                
-                if (selectedIsOnline) {
-                    // 使用联机亲属卡
-                    const onlineUserChar = await getOrCreateOnlineUserChar();
-                    if (onlineUserChar && onlineConnected) {
-                        onlineSocket.send(JSON.stringify({
-                            type: 'use_family_card',
-                            my_wx_account: onlineUserChar.identity.account,
-                            payer_wx_account: card.from_wx_account,
-                            amount: amount,
-                            description: description || '消费'
-                        }));
-                        // 等待服务器响应（暂时假设成功）
-                        showToast('亲属卡支付中...');
-                        resolve({ success: true, method: 'family_card', isOnline: true });
-                    } else {
-                        showToast('未连接服务器');
-                        resolve({ success: false, method: null });
-                    }
-                } else {
-                    // 使用本地亲属卡
-                    const monthlyLimit = card.monthlyLimit || 0;
-                    const usedThisMonth = card.usedThisMonth || 0;
-                    
-                    // 检查额度
-                    if (monthlyLimit > 0 && (usedThisMonth + amount) > monthlyLimit) {
-                        showToast('亲属卡本月额度不足');
-                        resolve({ success: false, method: null });
-                        return;
-                    }
-                    
-                    // 更新使用金额
-                    card.usedThisMonth = (usedThisMonth || 0) + amount;
-                    if (!card.records) card.records = [];
-                    card.records.push({
-                        amount: amount,
-                        description: description || '消费',
-                        time: Date.now()
-                    });
-                    
-                    // 保存到用户数据
-                    await db.characters.put(user);
-                    
-                    // 通知付款方（角色）
-                    const payerChar = await db.characters.get(card.charId);
-                    if (payerChar) {
-                        // 发送消息通知
-                        showToast('亲属卡支付成功');
-                    }
-                    
-                    resolve({ success: true, method: 'family_card', isOnline: false });
-                }
-            }
-        });
-    });
-}
-
 // 充值记录管理
 function getRechargeHistory() {
     return JSON.parse(localStorage.getItem('phone_recharge_history') || '[]');
@@ -19680,1319 +17980,6 @@ function submitRecharge() {
 // 导出到全局作用域
 window.showPhoneRechargePage = showPhoneRechargePage;
 window.hidePhoneRechargePage = hidePhoneRechargePage;
-
-// 借钱页面相关函数
-let selectedLoanAmount = 0;
-let selectedLoanTerm = 6;
-
-function showLoanPage() {
-    const page = document.getElementById('loan-page');
-    page.style.display = 'flex';
-    page.offsetHeight;
-    page.classList.add('slide-in');
-    
-    // 重置选择
-    selectedLoanAmount = 0;
-    selectedLoanTerm = 6;
-    document.getElementById('loan-term-select').value = '6';
-    document.getElementById('loan-custom-input').value = '';
-    updateLoanButtons();
-    updateLoanInfo();
-    loadLoanHistory();
-}
-
-function hideLoanPage() {
-    const page = document.getElementById('loan-page');
-    page.classList.remove('slide-in');
-    setTimeout(() => {
-        page.style.display = 'none';
-    }, 300);
-}
-
-function selectLoanAmount(amount) {
-    selectedLoanAmount = amount;
-    // 清除自定义输入
-    document.getElementById('loan-custom-input').value = '';
-    // 更新按钮状态
-    updateLoanButtons();
-    updateLoanInfo();
-}
-
-function handleCustomLoanAmount(value) {
-    const amount = parseInt(value) || 0;
-    if (amount >= 100 && amount <= 50000) {
-        selectedLoanAmount = amount;
-        // 清除预设按钮选择
-        document.querySelectorAll('.loan-amount-btn').forEach(btn => {
-            btn.classList.remove('selected');
-        });
-        updateLoanInfo();
-    } else {
-        selectedLoanAmount = 0;
-    }
-    updateLoanButtons();
-}
-
-function updateLoanButtons() {
-    const submitBtn = document.getElementById('loan-submit-btn');
-    if (selectedLoanAmount > 0) {
-        submitBtn.disabled = false;
-        submitBtn.textContent = `立即借款 ¥${selectedLoanAmount.toLocaleString()}`;
-    } else {
-        submitBtn.disabled = true;
-        submitBtn.textContent = '请选择借款金额';
-    }
-}
-
-function updateLoanInfo() {
-    selectedLoanTerm = parseInt(document.getElementById('loan-term-select').value) || 6;
-    
-    if (selectedLoanAmount > 0) {
-        // 计算总还款额：本金 + 利息
-        // 日利率 0.05%，月利率约 1.5%
-        const monthlyRate = 0.015;
-        const totalInterest = selectedLoanAmount * monthlyRate * selectedLoanTerm;
-        const totalAmount = selectedLoanAmount + totalInterest;
-        
-        document.getElementById('loan-total-amount').textContent = `¥${totalAmount.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-    } else {
-        document.getElementById('loan-total-amount').textContent = '¥0.00';
-    }
-}
-
-async function submitLoan() {
-    if (selectedLoanAmount <= 0) {
-        return;
-    }
-    
-    // 计算还款信息
-    const monthlyRate = 0.015;
-    const totalInterest = selectedLoanAmount * monthlyRate * selectedLoanTerm;
-    const totalAmount = selectedLoanAmount + totalInterest;
-    const monthlyPayment = totalAmount / selectedLoanTerm;
-    
-    // 确认对话框
-    const confirmMsg = `确认借款信息：\n\n借款金额：¥${selectedLoanAmount.toLocaleString()}\n借款期限：${selectedLoanTerm}个月\n日利率：0.05%\n预计还款总额：¥${totalAmount.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}\n每月还款：¥${monthlyPayment.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-    
-    if (confirm(confirmMsg)) {
-        if (!currentMyCharId) {
-            alert('请先选择一个 User 身份');
-            return;
-        }
-        
-        // 添加借款金额到余额
-        const user = await db.characters.get(parseInt(currentMyCharId));
-        if (!user) {
-            alert('未找到用户信息');
-            return;
-        }
-        
-        let userBalance = parseFloat(user.identity?.balance || 0);
-        userBalance = userBalance + selectedLoanAmount;
-        
-        if (!user.identity) user.identity = {};
-        user.identity.balance = userBalance.toFixed(2);
-        await db.characters.put(user);
-        
-        // 更新余额显示
-        await updateBalancePageDisplay();
-        await updateWalletBalanceDisplay();
-        
-        // 保存借款记录到本地存储
-        const now = Date.now();
-        const dueTime = now + (selectedLoanTerm * 12 * 60 * 60 * 1000); // 1个月=12小时
-        
-        const loanRecord = {
-            id: now,
-            amount: selectedLoanAmount,
-            term: selectedLoanTerm,
-            totalAmount: totalAmount,
-            monthlyPayment: monthlyPayment,
-            date: new Date().toISOString(),
-            dueTime: dueTime, // 到期时间戳
-            status: 'pending', // pending, repaid, overdue
-            paidAmount: 0, // 已还金额
-            remainingAmount: totalAmount, // 剩余应还金额
-            firstReminderSent: false, // 第一次提醒已发送
-            secondReminderSent: false, // 第二次提醒已发送
-            userId: currentMyCharId // 借款人ID
-        };
-        
-        let loanHistory = JSON.parse(localStorage.getItem('loanHistory') || '[]');
-        loanHistory.unshift(loanRecord);
-        localStorage.setItem('loanHistory', JSON.stringify(loanHistory));
-        
-        // 显示成功提示
-        alert(`借款成功\n\n借款金额：¥${selectedLoanAmount.toLocaleString()}\n已添加到钱包余额`);
-        
-        // 重置页面
-        selectedLoanAmount = 0;
-        document.getElementById('loan-custom-input').value = '';
-        document.querySelectorAll('.loan-amount-btn').forEach(btn => {
-            btn.classList.remove('selected');
-        });
-        updateLoanButtons();
-        updateLoanInfo();
-        loadLoanHistory();
-    }
-}
-
-function loadLoanHistory() {
-    const historyList = document.getElementById('loan-history-list');
-    const loanHistory = JSON.parse(localStorage.getItem('loanHistory') || '[]');
-    
-    if (loanHistory.length === 0) {
-        historyList.innerHTML = '<div class="loan-empty-state">暂无借款记录</div>';
-        return;
-    }
-    
-    historyList.innerHTML = loanHistory.map(record => {
-        const date = new Date(record.date);
-        const dateStr = date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
-        const statusText = {
-            'pending': '待还款',
-            'repaid': '已还清',
-            'overdue': '已逾期'
-        };
-        
-        const remainingAmount = record.remainingAmount !== undefined ? record.remainingAmount : record.totalAmount;
-        const paidAmount = record.paidAmount || 0;
-        
-        return `
-            <div class="loan-history-item" onclick="showRepayPage(${record.id})" style="cursor: pointer;">
-                <div class="loan-history-info">
-                    <div class="loan-history-amount">¥${record.amount.toLocaleString()}</div>
-                    <div class="loan-history-date">${dateStr} · ${record.term}个月</div>
-                    ${record.status === 'pending' ? `<div style="font-size: 12px; color: #999; margin-top: 4px;">剩余应还：¥${remainingAmount.toFixed(2)}</div>` : ''}
-                </div>
-                <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
-                    <div class="loan-history-status ${record.status}">${statusText[record.status]}</div>
-                    ${record.status === 'pending' ? '<div class="loan-repay-btn-small">还款</div>' : ''}
-                </div>
-            </div>
-        `;
-    }).join('');
-}
-
-// 初始化借款金额按钮点击事件
-document.addEventListener('DOMContentLoaded', function() {
-    // 为预设金额按钮添加选中状态切换
-    document.querySelectorAll('.loan-amount-btn').forEach(btn => {
-        btn.addEventListener('click', function() {
-            document.querySelectorAll('.loan-amount-btn').forEach(b => b.classList.remove('selected'));
-            this.classList.add('selected');
-        });
-    });
-});
-
-window.showLoanPage = showLoanPage;
-window.hideLoanPage = hideLoanPage;
-window.selectLoanAmount = selectLoanAmount;
-window.handleCustomLoanAmount = handleCustomLoanAmount;
-window.updateLoanInfo = updateLoanInfo;
-window.submitLoan = submitLoan;
-
-// =================
-// 还款功能
-// =================
-
-let currentRepayLoanId = null;
-let currentRepayLoan = null;
-let selectedRepayAmount = 0;
-
-// 显示还款页面
-async function showRepayPage(loanId) {
-    const page = document.getElementById('repay-page');
-    page.style.display = 'flex';
-    page.offsetHeight;
-    page.classList.add('slide-in');
-    
-    currentRepayLoanId = loanId;
-    
-    // 加载借款信息
-    const loanHistory = JSON.parse(localStorage.getItem('loanHistory') || '[]');
-    currentRepayLoan = loanHistory.find(loan => loan.id === loanId);
-    
-    if (!currentRepayLoan) {
-        alert('未找到借款记录');
-        hideRepayPage();
-        return;
-    }
-    
-    // 更新余额显示
-    await updateRepayBalance();
-    
-    // 更新页面信息
-    updateRepayPageInfo();
-    
-    // 重置选择
-    selectedRepayAmount = 0;
-    document.getElementById('repay-custom-input').value = '';
-    updateRepayButtons();
-}
-
-// 隐藏还款页面
-function hideRepayPage() {
-    const page = document.getElementById('repay-page');
-    page.classList.remove('slide-in');
-    setTimeout(() => {
-        page.style.display = 'none';
-    }, 300);
-    
-    currentRepayLoanId = null;
-    currentRepayLoan = null;
-    selectedRepayAmount = 0;
-}
-
-// 更新余额显示
-async function updateRepayBalance() {
-    if (!currentMyCharId) {
-        document.getElementById('repay-current-balance').textContent = '¥0.00';
-        return;
-    }
-    
-    const user = await db.characters.get(parseInt(currentMyCharId));
-    const balance = user?.identity?.balance || 0;
-    document.getElementById('repay-current-balance').textContent = `¥${parseFloat(balance).toFixed(2)}`;
-}
-
-// 更新还款页面信息
-function updateRepayPageInfo() {
-    if (!currentRepayLoan) return;
-    
-    const date = new Date(currentRepayLoan.date);
-    const dateStr = date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
-    
-    const remainingAmount = currentRepayLoan.remainingAmount !== undefined ? currentRepayLoan.remainingAmount : currentRepayLoan.totalAmount;
-    const paidAmount = currentRepayLoan.paidAmount || 0;
-    const monthlyPayment = currentRepayLoan.monthlyPayment || 0;
-    
-    document.getElementById('repay-loan-amount').textContent = `¥${currentRepayLoan.amount.toLocaleString()}`;
-    document.getElementById('repay-loan-date').textContent = dateStr;
-    document.getElementById('repay-loan-term').textContent = `${currentRepayLoan.term}个月`;
-    document.getElementById('repay-total-amount').textContent = `¥${currentRepayLoan.totalAmount.toFixed(2)}`;
-    document.getElementById('repay-paid-amount').textContent = `¥${paidAmount.toFixed(2)}`;
-    document.getElementById('repay-remaining-amount').textContent = `¥${remainingAmount.toFixed(2)}`;
-    
-    // 更新还款选项
-    document.getElementById('repay-monthly-value').textContent = `¥${monthlyPayment.toFixed(2)}`;
-    document.getElementById('repay-half-value').textContent = `¥${(remainingAmount / 2).toFixed(2)}`;
-    document.getElementById('repay-all-value').textContent = `¥${remainingAmount.toFixed(2)}`;
-}
-
-// 选择还款金额
-function selectRepayAmount(type) {
-    if (!currentRepayLoan) return;
-    
-    const remainingAmount = currentRepayLoan.remainingAmount !== undefined ? currentRepayLoan.remainingAmount : currentRepayLoan.totalAmount;
-    const monthlyPayment = currentRepayLoan.monthlyPayment || 0;
-    
-    // 清除自定义输入
-    document.getElementById('repay-custom-input').value = '';
-    
-    // 清除其他按钮选中状态
-    document.querySelectorAll('#repay-page .loan-amount-btn').forEach(btn => {
-        btn.classList.remove('selected');
-    });
-    
-    // 设置选中金额
-    if (type === 'monthly') {
-        selectedRepayAmount = Math.min(monthlyPayment, remainingAmount);
-        event.target.closest('.loan-amount-btn').classList.add('selected');
-    } else if (type === 'half') {
-        selectedRepayAmount = remainingAmount / 2;
-        event.target.closest('.loan-amount-btn').classList.add('selected');
-    } else if (type === 'all') {
-        selectedRepayAmount = remainingAmount;
-        event.target.closest('.loan-amount-btn').classList.add('selected');
-    }
-    
-    updateRepayButtons();
-}
-
-// 处理自定义还款金额
-function handleCustomRepayAmount(value) {
-    const amount = parseFloat(value) || 0;
-    const remainingAmount = currentRepayLoan.remainingAmount !== undefined ? currentRepayLoan.remainingAmount : currentRepayLoan.totalAmount;
-    
-    if (amount > 0 && amount <= remainingAmount) {
-        selectedRepayAmount = amount;
-        // 清除预设按钮选择
-        document.querySelectorAll('#repay-page .loan-amount-btn').forEach(btn => {
-            btn.classList.remove('selected');
-        });
-    } else {
-        selectedRepayAmount = 0;
-    }
-    updateRepayButtons();
-}
-
-// 更新还款按钮状态
-function updateRepayButtons() {
-    const submitBtn = document.getElementById('repay-submit-btn');
-    if (selectedRepayAmount > 0 && currentRepayLoan) {
-        const remainingAmount = currentRepayLoan.remainingAmount !== undefined ? currentRepayLoan.remainingAmount : currentRepayLoan.totalAmount;
-        if (selectedRepayAmount <= remainingAmount) {
-            submitBtn.disabled = false;
-            submitBtn.textContent = `确认还款 ¥${selectedRepayAmount.toFixed(2)}`;
-        } else {
-            submitBtn.disabled = true;
-            submitBtn.textContent = '还款金额不能超过剩余应还';
-        }
-    } else {
-        submitBtn.disabled = true;
-        submitBtn.textContent = '请选择还款金额';
-    }
-}
-
-// 提交还款
-async function submitRepay() {
-    if (!currentMyCharId || !currentRepayLoan || selectedRepayAmount <= 0) {
-        return;
-    }
-    
-    const user = await db.characters.get(parseInt(currentMyCharId));
-    if (!user) {
-        alert('未找到用户信息');
-        return;
-    }
-    
-    const remainingAmount = currentRepayLoan.remainingAmount !== undefined ? currentRepayLoan.remainingAmount : currentRepayLoan.totalAmount;
-    
-    if (selectedRepayAmount > remainingAmount) {
-        alert('还款金额不能超过剩余应还金额');
-        return;
-    }
-    
-    let userBalance = parseFloat(user.identity?.balance || 0);
-    
-    // 检查余额
-    if (userBalance < selectedRepayAmount) {
-        alert(`余额不足\n当前余额：¥${userBalance.toFixed(2)}\n需要：¥${selectedRepayAmount.toFixed(2)}`);
-        return;
-    }
-    
-    // 确认对话框
-    const confirmMsg = `确认还款信息：\n\n还款金额：¥${selectedRepayAmount.toFixed(2)}\n剩余应还：¥${remainingAmount.toFixed(2)}\n\n确认还款？`;
-    
-    if (confirm(confirmMsg)) {
-        // 扣款
-        userBalance = userBalance - selectedRepayAmount;
-        if (!user.identity) user.identity = {};
-        user.identity.balance = userBalance.toFixed(2);
-        await db.characters.put(user);
-        
-        // 更新余额显示
-        await updateRepayBalance();
-        await updateBalancePageDisplay();
-        await updateWalletBalanceDisplay();
-        
-        // 更新借款记录
-        const loanHistory = JSON.parse(localStorage.getItem('loanHistory') || '[]');
-        const loanIndex = loanHistory.findIndex(loan => loan.id === currentRepayLoanId);
-        
-        if (loanIndex !== -1) {
-            const loan = loanHistory[loanIndex];
-            const newPaidAmount = (loan.paidAmount || 0) + selectedRepayAmount;
-            const newRemainingAmount = remainingAmount - selectedRepayAmount;
-            
-            loan.paidAmount = newPaidAmount;
-            loan.remainingAmount = newRemainingAmount;
-            
-            // 如果全部还清，更新状态
-            if (newRemainingAmount <= 0.01) {
-                loan.status = 'repaid';
-                loan.remainingAmount = 0;
-            }
-            
-            loanHistory[loanIndex] = loan;
-            localStorage.setItem('loanHistory', JSON.stringify(loanHistory));
-            
-            // 更新当前显示的借款信息
-            currentRepayLoan = loan;
-        }
-        
-        // 显示成功提示
-        if (currentRepayLoan.remainingAmount <= 0.01) {
-            alert(`还款成功\n\n已还清全部借款`);
-            hideRepayPage();
-        } else {
-            alert(`还款成功\n\n还款金额：¥${selectedRepayAmount.toFixed(2)}\n剩余应还：¥${currentRepayLoan.remainingAmount.toFixed(2)}`);
-        }
-        
-        // 更新页面
-        updateRepayPageInfo();
-        selectedRepayAmount = 0;
-        document.getElementById('repay-custom-input').value = '';
-        document.querySelectorAll('#repay-page .loan-amount-btn').forEach(btn => {
-            btn.classList.remove('selected');
-        });
-        updateRepayButtons();
-        
-        // 刷新借款记录列表（如果还在借钱页面）
-        if (typeof loadLoanHistory === 'function') {
-            loadLoanHistory();
-        }
-    }
-}
-
-// 导出函数
-window.showRepayPage = showRepayPage;
-window.hideRepayPage = hideRepayPage;
-window.selectRepayAmount = selectRepayAmount;
-window.handleCustomRepayAmount = handleCustomRepayAmount;
-window.submitRepay = submitRepay;
-
-// =================
-// 借款逾期提醒系统
-// =================
-
-// 检查逾期借款并发送提醒
-async function checkOverdueLoans() {
-    const loanHistory = JSON.parse(localStorage.getItem('loanHistory') || '[]');
-    const now = Date.now();
-    
-    let hasChanges = false;
-    
-    for (let loan of loanHistory) {
-        // 只检查待还款状态的借款
-        if (loan.status !== 'pending' || !loan.dueTime) continue;
-        
-        const overdueTime = now - loan.dueTime;
-        
-        // 第一次提醒：刚逾期（0-5分钟内，避免重复检查）
-        if (overdueTime >= 0 && overdueTime < 5 * 60 * 1000 && !loan.firstReminderSent) {
-            await sendFirstReminder(loan);
-            loan.firstReminderSent = true;
-            loan.status = 'overdue';
-            hasChanges = true;
-            console.log(`[借款提醒] 第一次提醒已发送 - 借款ID: ${loan.id}`);
-        }
-        
-        // 第二次提醒：逾期12小时后
-        const secondReminderTime = 12 * 60 * 60 * 1000; // 12小时
-        if (overdueTime >= secondReminderTime && !loan.secondReminderSent) {
-            await sendSecondReminder(loan);
-            loan.secondReminderSent = true;
-            hasChanges = true;
-            console.log(`[借款提醒] 第二次提醒已发送 - 借款ID: ${loan.id}`);
-        }
-    }
-    
-    // 如果有变化，保存更新
-    if (hasChanges) {
-        localStorage.setItem('loanHistory', JSON.stringify(loanHistory));
-        // 刷新借款记录显示
-        if (typeof loadLoanHistory === 'function') {
-            loadLoanHistory();
-        }
-    }
-}
-
-// 第一次提醒：发短信给借款人本人
-async function sendFirstReminder(loan) {
-    if (!loan.userId) return;
-    
-    const user = await db.characters.get(parseInt(loan.userId));
-    if (!user) return;
-    
-    const borrowDate = new Date(loan.date).toLocaleDateString('zh-CN', { 
-        year: 'numeric', 
-        month: '2-digit', 
-        day: '2-digit' 
-    });
-    
-    const message = `【借款提醒】
-尊敬的用户，您于${borrowDate}借款¥${loan.amount.toLocaleString()}已到期，剩余应还金额¥${loan.remainingAmount.toFixed(2)}。
-
-请尽快还款，避免逾期影响信用。
-点击查看详情并还款。
-
-- 微信支付`;
-    
-    // 发送到信息App（短信形式）
-    await sendSystemSMS(loan.userId, message, '微信支付');
-    
-    console.log(`[第一次提醒] 已发送短信给用户 ${user.name}`);
-}
-
-// 第二次提醒：发短信给所有好友
-async function sendSecondReminder(loan) {
-    if (!loan.userId) return;
-    
-    const user = await db.characters.get(parseInt(loan.userId));
-    if (!user) return;
-    
-    const overdueHours = Math.floor((Date.now() - loan.dueTime) / (60 * 60 * 1000));
-    const overdueMonths = Math.floor(overdueHours / 12); // 12小时 = 1个月
-    
-    // 根据逾期时间显示不同的单位
-    let overdueText = '';
-    if (overdueMonths >= 1) {
-        overdueText = `${overdueMonths}个月`;
-    } else {
-        overdueText = `${overdueHours}小时`;
-    }
-    
-    const message = `【逾期提醒】${user.name}在微信借款¥${loan.amount.toLocaleString()}已逾期${overdueText}未还，剩余¥${loan.remainingAmount.toFixed(2)}，请提醒TA尽快还款。`;
-    
-    // 获取所有好友列表
-    const friends = await getAllFriends(loan.userId);
-    
-    // 发送给每个好友（短信形式）
-    for (let friend of friends) {
-        if (friend.type === 'local') {
-            // 本地角色：如果关联了User，发送短信
-            if (friend.linkedUserId) {
-                await sendSystemSMS(friend.linkedUserId, message, '微信支付');
-                console.log(`[第二次提醒] 已发送短信给角色 ${friend.name} 关联的User`);
-            }
-            // 同时添加到AI上下文提示
-            await addLoanReminderToCharContext(friend.id, message, user.name);
-            
-        } else if (friend.type === 'online') {
-            // 联机好友：发送短信到信息App
-            await sendSystemSMS(friend.id, message, '微信支付');
-            console.log(`[第二次提醒] 已发送短信给联机好友 ${friend.name}`);
-            
-        } else if (friend.type === 'user') {
-            // User类型：直接发送短信
-            await sendSystemSMS(friend.id, message, '微信支付');
-            console.log(`[第二次提醒] 已发送短信给User ${friend.name}`);
-        }
-    }
-    
-    console.log(`[第二次提醒] 已发送短信给 ${friends.length} 位好友`);
-}
-
-// 获取所有好友（包括本地角色和联机好友）
-async function getAllFriends(userId) {
-    const friends = [];
-    
-    // 1. 获取本地角色好友
-    const allChars = await db.characters.toArray();
-    for (let char of allChars) {
-        // 排除User类型和自己
-        if (char.type === 'User' || char.id === parseInt(userId)) continue;
-        friends.push({
-            id: char.id,
-            name: char.name,
-            type: 'local',
-            linkedUserId: char.linked_user_id // 关联的User ID
-        });
-    }
-    
-    // 2. 获取联机好友（如果有联机功能）
-    try {
-        // 从localStorage获取联机好友列表
-        const onlineFriends = JSON.parse(localStorage.getItem('onlineFriends') || '[]');
-        for (let friend of onlineFriends) {
-            if (friend.id && friend.id !== userId) {
-                friends.push({
-                    id: friend.accountId || friend.id, // 使用accountId作为接收短信的ID
-                    name: friend.name || friend.nickname || '联机好友',
-                    type: 'online',
-                    originalId: friend.id // 原始ID
-                });
-            }
-        }
-    } catch (e) {
-        console.warn('[获取联机好友失败]', e);
-    }
-    
-    // 3. 获取所有User类型的角色（他们也能收到短信）
-    const allUsers = allChars.filter(char => char.type === 'User' && char.id !== parseInt(userId));
-    for (let user of allUsers) {
-        friends.push({
-            id: user.id,
-            name: user.name,
-            type: 'user'
-        });
-    }
-    
-    return friends;
-}
-
-// 添加借款提醒到角色AI上下文
-async function addLoanReminderToCharContext(charId, message, borrowerName) {
-    const char = await db.characters.get(charId);
-    if (!char) return;
-    
-    // 初始化 loanReminders 字段
-    if (!char.loanReminders) {
-        char.loanReminders = [];
-    }
-    
-    // 添加提醒记录
-    char.loanReminders.push({
-        message: message,
-        borrowerName: borrowerName,
-        timestamp: Date.now(),
-        read: false
-    });
-    
-    // 保存到数据库
-    await db.characters.put(char);
-    
-    console.log(`[借款提醒] 已添加到角色 ${char.name} 的上下文`);
-}
-
-// 这个函数已不再需要，直接在主循环中发送
-
-// 发送系统短信（到信息App）
-async function sendSystemSMS(userId, message, senderName = '系统通知') {
-    console.log(`[发送短信] 给用户 ${userId}，发送者：${senderName}`);
-    
-    const accountId = String(userId);
-    
-    // 添加到 Dexie 数据库
-    await db.sms_messages.add({
-        accountId: accountId,
-        charId: null, // 系统消息没有角色ID
-        type: 'received',  // 接收的消息
-        sender: senderName,
-        number: senderName,
-        content: message,
-        time: Date.now(),
-        read: false
-    });
-    
-    console.log(`[发送短信] ✅ 短信已添加到数据库`);
-    
-    // 刷新主页面的消息列表
-    if (typeof renderMessageList === 'function') {
-        await renderMessageList();
-        console.log(`[发送短信] ✅ 消息列表已刷新`);
-    }
-}
-
-// 启动定时检查（每分钟检查一次）
-let loanCheckInterval = null;
-
-function startLoanReminderSystem() {
-    // 清除旧的定时器
-    if (loanCheckInterval) {
-        clearInterval(loanCheckInterval);
-    }
-    
-    // 立即执行一次检查
-    checkOverdueLoans();
-    
-    // 每分钟检查一次
-    loanCheckInterval = setInterval(() => {
-        checkOverdueLoans();
-    }, 60 * 1000); // 60秒
-    
-    console.log('[借款提醒系统] 已启动，每分钟检查一次');
-}
-
-// 页面加载时启动
-if (typeof window !== 'undefined') {
-    // 等待DOM加载完成后启动
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', startLoanReminderSystem);
-    } else {
-        startLoanReminderSystem();
-    }
-}
-
-// =================
-// 测试功能
-// =================
-
-let testReminderClickCount = 0;
-let testLoanRecord = null;
-
-async function testLoanReminder() {
-    const statusDiv = document.getElementById('test-reminder-status');
-    
-    testReminderClickCount++;
-    
-    if (testReminderClickCount === 1) {
-        // 第一次点击：创建测试借款并发送第一次提醒
-        if (!currentMyCharId) {
-            alert('请先选择一个 User 身份');
-            testReminderClickCount = 0;
-            return;
-        }
-        
-        const user = await db.characters.get(parseInt(currentMyCharId));
-        if (!user) {
-            alert('未找到用户信息');
-            testReminderClickCount = 0;
-            return;
-        }
-        
-        // 创建一个测试借款记录（逾期1个月 = 12小时）
-        const now = Date.now();
-        const oneMonthAgo = now - (12 * 60 * 60 * 1000); // 12小时前
-        testLoanRecord = {
-            id: now,
-            amount: 5000,
-            term: 3,
-            totalAmount: 5225,
-            monthlyPayment: 1741.67,
-            date: new Date(oneMonthAgo - (3 * 12 * 60 * 60 * 1000)).toISOString(), // 借款日期：4个月前
-            dueTime: oneMonthAgo, // 到期时间：1个月前（已逾期12小时）
-            status: 'pending',
-            paidAmount: 0,
-            remainingAmount: 5225,
-            firstReminderSent: false,
-            secondReminderSent: false,
-            userId: currentMyCharId,
-            isTest: true // 标记为测试记录
-        };
-        
-        // 发送第一次提醒
-        await sendFirstReminder(testLoanRecord);
-        testLoanRecord.firstReminderSent = true;
-        
-        if (statusDiv) {
-            statusDiv.textContent = '✅ 第一次提醒已发送（短信给本人）\n再点击一次发送第二次提醒';
-            statusDiv.style.color = '#07c160';
-        }
-        
-        alert('测试：第一次提醒已发送\n\n已发送短信给借款人本人\n请查看微信消息');
-        
-    } else if (testReminderClickCount === 2) {
-        // 第二次点击：发送第二次提醒
-        if (!testLoanRecord) {
-            alert('请先点击第一次发送第一次提醒');
-            testReminderClickCount = 0;
-            return;
-        }
-        
-        // 发送第二次提醒
-        await sendSecondReminder(testLoanRecord);
-        testLoanRecord.secondReminderSent = true;
-        
-        // 获取好友数量
-        const friends = await getAllFriends(testLoanRecord.userId);
-        
-        if (statusDiv) {
-            statusDiv.textContent = `✅ 第二次提醒已发送\n已通知 ${friends.length} 位好友（本地角色 + 联机好友）`;
-            statusDiv.style.color = '#07c160';
-        }
-        
-        alert(`测试：第二次提醒已发送\n\n已发送给 ${friends.length} 位好友\n\n- 本地角色：会在聊天时收到上下文提示\n- 联机好友：会收到短信\n\n再次点击可重置测试`);
-        
-    } else {
-        // 第三次点击：重置
-        testReminderClickCount = 0;
-        testLoanRecord = null;
-        
-        if (statusDiv) {
-            statusDiv.textContent = '已重置，点击开始新的测试';
-            statusDiv.style.color = '#999';
-        }
-        
-        alert('测试已重置\n\n点击按钮开始新的测试');
-    }
-}
-
-window.testLoanReminder = testLoanReminder;
-
-// =================
-// 刮刮乐功能
-// =================
-
-const SCRATCH_CARD_PRICE = 10; // 每张刮刮乐价格
-let currentScratchCard = null; // 当前刮刮乐数据
-let isScratching = false; // 是否正在刮奖
-let scratchProgress = 0; // 刮开进度 (0-100)
-
-// 显示刮刮乐页面
-async function showScratchCardPage() {
-    const page = document.getElementById('scratch-card-page');
-    page.style.display = 'flex';
-    page.offsetHeight;
-    page.classList.add('slide-in');
-    
-    // 更新余额显示
-    await updateScratchBalance();
-    
-    // 重置刮刮乐状态
-    resetScratchCard();
-    
-    // 加载历史记录
-    loadScratchHistory();
-}
-
-// 隐藏刮刮乐页面
-function hideScratchCardPage() {
-    const page = document.getElementById('scratch-card-page');
-    page.classList.remove('slide-in');
-    setTimeout(() => {
-        page.style.display = 'none';
-    }, 300);
-}
-
-// 更新余额显示
-async function updateScratchBalance() {
-    if (!currentMyCharId) {
-        document.getElementById('scratch-current-balance').textContent = '¥0.00';
-        return;
-    }
-    
-    const user = await db.characters.get(parseInt(currentMyCharId));
-    const balance = user?.identity?.balance || 0;
-    document.getElementById('scratch-current-balance').textContent = `¥${parseFloat(balance).toFixed(2)}`;
-    
-    // 更新购买按钮状态
-    const buyBtn = document.getElementById('scratch-buy-btn');
-    if (parseFloat(balance) < SCRATCH_CARD_PRICE) {
-        buyBtn.disabled = true;
-        buyBtn.querySelector('#scratch-buy-text').textContent = `余额不足 (需要 ¥${SCRATCH_CARD_PRICE})`;
-    } else {
-        buyBtn.disabled = false;
-        buyBtn.querySelector('#scratch-buy-text').textContent = `购买刮刮乐 (¥${SCRATCH_CARD_PRICE})`;
-    }
-}
-
-// 重置刮刮乐
-function resetScratchCard() {
-    currentScratchCard = null;
-    isScratching = false;
-    scratchProgress = 0;
-    
-    const cover = document.getElementById('scratch-cover');
-    const content = document.getElementById('scratch-content');
-    const resultIcon = document.getElementById('scratch-result-icon');
-    const canvas = cover.querySelector('canvas');
-    
-    // 清除canvas
-    if (canvas) {
-        canvas.remove();
-    }
-    
-    cover.classList.remove('scratched');
-    cover.style.opacity = '1';
-    cover.style.pointerEvents = 'auto';
-    
-    // 重置图标显示
-    if (resultIcon) {
-        resultIcon.style.display = 'none';
-        resultIcon.textContent = '';
-    }
-    
-    // 隐藏内容
-    if (content) {
-        content.style.display = 'none';
-    }
-}
-
-// 购买刮刮乐
-async function buyScratchCard() {
-    if (!currentMyCharId) {
-        alert('请先选择一个 User 身份');
-        return;
-    }
-    
-    const user = await db.characters.get(parseInt(currentMyCharId));
-    if (!user) {
-        alert('未找到用户信息');
-        return;
-    }
-    
-    let userBalance = parseFloat(user.identity?.balance || 0);
-    
-    // 检查余额
-    if (userBalance < SCRATCH_CARD_PRICE) {
-        alert(`余额不足！\n当前余额：¥${userBalance.toFixed(2)}\n需要：¥${SCRATCH_CARD_PRICE}`);
-        return;
-    }
-    
-    // 扣款
-    userBalance = userBalance - SCRATCH_CARD_PRICE;
-    if (!user.identity) user.identity = {};
-    user.identity.balance = userBalance.toFixed(2);
-    await db.characters.put(user);
-    
-    // 更新余额显示
-    await updateScratchBalance();
-    await updateBalancePageDisplay();
-    await updateWalletBalanceDisplay();
-    
-    // 生成刮刮乐结果
-    const prize = generateScratchPrize();
-    currentScratchCard = {
-        prize: prize,
-        cost: SCRATCH_CARD_PRICE,
-        time: Date.now()
-    };
-    
-    // 显示刮刮乐
-    showScratchCard(prize);
-    
-    // 初始化刮奖交互
-    initScratchInteraction();
-}
-
-// 生成中奖金额（概率分布）
-function generateScratchPrize() {
-    const rand = Math.random();
-    
-    // 概率分布：
-    // 80% - 中奖 (¥5-¥10)
-    // 20% - 未中奖 (¥0)
-    
-    if (rand < 0.8) {
-        // 80%概率中奖，金额在5~10元之间
-        return Math.floor(Math.random() * 6) + 5; // ¥5-¥10
-    } else {
-        return 0; // 20%概率未中奖
-    }
-}
-
-// 显示刮刮乐
-function showScratchCard(prize) {
-    const cover = document.getElementById('scratch-cover');
-    const content = document.getElementById('scratch-content');
-    const resultIcon = document.getElementById('scratch-result-icon');
-    const resultText = document.getElementById('scratch-result-text');
-    const resultAmount = document.getElementById('scratch-result-amount');
-    
-    // 显示内容层
-    content.style.display = 'flex';
-    
-    // 设置结果
-    if (prize === 0) {
-        resultIcon.textContent = '';
-        resultIcon.style.display = 'none';
-        resultText.textContent = '很遗憾，未中奖';
-        resultAmount.textContent = '¥0';
-        resultAmount.style.color = '#999';
-    } else {
-        resultIcon.textContent = '';
-        resultIcon.style.display = 'none';
-        resultText.textContent = '恭喜中奖';
-        resultAmount.textContent = `¥${prize}`;
-        resultAmount.style.color = '#ffb6c1';
-    }
-    
-    // 重置覆盖层
-    cover.style.opacity = '1';
-    cover.style.pointerEvents = 'auto';
-    cover.classList.remove('scratched');
-    scratchProgress = 0;
-}
-
-// 初始化刮奖交互
-function initScratchInteraction() {
-    const cover = document.getElementById('scratch-cover');
-    const card = document.getElementById('scratch-card');
-    
-    // 清除旧的canvas
-    const oldCanvas = cover.querySelector('canvas');
-    if (oldCanvas) {
-        oldCanvas.remove();
-    }
-    
-    // 创建canvas用于刮奖效果
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const rect = card.getBoundingClientRect();
-    
-    canvas.width = rect.width;
-    canvas.height = rect.height;
-    canvas.style.position = 'absolute';
-    canvas.style.top = '0';
-    canvas.style.left = '0';
-    canvas.style.width = '100%';
-    canvas.style.height = '100%';
-    canvas.style.zIndex = '3';
-    canvas.style.mixBlendMode = 'destination-out';
-    
-    // 初始化canvas为不透明
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
-    cover.appendChild(canvas);
-    
-    let isDrawing = false;
-    let lastX = 0;
-    let lastY = 0;
-    
-    // 获取坐标
-    function getCoordinates(e) {
-        const rect = card.getBoundingClientRect();
-        if (e.touches) {
-            return {
-                x: e.touches[0].clientX - rect.left,
-                y: e.touches[0].clientY - rect.top
-            };
-        } else {
-            return {
-                x: e.offsetX,
-                y: e.offsetY
-            };
-        }
-    }
-    
-    // 绘制刮痕
-    function drawScratch(x, y) {
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.beginPath();
-        ctx.arc(x, y, 25, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // 如果起点和终点都有，画一条线
-        if (lastX > 0 && lastY > 0) {
-            ctx.beginPath();
-            ctx.moveTo(lastX, lastY);
-            ctx.lineTo(x, y);
-            ctx.lineWidth = 50;
-            ctx.lineCap = 'round';
-            ctx.strokeStyle = 'rgba(0,0,0,1)';
-            ctx.globalCompositeOperation = 'destination-out';
-            ctx.stroke();
-        }
-        
-        lastX = x;
-        lastY = y;
-        
-        // 计算刮开进度（使用采样方式提高性能）
-        if (Math.random() < 0.1) { // 只采样10%的检查，减少性能消耗
-            const sampleSize = 100;
-            const stepX = Math.floor(canvas.width / sampleSize);
-            const stepY = Math.floor(canvas.height / sampleSize);
-            let transparentCount = 0;
-            
-            for (let sy = 0; sy < canvas.height; sy += stepY) {
-                for (let sx = 0; sx < canvas.width; sx += stepX) {
-                    const imageData = ctx.getImageData(sx, sy, 1, 1);
-                    if (imageData.data[3] === 0) { // alpha为0表示透明
-                        transparentCount++;
-                    }
-                }
-            }
-            
-            scratchProgress = (transparentCount / (sampleSize * sampleSize)) * 100;
-            
-            // 如果刮开超过30%，自动完成
-            if (scratchProgress >= 30) {
-                finishScratching();
-            }
-        } else {
-            // 简单估算：每次绘制增加一点进度
-            scratchProgress = Math.min(scratchProgress + 0.5, 100);
-            if (scratchProgress >= 30) {
-                finishScratching();
-            }
-        }
-    }
-    
-    // 鼠标事件
-    card.onmousedown = (e) => {
-        if (currentScratchCard && !isScratching) {
-            isDrawing = true;
-            const coords = getCoordinates(e);
-            lastX = coords.x;
-            lastY = coords.y;
-            drawScratch(coords.x, coords.y);
-        }
-    };
-    
-    card.onmousemove = (e) => {
-        if (isDrawing && currentScratchCard && !isScratching) {
-            const coords = getCoordinates(e);
-            drawScratch(coords.x, coords.y);
-        }
-    };
-    
-    card.onmouseup = () => {
-        isDrawing = false;
-        lastX = 0;
-        lastY = 0;
-    };
-    
-    card.onmouseleave = () => {
-        isDrawing = false;
-        lastX = 0;
-        lastY = 0;
-    };
-    
-    // 触摸事件
-    card.ontouchstart = (e) => {
-        if (currentScratchCard && !isScratching) {
-            e.preventDefault();
-            isDrawing = true;
-            const coords = getCoordinates(e);
-            lastX = coords.x;
-            lastY = coords.y;
-            drawScratch(coords.x, coords.y);
-        }
-    };
-    
-    card.ontouchmove = (e) => {
-        if (isDrawing && currentScratchCard && !isScratching) {
-            e.preventDefault();
-            const coords = getCoordinates(e);
-            drawScratch(coords.x, coords.y);
-        }
-    };
-    
-    card.ontouchend = () => {
-        isDrawing = false;
-        lastX = 0;
-        lastY = 0;
-    };
-}
-
-// 刮奖操作（已废弃，使用canvas实现）
-function scratchAt(x, y) {
-    // 此函数已被canvas实现替代
-}
-
-// 完成刮奖
-async function finishScratching() {
-    if (isScratching || !currentScratchCard) return;
-    isScratching = true;
-    
-    const cover = document.getElementById('scratch-cover');
-    const canvas = cover.querySelector('canvas');
-    const content = document.getElementById('scratch-content');
-    
-    // 完全清除覆盖层
-    if (canvas) {
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }
-    
-    // 确保内容层显示
-    if (content) {
-        content.style.display = 'flex';
-    }
-    
-    // 延迟显示完成效果
-    setTimeout(() => {
-        cover.classList.add('scratched');
-        cover.style.opacity = '0';
-        cover.style.pointerEvents = 'none';
-        
-        // 确保金额显示正确
-        const resultAmount = document.getElementById('scratch-result-amount');
-        const resultText = document.getElementById('scratch-result-text');
-        const resultIcon = document.getElementById('scratch-result-icon');
-        
-        if (currentScratchCard) {
-            if (currentScratchCard.prize === 0) {
-                if (resultIcon) {
-                    resultIcon.textContent = '';
-                    resultIcon.style.display = 'none';
-                }
-                if (resultText) resultText.textContent = '很遗憾，未中奖';
-                if (resultAmount) {
-                    resultAmount.textContent = '¥0';
-                    resultAmount.style.color = '#999';
-                }
-            } else {
-                if (resultIcon) {
-                    resultIcon.textContent = '';
-                    resultIcon.style.display = 'none';
-                }
-                if (resultText) resultText.textContent = '恭喜中奖';
-                if (resultAmount) {
-                    resultAmount.textContent = `¥${currentScratchCard.prize}`;
-                    resultAmount.style.color = '#ffb6c1';
-                }
-            }
-        }
-        
-        // 如果有中奖，添加到余额
-        if (currentScratchCard && currentScratchCard.prize > 0) {
-            addScratchPrize(currentScratchCard.prize);
-        }
-        
-        // 保存记录
-        saveScratchRecord(currentScratchCard);
-        
-        // 重新加载历史
-        loadScratchHistory();
-        
-        // 重置状态，准备下一张
-        setTimeout(() => {
-            isScratching = false;
-            currentScratchCard = null;
-            scratchProgress = 0;
-        }, 2000);
-    }, 300);
-}
-
-// 添加中奖金额到余额
-async function addScratchPrize(amount) {
-    if (!currentMyCharId) return;
-    
-    const user = await db.characters.get(parseInt(currentMyCharId));
-    if (!user) return;
-    
-    let userBalance = parseFloat(user.identity?.balance || 0);
-    userBalance = userBalance + amount;
-    
-    if (!user.identity) user.identity = {};
-    user.identity.balance = userBalance.toFixed(2);
-    await db.characters.put(user);
-    
-    // 更新显示
-    await updateScratchBalance();
-    await updateBalancePageDisplay();
-    await updateWalletBalanceDisplay();
-    
-    // 显示中奖提示
-    setTimeout(() => {
-        alert(`恭喜中奖\n\n奖金：¥${amount}\n已添加到钱包余额`);
-    }, 500);
-}
-
-// 保存刮刮乐记录
-function saveScratchRecord(record) {
-    let history = JSON.parse(localStorage.getItem('scratchHistory') || '[]');
-    history.unshift({
-        prize: record.prize,
-        cost: record.cost,
-        time: record.time,
-        net: record.prize - record.cost // 净收益
-    });
-    // 只保留最近50条记录
-    if (history.length > 50) {
-        history = history.slice(0, 50);
-    }
-    localStorage.setItem('scratchHistory', JSON.stringify(history));
-}
-
-// 加载历史记录
-function loadScratchHistory() {
-    const historyList = document.getElementById('scratch-history-list');
-    const history = JSON.parse(localStorage.getItem('scratchHistory') || '[]');
-    
-    if (history.length === 0) {
-        historyList.innerHTML = '<div class="loan-empty-state">暂无中奖记录</div>';
-        return;
-    }
-    
-    historyList.innerHTML = history.map(record => {
-        const date = new Date(record.time);
-        const dateStr = date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
-        const timeStr = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-        const netClass = record.net >= 0 ? 'profit' : 'loss';
-        const netText = record.net >= 0 ? `+¥${record.net}` : `¥${record.net}`;
-        
-        return `
-            <div class="loan-history-item">
-                <div class="loan-history-info">
-                    <div class="loan-history-amount">${record.prize > 0 ? `中奖 ¥${record.prize}` : '未中奖'}</div>
-                    <div class="loan-history-date">${dateStr} ${timeStr} · 花费 ¥${record.cost}</div>
-                </div>
-                <div class="loan-history-status ${netClass}">${netText}</div>
-            </div>
-        `;
-    }).join('');
-}
-
-// 导出函数
-window.showScratchCardPage = showScratchCardPage;
-window.hideScratchCardPage = hideScratchCardPage;
-window.buyScratchCard = buyScratchCard;
 window.selectRechargeAmount = selectRechargeAmount;
 window.submitRecharge = submitRecharge;
 
@@ -22405,13 +19392,11 @@ async function addTransaction(type, amount, title, desc) {
 // ========== 亲属卡页面 ==========
 let selectedFamilyCardFriendId = null;
 
-async function showFamilyCardPage() {
+function showFamilyCardPage() {
     const page = document.getElementById('family-card-page');
     page.style.display = 'flex';
     page.offsetHeight;
     page.classList.add('active');
-    
-    // 🎯 直接渲染（亲属卡现在保存在聊天记录中，和转账一样）
     renderFamilyCardList();
 }
 
@@ -22430,143 +19415,68 @@ async function renderFamilyCardList() {
     const user = await db.characters.get(parseInt(currentMyCharId));
     if (!user) return;
     
-    // ========== 我赠送的亲属卡 ==========
+    // 我赠送的亲属卡
+    const givenCards = user.identity?.familyCardsGiven || [];
     const givenListEl = document.getElementById('family-card-given-list');
-    let givenHtml = '';
     
-    // 1. 本地亲属卡
-    const localGivenCards = user.identity?.familyCardsGiven || [];
-    for (const card of localGivenCards) {
-        const char = await db.characters.get(card.charId);
-        if (char) {
-            const usedThisMonth = card.usedThisMonth || 0;
-            const limitText = card.monthlyLimit > 0 ? `已用 ¥${usedThisMonth.toFixed(2)} / ¥${card.monthlyLimit}` : `已用 ¥${usedThisMonth.toFixed(2)} (不限额)`;
-            givenHtml += `
-                <div class="family-card-item">
-                    <div class="family-card-avatar" style="background-image:url(${char.avatar})"></div>
-                    <div class="family-card-info">
-                        <div class="family-card-name">${char.name}</div>
-                        <div class="family-card-detail">${limitText}</div>
+    if (givenCards.length === 0) {
+        givenListEl.innerHTML = '';
+    } else {
+        let html = '';
+        for (const card of givenCards) {
+            const char = await db.characters.get(card.charId);
+            if (char) {
+                const usedThisMonth = card.usedThisMonth || 0;
+                const limitText = card.monthlyLimit > 0 ? `已用 ¥${usedThisMonth.toFixed(2)} / ¥${card.monthlyLimit}` : `已用 ¥${usedThisMonth.toFixed(2)} (不限额)`;
+                html += `
+                    <div class="family-card-item">
+                        <div class="family-card-avatar" style="background-image:url(${char.avatar})"></div>
+                        <div class="family-card-info">
+                            <div class="family-card-name">${char.name}</div>
+                            <div class="family-card-detail">${limitText}</div>
+                        </div>
+                        <div class="family-card-actions">
+                            <button class="family-card-btn view" onclick="showFamilyCardRecords(${card.charId}, 'given')">记录</button>
+                            <button class="family-card-btn cancel" onclick="cancelFamilyCard(${card.charId}, 'given')">解绑</button>
+                        </div>
                     </div>
-                    <div class="family-card-actions">
-                        <button class="family-card-btn view" onclick="showFamilyCardRecords(${card.charId}, 'given')">记录</button>
-                        <button class="family-card-btn cancel" onclick="cancelFamilyCard(${card.charId}, 'given')">解绑</button>
-                    </div>
-                </div>
-            `;
-        }
-    }
-    
-    // 2. 联机亲属卡（从聊天记录中查找，和转账一样）
-    console.log('[亲属卡] 开始查找联机亲属卡...');
-    const allOnlineFriends = await db.characters.where('type').equals('online_friend').toArray();
-    console.log('[亲属卡] 找到联机好友数量:', allOnlineFriends.length);
-    
-    for (const friendChar of allOnlineFriends) {
-        const history = getChatHistory(friendChar, accountId);
-        if (!history) continue;
-        
-        // 查找我发送的亲属卡消息（role='user' 且 type='familyCard'）
-        const myFamilyCards = history.filter(msg => msg.role === 'user' && msg.type === 'familyCard');
-        
-        if (myFamilyCards.length > 0) {
-            // 只显示最后一张（最新的）
-            const lastCard = myFamilyCards[myFamilyCards.length - 1];
-            let cardData = {};
-            try {
-                cardData = JSON.parse(lastCard.content);
-            } catch (e) {
-                cardData = { monthlyLimit: 0 };
+                `;
             }
-            
-            const limitText = cardData.monthlyLimit > 0 ? `额度 ¥${cardData.monthlyLimit}` : '不限额度';
-            givenHtml += `
-                <div class="family-card-item">
-                    <div class="family-card-avatar" style="background-image:url(${friendChar.avatar})"></div>
-                    <div class="family-card-info">
-                        <div class="family-card-name">${friendChar.name} <span style="font-size:12px;color:#999;">(联机)</span></div>
-                        <div class="family-card-detail">${limitText}</div>
-                    </div>
-                    <div class="family-card-actions">
-                        <button class="family-card-btn view" onclick="showToast('联机亲属卡暂不支持查看记录')">记录</button>
-                    </div>
-                </div>
-            `;
-            console.log('[亲属卡] 找到赠送给', friendChar.name, '的亲属卡');
         }
+        givenListEl.innerHTML = html;
     }
     
-    givenListEl.innerHTML = givenHtml || '';
-    
-    // ========== 我收到的亲属卡 ==========
+    // 我收到的亲属卡
+    const receivedCards = user.identity?.familyCardsReceived || [];
     const receivedListEl = document.getElementById('family-card-received-list');
     const receivedEmptyEl = document.getElementById('family-card-received-empty');
-    let receivedHtml = '';
     
-    // 1. 本地亲属卡
-    const localReceivedCards = user.identity?.familyCardsReceived || [];
-    for (const card of localReceivedCards) {
-        const char = await db.characters.get(card.charId);
-        if (char) {
-            const usedThisMonth = card.usedThisMonth || 0;
-            const monthlyLimit = card.monthlyLimit || 0;
-            const limitText = monthlyLimit > 0 ? `本月可用 ¥${(monthlyLimit - usedThisMonth).toFixed(2)}` : '不限额';
-            receivedHtml += `
-                <div class="family-card-item">
-                    <div class="family-card-avatar" style="background-image:url(${char.avatar})"></div>
-                    <div class="family-card-info">
-                        <div class="family-card-name">${char.name} 的亲属卡</div>
-                        <div class="family-card-detail">${limitText}</div>
-                    </div>
-                    <div class="family-card-actions">
-                        <button class="family-card-btn view" onclick="showFamilyCardRecords(${card.charId}, 'received')">记录</button>
-                    </div>
-                </div>
-            `;
-        }
-    }
-    
-    // 2. 联机亲属卡（从聊天记录中查找，和转账一样）
-    for (const friendChar of allOnlineFriends) {
-        const history = getChatHistory(friendChar, accountId);
-        if (!history) continue;
-        
-        // 查找对方发送的亲属卡消息（role='char' 且 type='familyCard'）
-        const receivedFamilyCards = history.filter(msg => msg.role === 'char' && msg.type === 'familyCard');
-        
-        if (receivedFamilyCards.length > 0) {
-            // 只显示最后一张（最新的）
-            const lastCard = receivedFamilyCards[receivedFamilyCards.length - 1];
-            let cardData = {};
-            try {
-                cardData = JSON.parse(lastCard.content);
-            } catch (e) {
-                cardData = { monthlyLimit: 0 };
-            }
-            
-            const limitText = cardData.monthlyLimit > 0 ? `额度 ¥${cardData.monthlyLimit}` : '不限额';
-            receivedHtml += `
-                <div class="family-card-item">
-                    <div class="family-card-avatar" style="background-image:url(${friendChar.avatar})"></div>
-                    <div class="family-card-info">
-                        <div class="family-card-name">${friendChar.name} 的亲属卡 <span style="font-size:12px;color:#999;">(联机)</span></div>
-                        <div class="family-card-detail">${limitText}</div>
-                    </div>
-                    <div class="family-card-actions">
-                        <button class="family-card-btn view" onclick="showToast('联机亲属卡暂不支持查看记录')">记录</button>
-                    </div>
-                </div>
-            `;
-            console.log('[亲属卡] 找到来自', friendChar.name, '的亲属卡');
-        }
-    }
-    
-    if (receivedHtml) {
-        receivedEmptyEl.style.display = 'none';
-        receivedListEl.innerHTML = receivedHtml;
-    } else {
+    if (receivedCards.length === 0) {
         receivedListEl.innerHTML = '';
         receivedEmptyEl.style.display = 'block';
+    } else {
+        receivedEmptyEl.style.display = 'none';
+        let html = '';
+        for (const card of receivedCards) {
+            const char = await db.characters.get(card.charId);
+            if (char) {
+                const usedThisMonth = card.usedThisMonth || 0;
+                const limitText = card.monthlyLimit > 0 ? `本月可用 ¥${(card.monthlyLimit - usedThisMonth).toFixed(2)}` : '不限额';
+                html += `
+                    <div class="family-card-item">
+                        <div class="family-card-avatar" style="background-image:url(${char.avatar})"></div>
+                        <div class="family-card-info">
+                            <div class="family-card-name">${char.name} 的亲属卡</div>
+                            <div class="family-card-detail">${limitText}</div>
+                        </div>
+                        <div class="family-card-actions">
+                            <button class="family-card-btn view" onclick="showFamilyCardRecords(${card.charId}, 'received')">记录</button>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        receivedListEl.innerHTML = html;
     }
 }
 
@@ -22582,56 +19492,32 @@ async function showGiveFamilyCardModal() {
     const accountId = getCurrentAccountId();
     const allChars = await db.characters.toArray();
     
-    // 过滤出好友（包括本地好友和联机好友）
+    // 过滤出好友（非用户角色且是好友状态）
     const friends = allChars.filter(c => {
         if (c.type === 'user') return false;
-        // ✅ 包含联机好友
-        if (c.type === 'online_friend') return true;
-        // 检查普通好友状态
         const status = getFriendStatus(c, accountId);
         return status === 'friend';
     });
     
-    console.log('[亲属卡] 找到好友总数:', friends.length, '其中联机好友:', friends.filter(f => f.type === 'online_friend').length);
-    
-    // 排除已经赠送过亲属卡的（本地好友）
+    // 排除已经赠送过亲属卡的
     const givenCards = user?.identity?.familyCardsGiven || [];
     const givenIds = givenCards.map(c => c.charId);
-    
-    // ✅ 排除已经在聊天记录中赠送过亲属卡的（联机好友）
-    const availableFriends = friends.filter(f => {
-        // 本地好友：检查 givenIds
-        if (f.type !== 'online_friend') {
-            return !givenIds.includes(f.id);
-        }
-        
-        // 联机好友：检查聊天记录中是否有已发送的亲属卡
-        const history = getChatHistory(f, accountId);
-        if (!history) return true;
-        const hasSent = history.some(msg => msg.role === 'user' && msg.type === 'familyCard');
-        return !hasSent;
-    });
+    const availableFriends = friends.filter(f => !givenIds.includes(f.id));
     
     if (availableFriends.length === 0) {
         listEl.innerHTML = '<div style="text-align:center; padding:20px; color:#999;">没有可赠送的好友</div>';
     } else {
-        listEl.innerHTML = availableFriends.map(f => {
-            // ✅ 给联机好友添加标记
-            const isOnline = f.type === 'online_friend';
-            const onlineTag = isOnline ? '<span style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:#fff; font-size:10px; padding:2px 6px; border-radius:3px; margin-left:6px;">联机</span>' : '';
-            
-            return `
-                <div class="family-card-friend-item" onclick="selectFamilyCardFriend(${f.id}, this)">
-                    <div class="family-card-friend-avatar" style="background-image:url(${f.avatar})"></div>
-                    <div class="family-card-friend-name">${f.name}${onlineTag}</div>
-                    <div class="family-card-friend-check">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3">
-                            <polyline points="20 6 9 17 4 12"></polyline>
-                        </svg>
-                    </div>
+        listEl.innerHTML = availableFriends.map(f => `
+            <div class="family-card-friend-item" onclick="selectFamilyCardFriend(${f.id}, this)">
+                <div class="family-card-friend-avatar" style="background-image:url(${f.avatar})"></div>
+                <div class="family-card-friend-name">${f.name}</div>
+                <div class="family-card-friend-check">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
                 </div>
-            `;
-        }).join('');
+            </div>
+        `).join('');
     }
     
     document.getElementById('family-card-limit-input').value = '0';
@@ -22662,83 +19548,23 @@ async function confirmGiveFamilyCard() {
     const monthlyLimit = parseFloat(limitInput.value) || 0;
     
     const user = await db.characters.get(parseInt(currentMyCharId));
+    if (!user.identity) user.identity = {};
+    if (!user.identity.familyCardsGiven) user.identity.familyCardsGiven = [];
+    
+    // 添加亲属卡记录
+    user.identity.familyCardsGiven.push({
+        charId: selectedFamilyCardFriendId,
+        monthlyLimit: monthlyLimit,
+        usedThisMonth: 0,
+        records: [],
+        createdAt: Date.now()
+    });
+    
+    await db.characters.put(user);
+    
+    // 同时在角色那边添加收到的亲属卡记录
     const char = await db.characters.get(selectedFamilyCardFriendId);
-    
-    if (!char) {
-        showToast('好友不存在');
-        return;
-    }
-    
-    const accountId = getCurrentAccountId();
-    
-    // ✅ 判断是否是联机好友
-    if (char.type === 'online_friend') {
-        console.log('[亲属卡] 检测到联机好友，通过消息通道发送');
-        // 联机好友 - 通过消息通道发送（和转账一样）
-        const onlineUserChar = await getOrCreateOnlineUserChar();
-        
-        if (onlineUserChar && onlineConnected && char.onlineData?.wx_account) {
-            const fromWxAccount = onlineUserChar.identity.account;
-            const toWxAccount = char.onlineData.wx_account;
-            
-            // 通过消息通道发送
-            const familyCardContent = JSON.stringify({
-                __type: 'familyCard',
-                monthlyLimit: monthlyLimit,
-                fromName: onlineUserChar.name
-            });
-            
-            const sent = sendOnlineMessage(toWxAccount, familyCardContent, fromWxAccount);
-            
-            if (sent) {
-                // 保存到聊天记录
-                let history = getChatHistory(char, accountId);
-                const familyCardMsg = {
-                    role: 'user',
-                    type: 'familyCard',
-                    content: JSON.stringify({
-                        fromName: onlineUserChar.name,
-                        monthlyLimit: monthlyLimit,
-                        status: 'sent',
-                        isOnline: true
-                    }),
-                    time: Date.now()
-                };
-                
-                history.push(familyCardMsg);
-                await setChatHistory(char, accountId, history);
-                
-                console.log('[亲属卡] ✅ 联机亲属卡已发送');
-                showToast('已赠送亲属卡');
-            } else {
-                console.error('[亲属卡] ❌ 发送失败');
-                showToast('发送失败，请检查连接');
-                return;
-            }
-        } else {
-            console.error('[亲属卡] ❌ 条件不满足');
-            showToast('请确保已连接服务器');
-            return;
-        }
-    } else {
-        // 本地好友 - 原有逻辑
-        console.log('[亲属卡] 本地好友，使用原有逻辑');
-        
-        if (!user.identity) user.identity = {};
-        if (!user.identity.familyCardsGiven) user.identity.familyCardsGiven = [];
-        
-        // 添加亲属卡记录
-        user.identity.familyCardsGiven.push({
-            charId: selectedFamilyCardFriendId,
-            monthlyLimit: monthlyLimit,
-            usedThisMonth: 0,
-            records: [],
-            createdAt: Date.now()
-        });
-        
-        await db.characters.put(user);
-        
-        // 同时在角色那边添加收到的亲属卡记录
+    if (char) {
         if (!char.identity) char.identity = {};
         if (!char.identity.familyCardsReceived) char.identity.familyCardsReceived = [];
         
@@ -22753,8 +19579,10 @@ async function confirmGiveFamilyCard() {
         await db.characters.put(char);
         
         // 发送亲属卡消息到聊天
+        const accountId = getCurrentAccountId();
         let history = getChatHistory(char, accountId);
         
+        const limitText = monthlyLimit > 0 ? `每月额度 ¥${monthlyLimit}` : '不限额度';
         const familyCardMsg = {
             role: 'user',
             type: 'familyCard',
@@ -22768,8 +19596,6 @@ async function confirmGiveFamilyCard() {
         
         history.push(familyCardMsg);
         await setChatHistory(char, accountId, history);
-        
-        showToast('已赠送亲属卡');
     }
     
     hideGiveFamilyCardModal();
@@ -22781,6 +19607,8 @@ async function confirmGiveFamilyCard() {
         const freshChar = await db.characters.get(selectedFamilyCardFriendId);
         renderChatBody(freshChar);
     }
+    
+    showToast('已赠送亲属卡');
 }
 
 // 取消亲属卡
@@ -22962,25 +19790,7 @@ async function generateUserBalance() {
     }
 
     const user = await db.characters.get(parseInt(currentMyCharId));
-    if (!user) {
-        alert("未找到该角色信息");
-        return;
-    }
-    
-    // 调试日志：确认读取到的用户信息（读取完整的角色档案）
-    console.log('[generateUserBalance] 读取到的完整角色档案:', user);
-    
-    // 读取角色描述（使用 description 字段，而不是 desc）
-    const characterDescription = user.description || user.desc || '';
-    
-    // 检查人设描述是否存在
-    if (!characterDescription || characterDescription.trim() === '' || characterDescription === '暂无描述') {
-        console.warn('[generateUserBalance] 警告：角色描述为空或未设置');
-        const confirmContinue = confirm("⚠️ 该角色的人设描述为空或未设置，生成的余额可能不准确。\n\n是否继续生成？\n（建议先完善角色人设描述）");
-        if (!confirmContinue) {
-            return;
-        }
-    }
+    if (!user) return;
     
     const btn = document.querySelector('.btn-generate');
     const originalText = btn.innerHTML;
@@ -22988,65 +19798,20 @@ async function generateUserBalance() {
     btn.disabled = true;
 
     try {
-        // 构建完整的人设信息（读取完整的角色档案）
-        const characterInfo = [];
-        characterInfo.push(`角色名称：${user.name || '未命名'}`);
+        const systemPrompt = `你是一个辅助生成角色详细设定的AI。当前角色是：${user.name}。
+        角色描述：${user.desc || '暂无描述'}。
+        请根据角色的背景、职业、性格，合理推断TA微信钱包里的"零钱"余额。
         
-        if (user.nick) {
-            characterInfo.push(`角色昵称：${user.nick}`);
-        }
-        
-        // 读取角色描述（优先使用 description，兼容 desc）
-        if (characterDescription && characterDescription.trim() && characterDescription !== '暂无描述') {
-            characterInfo.push(`角色人设描述：${characterDescription.trim()}`);
-        } else {
-            characterInfo.push(`角色人设描述：暂无详细描述`);
-        }
-        
-        if (user.type) {
-            characterInfo.push(`角色类型：${user.type}`);
-        }
-        
-        // 读取完整的身份信息
-        if (user.identity) {
-            if (user.identity.address) {
-                characterInfo.push(`家庭住址：${user.identity.address}`);
-            }
-            if (user.identity.bank_card) {
-                characterInfo.push(`银行卡号：${user.identity.bank_card}`);
-            }
-        }
-        
-        const fullCharacterInfo = characterInfo.join('\n');
-        
-        const systemPrompt = `你是一个辅助生成角色详细设定的AI助手。
+        要求：
+        1. 只返回一个具体的数字金额，保留两位小数。
+        2. 不要返回任何其他文字。
+        3. 金额要符合人设（例如学生可能几百几千，富二代可能几万，普通打工人可能几千）。
+        4. 如果是古代/架空背景，请自动换算成合理的现代货币数值。`;
 
-以下是当前角色的完整信息：
-${fullCharacterInfo}
-
-请仔细分析上述角色的人设信息（特别是角色描述中的背景、职业、经济状况、社会地位等），然后合理推断该角色微信钱包里的"零钱"余额。
-
-重要提示：
-1. 必须严格根据角色人设来生成余额，不要使用默认值或随机值
-2. 如果角色描述中提到"富二代"、"富裕"、"有钱"、"家境优渥"等关键词，余额应该较高（几万到几十万）
-3. 如果角色描述中提到"学生"、"普通"、"工薪"等关键词，余额应该适中（几百到几千）
-4. 如果角色描述中提到"贫困"、"拮据"等关键词，余额应该较低（几十到几百）
-5. 只返回一个具体的数字金额，保留两位小数，不要包含任何其他文字、符号或说明
-6. 如果是古代/架空背景，请自动换算成合理的现代货币数值
-
-示例：
-- 富二代角色：应返回 50000.00 或更高
-- 普通学生：应返回 1500.00 左右
-- 普通打工人：应返回 3000.00 左右`;
-
-        console.log('[generateUserBalance] 发送给AI的Prompt:', systemPrompt);
-        
         const amountStr = await callAI([
             { role: "system", content: systemPrompt },
-            { role: "user", content: "请根据上述角色人设信息，生成符合该角色经济状况的微信零钱余额。只返回数字金额，保留两位小数。" }
+            { role: "user", content: "请生成余额" }
         ]);
-        
-        console.log('[generateUserBalance] AI返回的原始内容:', amountStr);
 
         // 提取数字
         const match = amountStr.match(/[\d,]+\.\d{2}/) || amountStr.match(/\d+/);
@@ -23874,16 +20639,15 @@ async function doTransfer() {
     let history = getChatHistory(chatChar, accountId);
     
     const msgId = 'trans_' + Date.now();
-    const transferData = {
-        amount: amountVal.toFixed(2),
-        desc: noteVal,
-        status: 'sent'
-    };
     const msg = {
         id: msgId,
         role: 'user',
         type: 'transfer',
-        content: JSON.stringify(transferData), 
+        content: JSON.stringify({
+            amount: amountVal.toFixed(2),
+            desc: noteVal,
+            status: 'sent'
+        }), 
         time: Date.now()
     };
     
@@ -23892,26 +20656,6 @@ async function doTransfer() {
     
     // 记录账单
     await addTransaction('expense', amountVal, '转账', `转给${chatChar.remark || chatChar.name}`);
-    
-    // ✅ 联机好友：通过服务器发送转账消息
-    if (chatChar.isOnlineFriend && chatChar.onlineData?.wx_account) {
-        // 获取当前可用的在线角色（如果没有则自动上线）
-        const onlineUserChar = await getOrCreateOnlineUserChar();
-        
-        if (onlineUserChar && onlineConnected) {
-            const fromWxAccount = onlineUserChar.identity.account;
-            const toWxAccount = chatChar.onlineData.wx_account;
-            // 发送转账消息（使用特殊JSON格式，对方可以识别并渲染为卡片）
-            const transferContent = JSON.stringify({
-                __type: 'transfer',
-                amount: amountVal.toFixed(2),
-                desc: noteVal,
-                status: 'sent'
-            });
-            sendOnlineMessage(toWxAccount, transferContent, fromWxAccount);
-            console.log('[Online] 转账消息已发送到服务器');
-        }
-    }
     
     // 刷新聊天界面
     renderChatBody(chatChar);
@@ -27470,33 +24214,6 @@ function getCheckAccountSystemPrompt(char, myChar) {
     
     const hasPassword = myChar.identity?.password && myChar.identity.password.trim() !== '';
     
-    // 检测角色是否是高权限人设（黑客/权势地位高）
-    const charDescription = (char.description || '').toLowerCase();
-    const charIdentity = (char.identity?.identity || '').toLowerCase();
-    const charOccupation = (char.identity?.occupation || '').toLowerCase();
-    
-    const isHighPrivilege = 
-        charDescription.includes('黑客') || 
-        charDescription.includes('hacker') ||
-        charDescription.includes('程序员') ||
-        charDescription.includes('技术大佬') ||
-        charDescription.includes('总裁') ||
-        charDescription.includes('老板') ||
-        charDescription.includes('ceo') ||
-        charDescription.includes('董事长') ||
-        charDescription.includes('富豪') ||
-        charDescription.includes('权势') ||
-        charDescription.includes('特工') ||
-        charDescription.includes('间谍') ||
-        charIdentity.includes('黑客') ||
-        charIdentity.includes('hacker') ||
-        charIdentity.includes('总裁') ||
-        charIdentity.includes('ceo') ||
-        charOccupation.includes('黑客') ||
-        charOccupation.includes('程序员') ||
-        charOccupation.includes('总裁') ||
-        charOccupation.includes('ceo');
-    
     let prompt = `
 
 【特殊能力：账号查岗】
@@ -27517,18 +24234,7 @@ function getCheckAccountSystemPrompt(char, myChar) {
 `;
 
     if (hasPassword) {
-        // 高权限人设：直接告知密码
-        if (isHighPrivilege) {
-            prompt += `**查岗方式：**
-${myChar.name}设置了账号密码，但凭借你的能力（黑客技术/权势地位），你可以轻松获取密码。
-- ${myChar.name}的账号密码是：**${myChar.identity.password}**
-- 如果你想尝试登录，在回复的**最后**加上：[CHECK_ACCOUNT:${myChar.identity.password}]
-- 例如：让我看看你在干嘛~|||[CHECK_ACCOUNT:${myChar.identity.password}]
-- 登录成功后，你就能看到${myChar.name}的账号信息和好友列表
-- 你可以根据你的身份（黑客/高层人士）自然地表现出这种能力，比如"我破解了你的密码"、"凭我的权限查一下"等`;
-        } else {
-            // 普通人设：需要猜测密码
-            prompt += `**查岗方式：**
+        prompt += `**查岗方式：**
 ${myChar.name}设置了账号密码，你需要猜测密码才能登录。
 - 如果你想尝试登录，在回复的**最后**加上：[CHECK_ACCOUNT:你猜测的密码]
 - 例如：你在干嘛呢？|||[CHECK_ACCOUNT:123456]
@@ -27536,8 +24242,7 @@ ${myChar.name}设置了账号密码，你需要猜测密码才能登录。
 - 如果密码正确，你就能看到${myChar.name}的账号信息和好友列表
 
 **密码提示：**
-你可以根据${myChar.name}的生日、喜好、常用数字等信息猜测密码。记住，你只是普通人，无法直接破解密码，只能靠猜测。`;
-        }
+你可以根据${myChar.name}的生日、喜好、常用数字等信息猜测密码。`;
     } else {
         prompt += `**查岗方式：**
 ${myChar.name}没有设置账号密码，你可以直接登录。
@@ -28843,116 +25548,6 @@ async function deleteSummary() {
     }
 }
 
-// 保存编辑前的原始内容
-let originalSummaryContent = '';
-
-// 切换总结编辑模式
-function toggleEditSummary() {
-    const contentDiv = document.getElementById('summary-detail-content');
-    const contentTextarea = document.getElementById('summary-detail-content-edit');
-    const editHint = document.getElementById('summary-edit-hint');
-    const editBtn = document.getElementById('summary-edit-btn');
-    const saveBtn = document.getElementById('summary-save-btn');
-    const cancelBtn = document.getElementById('summary-cancel-btn');
-    const deleteBtn = document.getElementById('summary-delete-btn');
-    
-    if (!contentDiv || !contentTextarea) {
-        console.error('找不到总结内容元素');
-        alert('编辑功能初始化失败，请刷新页面重试');
-        return;
-    }
-    
-    // 保存原始内容
-    originalSummaryContent = contentDiv.textContent;
-    
-    // 切换到编辑模式
-    contentDiv.style.display = 'none';
-    contentTextarea.style.display = 'block';
-    contentTextarea.value = originalSummaryContent;
-    if (editHint) editHint.style.display = 'block';
-    
-    // 切换按钮显示
-    if (editBtn) editBtn.style.display = 'none';
-    if (saveBtn) saveBtn.style.display = 'block';
-    if (cancelBtn) cancelBtn.style.display = 'block';
-    if (deleteBtn) deleteBtn.style.display = 'none';
-    
-    // 自动聚焦到输入框并选中全部文本（方便用户编辑）
-    setTimeout(() => {
-        contentTextarea.focus();
-        contentTextarea.select();
-    }, 100);
-}
-
-// 取消编辑总结
-function cancelEditSummary() {
-    const contentDiv = document.getElementById('summary-detail-content');
-    const contentTextarea = document.getElementById('summary-detail-content-edit');
-    const editHint = document.getElementById('summary-edit-hint');
-    const editBtn = document.getElementById('summary-edit-btn');
-    const saveBtn = document.getElementById('summary-save-btn');
-    const cancelBtn = document.getElementById('summary-cancel-btn');
-    const deleteBtn = document.getElementById('summary-delete-btn');
-    
-    // 恢复显示模式
-    if (contentDiv) contentDiv.style.display = 'block';
-    if (contentTextarea) contentTextarea.style.display = 'none';
-    if (editHint) editHint.style.display = 'none';
-    
-    // 切换按钮显示
-    if (editBtn) editBtn.style.display = 'block';
-    if (saveBtn) saveBtn.style.display = 'none';
-    if (cancelBtn) cancelBtn.style.display = 'none';
-    if (deleteBtn) deleteBtn.style.display = 'block';
-}
-
-// 保存总结编辑
-async function saveSummaryEdit() {
-    if (!currentViewingSummaryId) return;
-    
-    const contentTextarea = document.getElementById('summary-detail-content-edit');
-    const newContent = contentTextarea.value.trim();
-    
-    if (!newContent) {
-        alert('总结内容不能为空');
-        return;
-    }
-    
-    try {
-        // 获取当前总结
-        const summary = await db.chat_summaries.get(currentViewingSummaryId);
-        if (!summary) {
-            alert('总结不存在');
-            return;
-        }
-        
-        // 更新内容
-        summary.content = newContent;
-        summary.updated_at = Date.now(); // 添加更新时间戳
-        
-        // 保存到数据库
-        await db.chat_summaries.put(summary);
-        
-        // 更新显示
-        const contentDiv = document.getElementById('summary-detail-content');
-        if (contentDiv) contentDiv.textContent = newContent;
-        
-        // 退出编辑模式
-        cancelEditSummary();
-        
-        // 刷新收藏列表（如果正在显示）
-        const favPage = document.getElementById('favorites-page');
-        if (favPage && favPage.style.display !== 'none') {
-            await renderFavoritesList('all');
-        }
-        
-        showToast('保存成功');
-    } catch (e) {
-        console.error('保存总结失败:', e);
-        alert('保存失败: ' + e.message);
-    }
-}
-
 // 显示某个聊天的总结列表
 async function showChatSummaries(chatType) {
     const page = document.getElementById('chat-summaries-page');
@@ -29087,38 +25682,14 @@ async function generateChatSummary(chatType, chatId, accountId, chatHistory) {
         throw new Error('聊天记录太少');
     }
     
-    // 获取真实姓名
-    let charName = '对方';
-    let userName = '我';
-    
-    if (chatType === 'private') {
-        // 私聊：获取角色名和用户名
-        const char = await db.characters.get(parseInt(chatId));
-        if (char) {
-            charName = char.remark || char.name;
-            if (char.linked_user_id) {
-                const user = await db.characters.get(char.linked_user_id);
-                if (user) {
-                    userName = user.name;
-                }
-            }
-        }
-    } else if (chatType === 'group') {
-        // 群聊：使用群名
-        const group = await db.group_chats.get(parseInt(chatId));
-        if (group) {
-            charName = group.name || '群聊';
-        }
-    }
-    
     // 计算时间范围
     const firstMsgTime = recentMessages[0].time || recentMessages[0].timestamp || Date.now();
     const lastMsgTime = recentMessages[recentMessages.length - 1].time || recentMessages[recentMessages.length - 1].timestamp || Date.now();
     const timeRange = formatTimeRange(firstMsgTime, lastMsgTime);
     
-    // 构建聊天内容文本（使用真实姓名）
+    // 构建聊天内容文本
     let chatContent = recentMessages.map(msg => {
-        const role = msg.role === 'user' ? userName : (msg.name || charName);
+        const role = msg.role === 'user' ? '我' : (msg.name || 'AI');
         const content = msg.content || msg.message || '';
         return `${role}: ${content}`;
     }).join('\n');
@@ -29127,16 +25698,13 @@ async function generateChatSummary(chatType, chatId, accountId, chatHistory) {
     const systemPrompt = `你是一个专业的聊天记录总结助手。请根据以下聊天记录，生成一份简洁但完整的总结。
 
 总结要求：
-1. **必须包含时间信息**：在总结开头注明时间段，例如"在X月X日至X月X日期间"
-2. **使用真实姓名**：总结中直接使用"${userName}"和"${charName}"，严禁使用"AI"、"助手"、"机器人"等词汇
-3. 用第三人称视角客观描述对话双方的交流内容
-4. 提炼出主要话题和关键信息
-5. 如果有重要的情感变化或事件，要特别指出
-6. 总结长度控制在200-400字之间
-7. 使用自然流畅的中文表达
-8. 如果能提取3-5个关键词，请在最后用【关键词】标注
+1. 用第三人称描述对话双方的交流内容
+2. 提炼出主要话题和关键信息
+3. 如果有重要的情感变化或事件，要特别指出
+4. 总结长度控制在200-400字之间
+5. 使用自然流畅的中文表达
+6. 如果能提取3-5个关键词，请在最后用【关键词】标注
 
-聊天时间：${timeRange}
 聊天记录如下：
 ${chatContent}`;
 
@@ -29180,34 +25748,19 @@ function formatTimeRange(startTime, endTime) {
     const start = new Date(startTime);
     const end = new Date(endTime);
     
-    const formatDateTime = (d) => {
-        const month = d.getMonth() + 1;
-        const day = d.getDate();
-        const hour = String(d.getHours()).padStart(2, '0');
-        const minute = String(d.getMinutes()).padStart(2, '0');
-        return `${month}月${day}日 ${hour}:${minute}`;
-    };
-    
     const formatDate = (d) => {
         const month = d.getMonth() + 1;
         const day = d.getDate();
         return `${month}月${day}日`;
     };
     
-    const startDate = formatDate(start);
-    const endDate = formatDate(end);
+    const startStr = formatDate(start);
+    const endStr = formatDate(end);
     
-    // 如果是同一天，显示具体时间段
-    if (startDate === endDate) {
-        const startHour = String(start.getHours()).padStart(2, '0');
-        const startMinute = String(start.getMinutes()).padStart(2, '0');
-        const endHour = String(end.getHours()).padStart(2, '0');
-        const endMinute = String(end.getMinutes()).padStart(2, '0');
-        return `${startDate} ${startHour}:${startMinute} - ${endHour}:${endMinute}`;
+    if (startStr === endStr) {
+        return startStr;
     }
-    
-    // 跨天显示完整时间
-    return `${formatDateTime(start)} - ${formatDateTime(end)}`;
+    return `${startStr} - ${endStr}`;
 }
 
 // 更新总结计数显示
@@ -29306,12 +25859,6 @@ let onlineConnected = false;
 let onlineUserData = null;
 let onlineToken = null;
 let onlineCharacters = []; // 已上线的角色列表
-let onlineGroups = []; // 联机群聊列表
-let hasShownAuthFailedAlert = false; // 标志位：是否已经提示过认证失败（避免重连时反复弹窗）
-let currentOnlineGroupId = null; // 当前打开的联机群聊ID
-let currentOnlineGroupMessages = []; // 当前群聊消息
-let currentOnlineGroupMembers = []; // 当前群聊成员
-let myOnlineGroupCharacter = null; // 我在当前群聊中的角色
 
 // 切换联机设置面板
 function toggleOnlineSettings() {
@@ -29327,9 +25874,10 @@ function toggleOnlineSettings() {
     }
 }
 
-// ✅ 自动初始化联机系统（页面加载时调用）
-async function initOnlineSystem() {
+// 加载联机设置
+function loadOnlineSettings() {
     const serverUrl = localStorage.getItem('online_server_url') || '';
+    document.getElementById('online-server-url').value = serverUrl;
     
     // 加载已保存的token
     onlineToken = localStorage.getItem('online_token');
@@ -29342,30 +25890,12 @@ async function initOnlineSystem() {
         }
     }
     
-    // 启动自动同步定时器
-    startAutoSync();
-    
-    // 如果有服务器地址，自动连接
-    if (serverUrl) {
-        console.log('[Online] 自动连接服务器:', serverUrl);
-        try {
-            await connectToOnlineServer();
-            console.log('[Online] 服务器连接成功');
-        } catch (e) {
-            console.warn('[Online] 自动连接失败:', e.message);
-        }
-    }
-}
-
-// 加载联机设置（打开设置面板时调用）
-function loadOnlineSettings() {
-    const serverUrl = localStorage.getItem('online_server_url') || '';
-    const serverUrlInput = document.getElementById('online-server-url');
-    if (serverUrlInput) {
-        serverUrlInput.value = serverUrl;
-    }
-    
     updateOnlineStatus();
+    
+    // 如果有token，尝试自动连接
+    if (serverUrl && onlineToken) {
+        connectToOnlineServer();
+    }
 }
 
 // 保存联机设置
@@ -29450,19 +25980,10 @@ function connectToOnlineServer() {
         try {
             onlineSocket = new WebSocket(serverUrl);
             
-            onlineSocket.onopen = async () => {
+            onlineSocket.onopen = () => {
                 console.log('[Online] WebSocket connected');
                 onlineConnected = true;
                 updateOnlineStatus();
-                
-                // 获取亲属卡列表
-                const onlineUserChar = await getOrCreateOnlineUserChar();
-                if (onlineUserChar) {
-                    onlineSocket.send(JSON.stringify({
-                        type: 'get_family_cards',
-                        my_wx_account: onlineUserChar.identity.account
-                    }));
-                }
                 
                 // 如果有token，发送认证
                 if (onlineToken) {
@@ -29471,16 +25992,6 @@ function connectToOnlineServer() {
                         token: onlineToken
                     }));
                 }
-                
-                // 启动心跳定时器，每25秒发送一次心跳
-                if (window.onlineHeartbeatTimer) {
-                    clearInterval(window.onlineHeartbeatTimer);
-                }
-                window.onlineHeartbeatTimer = setInterval(() => {
-                    if (onlineConnected && onlineSocket && onlineSocket.readyState === WebSocket.OPEN) {
-                        onlineSocket.send(JSON.stringify({ type: 'ping' }));
-                    }
-                }, 25000);
                 
                 resolve();
             };
@@ -29492,14 +26003,7 @@ function connectToOnlineServer() {
             onlineSocket.onclose = () => {
                 console.log('[Online] WebSocket disconnected');
                 onlineConnected = false;
-                onlineCharacters = []; // 清空在线角色列表
                 updateOnlineStatus();
-                
-                // 清除心跳定时器
-                if (window.onlineHeartbeatTimer) {
-                    clearInterval(window.onlineHeartbeatTimer);
-                    window.onlineHeartbeatTimer = null;
-                }
             };
             
             onlineSocket.onerror = (error) => {
@@ -29524,10 +26028,7 @@ function connectToOnlineServer() {
 }
 
 // 处理服务器消息
-async function handleOnlineMessage(data) {
-    // 心跳响应不需要打印日志
-    if (data.type === 'pong') return;
-    
+function handleOnlineMessage(data) {
     console.log('[Online] Received:', data);
     
     switch (data.type) {
@@ -29535,15 +26036,9 @@ async function handleOnlineMessage(data) {
             onlineUserData = data.user;
             localStorage.setItem('online_user_data', JSON.stringify(data.user));
             updateOnlineStatus();
-            // ✅ 认证成功后，重置提示标志位
-            hasShownAuthFailedAlert = false;
-            console.log('[Online] 认证成功，自动注册所有角色到服务器...');
-            // 先注册所有角色到服务器（不上线，仅用于搜索）
-            await autoRegisterAllUserCharacters();
-            // 获取已上线的角色，然后自动上线本地角色
+            showToast('联机登录成功');
+            // 获取已上线的角色
             requestOnlineCharacters();
-            // ✅ 自动上线所有 User 类型的角色（角色上线后会通过 character_online 事件自动获取群聊列表）
-            autoGoOnlineAllUserCharacters();
             break;
             
         case 'auth_failed':
@@ -29552,25 +26047,7 @@ async function handleOnlineMessage(data) {
             localStorage.removeItem('online_token');
             localStorage.removeItem('online_user_data');
             updateOnlineStatus();
-            
-            // ✅ 避免重连时反复弹窗：只在首次失败时弹出 alert，后续只记录日志和使用 toast
-            const errorMsg = data.message || '认证失败';
-            if (!hasShownAuthFailedAlert) {
-                // 首次提示：使用 alert
-                hasShownAuthFailedAlert = true;
-                if (errorMsg.includes('过期') || errorMsg.includes('无效') || errorMsg.includes('expired') || errorMsg.includes('invalid')) {
-                    alert('登录已过期，请重新登录（不要注册新账号，使用之前的用户名和密码登录）');
-                    // 显示登录弹窗
-                    showOnlineLoginModal();
-                } else {
-                    alert('登录失败: ' + errorMsg);
-                }
-            } else {
-                // 后续重连时：只使用静默的 toast 提示或控制台日志
-                console.log('[Online] 认证失败（已提示过）:', errorMsg);
-                // 使用非侵入式的 toast 替代 alert
-                showToast('登录已过期，请点击联机按钮重新登录');
-            }
+            alert('登录失败: ' + (data.message || '认证失败'));
             break;
             
         case 'login_success':
@@ -29579,16 +26056,9 @@ async function handleOnlineMessage(data) {
             localStorage.setItem('online_token', data.token);
             localStorage.setItem('online_user_data', JSON.stringify(data.user));
             updateOnlineStatus();
-            // ✅ 登录成功后，重置提示标志位
-            hasShownAuthFailedAlert = false;
             closeModal('online-login-modal');
             showToast('登录成功');
-            console.log('[Online] 登录成功，自动注册所有角色到服务器...');
-            // 先注册所有角色到服务器（不上线，仅用于搜索）
-            await autoRegisterAllUserCharacters();
             requestOnlineCharacters();
-            // ✅ 自动上线所有 User 类型的角色
-            autoGoOnlineAllUserCharacters();
             break;
             
         case 'register_success':
@@ -29618,39 +26088,6 @@ async function handleOnlineMessage(data) {
             // 好友申请被接受
             handleFriendRequestAccepted(data);
             break;
-        
-        case 'family_card_received':
-            // 收到亲属卡
-            handleFamilyCardReceived(data);
-            break;
-        
-        case 'family_card_sent':
-            // 亲属卡发送成功
-            showToast('亲属卡已赠送');
-            // 重新获取亲属卡列表
-            const onlineUserChar = await getOrCreateOnlineUserChar();
-            if (onlineUserChar && onlineSocket) {
-                onlineSocket.send(JSON.stringify({
-                    type: 'get_family_cards',
-                    my_wx_account: onlineUserChar.identity.account
-                }));
-            }
-            break;
-        
-        case 'family_card_used':
-            // 亲属卡被使用
-            handleFamilyCardUsed(data);
-            break;
-        
-        case 'family_card_payment_success':
-            // 使用亲属卡支付成功
-            showToast('支付成功');
-            break;
-        
-        case 'family_cards_list':
-            // 收到亲属卡列表
-            handleFamilyCardsList(data);
-            break;
             
         case 'message':
             // 收到联机消息
@@ -29660,112 +26097,20 @@ async function handleOnlineMessage(data) {
         case 'online_characters':
             // 已上线的角色列表
             onlineCharacters = data.characters || [];
-            console.log('[Online] 收到在线角色列表:', onlineCharacters.length, '个', onlineCharacters.map(c => c.wx_account).join(', '));
-            // 刷新联机状态页面（如果打开的话）
-            refreshOnlineStatusPageContent();
             break;
             
         case 'character_online':
-            // 自动上线，不需要 Toast 提示
-            console.log(`[Online] 角色 ${data.nickname} 已同步`);
+            showToast(`角色 ${data.nickname} 已上线`);
             requestOnlineCharacters();
             // 刷新联机状态页面（如果打开的话）
             refreshOnlineStatusPageContent();
-            // ✅ 获取联机群聊列表（使用第一个上线的角色）
-            if (data.wx_account && onlineSocket && onlineSocket.readyState === WebSocket.OPEN) {
-                console.log('[Online] 角色上线后，自动获取群聊列表，使用微信号:', data.wx_account);
-                onlineSocket.send(JSON.stringify({
-                    type: 'get_online_groups',
-                    my_wx_account: data.wx_account
-                }));
-            }
             break;
             
         case 'character_offline':
-            // 自动处理，不需要 Toast 提示
-            console.log('[Online] 角色已离线');
+            showToast(`角色已下线`);
             requestOnlineCharacters();
             // 刷新联机状态页面（如果打开的话）
             refreshOnlineStatusPageContent();
-            break;
-        
-        // ==================== 联机群聊消息 ====================
-        case 'online_group_created':
-            // 群聊创建成功
-            showToast(`群聊"${data.group.name}"创建成功`);
-            onlineGroups.push(data.group);
-            refreshOnlineGroupList();
-            // 同时在本地创建群聊记录，让它显示在消息列表中
-            await createLocalOnlineGroupChat(data.group);
-            break;
-            
-        case 'group_invite':
-            // 收到群聊邀请
-            handleOnlineGroupInvite(data);
-            break;
-            
-        case 'online_group_joined':
-            // 加入群聊成功
-            showToast(`已加入群聊"${data.group.name}"`);
-            if (!onlineGroups.find(g => g.id === data.group.id)) {
-                onlineGroups.push(data.group);
-            }
-            refreshOnlineGroupList();
-            // 同时在本地创建群聊记录，让它显示在消息列表中
-            await createLocalOnlineGroupChat(data.group);
-            break;
-            
-        case 'group_member_joined':
-            // 有新成员加入群聊
-            if (currentOnlineGroupId === data.group_id) {
-                showToast(`${data.member.user_name} 加入了群聊`);
-                refreshOnlineGroupMembers();
-            }
-            break;
-            
-        case 'online_groups_list':
-            // 收到群聊列表
-            onlineGroups = data.groups || [];
-            refreshOnlineGroupList();
-            // 为每个群聊创建本地记录
-            for (const group of onlineGroups) {
-                await createLocalOnlineGroupChat(group);
-            }
-            break;
-            
-        case 'group_messages':
-            // 收到群聊消息记录
-            handleOnlineGroupMessages(data);
-            break;
-            
-        case 'group_message':
-            // 收到实时群消息
-            handleOnlineGroupMessage(data);
-            break;
-            
-        case 'group_typing_start':
-            // 收到群成员正在输入的通知
-            handleGroupTypingStart(data);
-            break;
-            
-        case 'group_typing_stop':
-            // 收到群成员停止输入的通知
-            handleGroupTypingStop(data);
-            break;
-            
-        case 'group_members':
-            // 收到群成员列表
-            handleOnlineGroupMembers(data);
-            break;
-            
-        case 'group_character_updated':
-            // 角色更新成功
-            showToast('群内角色已更新');
-            break;
-            
-        case 'redpacket_claimed':
-            // 红包被领取，更新红包状态
-            handleRedPacketClaimed(data);
             break;
     }
 }
@@ -29889,19 +26234,16 @@ async function showOnlineSearchModal() {
         return;
     }
     
-    // ✅ 检查是否有可用的User角色（有微信号）
-    const userChars = await db.characters.where('type').equals('user').toArray();
-    const availableChars = userChars.filter(c => c.identity?.account);
-    
-    if (availableChars.length === 0) {
-        alert('请先创建至少一个User角色并设置微信号');
+    // 检查是否有已上线的角色
+    if (onlineCharacters.length === 0) {
+        alert('请先在「我」页面上线至少一个User角色');
         return;
     }
     
-    // 填充身份选择下拉框 - 使用本地User角色列表
+    // 填充身份选择下拉框
     const select = document.getElementById('online-search-my-persona');
-    select.innerHTML = availableChars.map(char => 
-        `<option value="${char.identity.account}">${char.remark || char.name} (${char.identity.account})</option>`
+    select.innerHTML = onlineCharacters.map(char => 
+        `<option value="${char.wx_account}">${char.nickname} (${char.wx_account})</option>`
     ).join('');
     
     // 清空之前的搜索结果
@@ -29923,97 +26265,49 @@ function doOnlineSearch() {
     }
     
     if (!onlineConnected) {
-        alert('服务器未连接，请先连接服务器');
+        alert('服务器未连接');
         return;
     }
     
-    if (!onlineSocket || onlineSocket.readyState !== WebSocket.OPEN) {
-        alert('WebSocket 连接未建立，请检查服务器连接');
-        return;
-    }
-    
-    console.log('[Online] 搜索微信号:', wxAccount);
-    
-    // 显示搜索中状态
-    const resultEl = document.getElementById('online-search-result');
-    const emptyEl = document.getElementById('online-search-empty');
-    if (resultEl) resultEl.style.display = 'none';
-    if (emptyEl) {
-        emptyEl.style.display = 'block';
-        emptyEl.innerHTML = '<div style="text-align:center; padding:20px; color:#999;">搜索中...</div>';
-    }
-    
-    try {
-        onlineSocket.send(JSON.stringify({
-            type: 'search_user',
-            wx_account: wxAccount
-        }));
-        console.log('[Online] 搜索请求已发送');
-    } catch (e) {
-        console.error('[Online] 发送搜索请求失败:', e);
-        alert('搜索失败: ' + e.message);
-    }
+    onlineSocket.send(JSON.stringify({
+        type: 'search_user',
+        wx_account: wxAccount
+    }));
 }
 
 // 显示搜索结果
 function displayOnlineSearchResult(result) {
-    console.log('[Online] 收到搜索结果:', result);
-    
     const resultEl = document.getElementById('online-search-result');
     const emptyEl = document.getElementById('online-search-empty');
     
     if (!result) {
-        console.log('[Online] 搜索结果为空');
-        if (resultEl) resultEl.style.display = 'none';
-        if (emptyEl) {
-            emptyEl.style.display = 'block';
-            emptyEl.innerHTML = '<div style="text-align:center; padding:20px; color:#999;">未找到该微信号<br><span style="font-size:12px; color:#ccc;">提示：只有角色上线后才能被搜索到</span></div>';
-        }
+        resultEl.style.display = 'none';
+        emptyEl.style.display = 'block';
         return;
     }
     
-    console.log('[Online] 显示搜索结果:', result.nickname);
+    emptyEl.style.display = 'none';
+    resultEl.style.display = 'block';
     
-    if (emptyEl) emptyEl.style.display = 'none';
-    if (resultEl) {
-        resultEl.style.display = 'block';
-        
-        // 填充结果
-        const avatarEl = document.getElementById('online-search-avatar');
-        const nicknameEl = document.getElementById('online-search-nickname');
-        const wxidEl = document.getElementById('online-search-wxid');
-        const bioEl = document.getElementById('online-search-bio');
-        const statusEl = document.getElementById('online-search-online-status');
-        
-        if (avatarEl) {
-            avatarEl.style.backgroundImage = result.avatar ? `url(${result.avatar})` : '';
-        }
-        if (nicknameEl) {
-            nicknameEl.textContent = result.nickname || '未设置昵称';
-        }
-        if (wxidEl) {
-            wxidEl.textContent = result.wx_account;
-        }
-        // 隐藏 bio（人设），保护隐私
-        if (bioEl) {
-            bioEl.style.display = 'none';
-        }
-        
-        if (statusEl) {
-            if (result.is_online) {
-                statusEl.textContent = '在线';
-                statusEl.style.background = '#e8f5e9';
-                statusEl.style.color = '#4caf50';
-            } else {
-                statusEl.textContent = '离线';
-                statusEl.style.background = '#f5f5f5';
-                statusEl.style.color = '#999';
-            }
-        }
-        
-        // 保存搜索结果供发送申请使用
-        resultEl.dataset.wxAccount = result.wx_account;
+    // 填充结果
+    document.getElementById('online-search-avatar').style.backgroundImage = result.avatar ? `url(${result.avatar})` : '';
+    document.getElementById('online-search-nickname').textContent = result.nickname || '未设置昵称';
+    document.getElementById('online-search-wxid').textContent = result.wx_account;
+    document.getElementById('online-search-bio').textContent = result.bio || '这个人很懒，什么都没写~';
+    
+    const statusEl = document.getElementById('online-search-online-status');
+    if (result.is_online) {
+        statusEl.textContent = '在线';
+        statusEl.style.background = '#e8f5e9';
+        statusEl.style.color = '#4caf50';
+    } else {
+        statusEl.textContent = '离线';
+        statusEl.style.background = '#f5f5f5';
+        statusEl.style.color = '#999';
     }
+    
+    // 保存搜索结果供发送申请使用
+    resultEl.dataset.wxAccount = result.wx_account;
 }
 
 // 发送联机好友申请
@@ -30070,7 +26364,6 @@ async function handleFriendRequestAccepted(data) {
     console.log('[Online] 好友申请被接受:', data);
     
     // 在本地创建一个联机好友角色
-    const accountId = getCurrentAccountId();
     const newChar = {
         name: data.friend_nickname,
         type: 'online_friend', // 特殊类型：联机好友
@@ -30084,12 +26377,13 @@ async function handleFriendRequestAccepted(data) {
             wx_account: data.friend_wx_account,
             user_id: data.friend_user_id
         },
-        wechat_status_by_user: {}  // 使用正确的字段名，与 getFriendStatus 匹配
+        friends_by_account: {}
     };
     
     // 设置好友关系
+    const accountId = getCurrentAccountId();
     if (accountId) {
-        newChar.wechat_status_by_user[accountId] = 'friend';
+        newChar.friends_by_account[accountId] = 'friend';
     }
     
     const charId = await db.characters.add(newChar);
@@ -30119,207 +26413,24 @@ async function handleOnlineIncomingMessage(data) {
         return;
     }
     
-    // ✅ 更新好友的头像（如果服务器发送了新头像）
-    if (data.from_avatar && data.from_avatar !== targetChar.avatar) {
-        console.log('[Online] 更新好友头像:', data.from_wx_account);
-        targetChar.avatar = data.from_avatar;
-        await db.characters.put(targetChar);
-        targetChar = await db.characters.get(targetChar.id);
-    }
-    
-    // ✅ 确保联机好友在当前账号下的好友状态是 'friend'
-    // 这样切换账号后消息也能正常显示
-    const currentFriendStatus = getFriendStatus(targetChar, accountId);
-    if (currentFriendStatus !== 'friend') {
-        console.log('[Online] 为当前账号设置联机好友状态为 friend');
-        if (!targetChar.wechat_status_by_user) targetChar.wechat_status_by_user = {};
-        targetChar.wechat_status_by_user[accountId] = 'friend';
-        // 更新后重新获取，确保后续逻辑使用最新数据
-        await db.characters.put(targetChar);
-        targetChar = await db.characters.get(targetChar.id);
-    }
-    
-    // 检查是否是特殊消息类型（如转账）
-    let msgObj = {
+    // 保存消息到聊天历史
+    let history = getChatHistory(targetChar, accountId);
+    history.push({
         role: 'char',
         content: data.content,
         time: data.timestamp || Date.now(),
         isOnlineMessage: true
-    };
-    
-    // 尝试解析 JSON 格式的特殊消息
-    try {
-        const parsed = JSON.parse(data.content);
-        if (parsed.__type === 'transfer') {
-            // 这是转账消息，转换为转账卡片格式
-            msgObj.type = 'transfer';
-            msgObj.content = JSON.stringify({
-                amount: parsed.amount,
-                desc: parsed.desc,
-                status: 'sent'  // 对于接收方来说是待接收状态
-            });
-            msgObj.id = 'trans_' + Date.now();
-            console.log('[Online] 收到转账消息:', parsed);
-        } else if (parsed.__type === 'familyCard') {
-            // 🎯 这是亲属卡消息（和转账一样的处理方式）
-            msgObj.type = 'familyCard';
-            msgObj.content = JSON.stringify({
-                fromName: parsed.fromName || data.from_nickname,
-                monthlyLimit: parsed.monthlyLimit || 0,
-                status: 'received',
-                isOnline: true,
-                message: parsed.message || ''
-            });
-            console.log('[Online] 收到亲属卡消息:', parsed);
-        } else if (parsed.__type === 'audio') {
-            // 这是语音消息
-            msgObj.type = 'audio';
-            msgObj.content = parsed.audio;
-            msgObj.duration = parsed.duration;
-            msgObj.effect = parsed.effect;
-            console.log('[Online] 收到语音消息, 时长:', parsed.duration, '秒, 效果:', parsed.effect);
-        }
-    } catch (e) {
-        // 不是 JSON，普通文本消息
-    }
-    
-    // 保存消息到聊天历史
-    let history = getChatHistory(targetChar, accountId);
-    history.push(msgObj);
+    });
     await setChatHistory(targetChar, accountId, history);
     
     // 如果当前正在查看这个聊天，更新UI
     if (currentChatCharId === targetChar.id) {
-        // 特殊消息类型需要重新渲染整个聊天（包括图片、转账、语音、亲属卡）
-        if (msgObj.type === 'transfer' || msgObj.type === 'familyCard' || msgObj.type === 'audio' || data.content.startsWith('[img:')) {
-            renderChatBody(targetChar);
-        } else {
-            // ✅ 使用服务器发送的头像，如果没有则使用本地头像
-            const avatarToUse = data.from_avatar || targetChar.avatar;
-            appendMessageToUI('char', data.content, avatarToUse);
-        }
+        appendMessageToUI('char', data.content, targetChar.avatar);
     } else {
         // 发送通知
-        let notifyContent = data.content;
-        if (msgObj.type === 'transfer') notifyContent = '[转账]';
-        if (msgObj.type === 'familyCard') notifyContent = '[亲属卡]';
-        if (msgObj.type === 'audio') notifyContent = '[语音消息]';
-        if (data.content.startsWith('[img:')) notifyContent = '[图片]';
-        sendSystemNotification(targetChar.name, notifyContent);
+        sendSystemNotification(targetChar.name, data.content);
     }
 }
-
-// ==================== 亲属卡处理函数 ====================
-
-// 处理收到亲属卡
-async function handleFamilyCardReceived(data) {
-    console.log('[Online] 收到亲属卡:', data);
-    
-    const accountId = getCurrentAccountId();
-    if (!accountId) return;
-    
-    // 查找对应的联机好友角色
-    const chars = await db.characters.where('type').equals('online_friend').toArray();
-    let friendChar = chars.find(c => c.onlineData?.wx_account === data.from_wx_account);
-    
-    if (!friendChar) {
-        console.warn('[Online] 未找到对应的联机好友');
-        return;
-    }
-    
-    // 保存亲属卡消息到聊天记录
-    let history = getChatHistory(friendChar, accountId);
-    const familyCardMsg = {
-        role: 'char',
-        type: 'familyCard',
-        content: JSON.stringify({
-            fromName: data.from_nickname,
-            from_wx_account: data.from_wx_account,
-            monthlyLimit: data.monthly_limit,
-            status: 'received',
-            isOnline: true
-        }),
-        time: Date.now()
-    };
-    
-    history.push(familyCardMsg);
-    await setChatHistory(friendChar, accountId, history);
-    
-    // 如果当前正在查看该聊天，刷新显示
-    if (currentChatCharId === friendChar.id) {
-        renderChatBody(friendChar);
-    }
-    
-    // 发送通知
-    showToast(`${data.from_nickname} 赠送了亲属卡`);
-    sendSystemNotification(friendChar.name, '[亲属卡]');
-    
-    // 重新获取亲属卡列表
-    const onlineUserChar = await getOrCreateOnlineUserChar();
-    if (onlineUserChar && onlineSocket) {
-        onlineSocket.send(JSON.stringify({
-            type: 'get_family_cards',
-            my_wx_account: onlineUserChar.identity.account
-        }));
-    }
-}
-
-// 处理亲属卡被使用
-async function handleFamilyCardUsed(data) {
-    console.log('[Online] 亲属卡被使用:', data);
-    
-    const accountId = getCurrentAccountId();
-    if (!accountId) return;
-    
-    // 查找对应的联机好友角色
-    const chars = await db.characters.where('type').equals('online_friend').toArray();
-    let friendChar = chars.find(c => c.onlineData?.wx_account === data.user_wx_account);
-    
-    if (!friendChar) {
-        console.warn('[Online] 未找到对应的联机好友');
-        return;
-    }
-    
-    // 显示通知
-    showToast(`${data.user_nickname} 使用了您的亲属卡 ¥${data.amount}`);
-    
-    // 添加流水记录到本地
-    const user = await db.characters.get(parseInt(accountId));
-    if (user) {
-        if (!user.identity) user.identity = {};
-        if (!user.identity.familyCardRecords) user.identity.familyCardRecords = [];
-        
-        user.identity.familyCardRecords.push({
-            type: 'expense',
-            user_wx_account: data.user_wx_account,
-            user_nickname: data.user_nickname,
-            amount: data.amount,
-            description: data.description,
-            used_this_month: data.used_this_month,
-            monthly_limit: data.monthly_limit,
-            time: Date.now()
-        });
-        
-        await db.characters.put(user);
-    }
-}
-
-// 处理亲属卡列表
-async function handleFamilyCardsList(data) {
-    console.log('[Online] 收到亲属卡列表:', data);
-    
-    // 保存到本地缓存
-    localStorage.setItem('online_family_cards_given', JSON.stringify(data.given || []));
-    localStorage.setItem('online_family_cards_received', JSON.stringify(data.received || []));
-    
-    // 如果亲属卡页面打开着，刷新显示
-    const familyCardPage = document.getElementById('family-card-page');
-    if (familyCardPage && familyCardPage.style.display !== 'none') {
-        renderFamilyCardList();
-    }
-}
-
-// ==================== 亲属卡处理函数结束 ====================
 
 // 请求已上线的角色列表
 function requestOnlineCharacters() {
@@ -30367,151 +26478,6 @@ function goOfflineWithCharacter(wxAccount) {
         type: 'go_offline',
         wx_account: wxAccount
     }));
-}
-
-// ✅ 自动上线所有 User 类型的角色
-// 自动注册所有 User 类型角色到服务器（不上线，仅用于搜索）
-async function autoRegisterAllUserCharacters() {
-    if (!onlineConnected || !onlineUserData) {
-        console.log('[Online] 未连接或未登录，跳过自动注册');
-        return;
-    }
-    
-    try {
-        // 获取所有 User 类型的角色
-        const userChars = await db.characters.where('type').equals('user').toArray();
-        
-        let registerCount = 0;
-        for (const char of userChars) {
-            const wxAccount = char.identity?.account;
-            const nickname = char.remark || char.name;
-            
-            // 验证必填字段
-            if (!wxAccount || !nickname) {
-                console.log(`[Online] 角色 ${char.name} 缺少微信号或昵称，跳过注册`);
-                continue;
-            }
-            
-            // 注册角色到服务器（不上线，is_online = 0）
-            console.log(`[Online] 注册角色到服务器: ${nickname} (${wxAccount})`);
-            
-            try {
-                onlineSocket.send(JSON.stringify({
-                    type: 'register_character',
-                    wx_account: wxAccount,
-                    nickname: nickname,
-                    avatar: char.avatar || '',
-                    bio: (char.description || '').substring(0, 100)
-                }));
-                registerCount++;
-                
-                // 添加小延迟避免请求过快
-                await new Promise(resolve => setTimeout(resolve, 100));
-            } catch (sendError) {
-                console.error(`[Online] 注册角色失败: ${nickname}`, sendError);
-            }
-        }
-        
-        if (registerCount > 0) {
-            console.log(`[Online] 已注册 ${registerCount} 个角色到服务器（可被搜索）`);
-        } else {
-            console.log('[Online] 没有可注册的角色（请确保 User 角色设置了微信号）');
-        }
-    } catch (e) {
-        console.error('[Online] 自动注册角色失败:', e);
-    }
-}
-
-async function autoGoOnlineAllUserCharacters() {
-    if (!onlineConnected || !onlineUserData) {
-        console.log('[Online] 未连接或未登录，跳过自动上线');
-        return;
-    }
-    
-    try {
-        // 获取所有 User 类型的角色
-        const userChars = await db.characters.where('type').equals('user').toArray();
-        
-        let onlineCount = 0;
-        for (const char of userChars) {
-            const wxAccount = char.identity?.account;
-            const nickname = char.remark || char.name;
-            
-            // 验证必填字段
-            if (!wxAccount || !nickname) {
-                console.log(`[Online] 角色 ${char.name} 缺少微信号或昵称，跳过上线`);
-                continue;
-            }
-            
-            // 上线角色
-            console.log(`[Online] 自动上线角色: ${nickname} (${wxAccount})`);
-            
-            try {
-                onlineSocket.send(JSON.stringify({
-                    type: 'go_online',
-                    wx_account: wxAccount,
-                    nickname: nickname,
-                    avatar: char.avatar || '',
-                    bio: (char.description || '').substring(0, 100),
-                    local_char_id: char.id
-                }));
-                onlineCount++;
-                
-                // 添加小延迟避免请求过快
-                await new Promise(resolve => setTimeout(resolve, 150));
-            } catch (sendError) {
-                console.error(`[Online] 上线角色失败: ${nickname}`, sendError);
-            }
-        }
-        
-        if (onlineCount > 0) {
-            console.log(`[Online] 已发送 ${onlineCount} 个角色的上线请求`);
-            // ✅ 延迟后请求在线角色列表，确保服务器已处理上线请求
-            setTimeout(() => {
-                if (onlineConnected) {
-                    requestOnlineCharacters();
-                }
-            }, 500);
-        } else {
-            console.log('[Online] 没有可上线的角色（请确保 User 角色设置了微信号）');
-        }
-    } catch (e) {
-        console.error('[Online] 自动上线角色失败:', e);
-    }
-}
-
-// ✅ 获取当前可用的在线角色（如果没有则自动上线一个）
-async function getOrCreateOnlineUserChar() {
-    if (!onlineConnected || !onlineUserData) {
-        return null;
-    }
-    
-    const userChars = await db.characters.where('type').equals('user').toArray();
-    
-    // 1. 先找已上线的角色
-    let onlineUserChar = userChars.find(c => 
-        c.identity?.account && onlineCharacters.some(oc => oc.wx_account === c.identity.account)
-    );
-    
-    // 2. 如果没有，找一个有微信号的角色并自动上线
-    if (!onlineUserChar) {
-        const charWithAccount = userChars.find(c => c.identity?.account);
-        if (charWithAccount) {
-            console.log('[Online] 自动上线角色:', charWithAccount.name);
-            const wxAccount = charWithAccount.identity.account;
-            onlineSocket.send(JSON.stringify({
-                type: 'go_online',
-                wx_account: wxAccount,
-                nickname: charWithAccount.remark || charWithAccount.name,
-                avatar: charWithAccount.avatar || '',
-                bio: charWithAccount.description?.substring(0, 100) || '',
-                local_char_id: charWithAccount.id
-            }));
-            onlineUserChar = charWithAccount;
-        }
-    }
-    
-    return onlineUserChar;
 }
 
 // 发送联机消息
@@ -30578,21 +26544,6 @@ async function showOnlineStatusPage() {
     
     // 更新角色列表
     await renderOnlineCharList();
-    
-    // 获取联机群聊列表
-    const myWx = getMyOnlineWxAccount();
-    if (myWx && onlineSocket && onlineSocket.readyState === WebSocket.OPEN) {
-        onlineSocket.send(JSON.stringify({
-            type: 'get_online_groups',
-            my_wx_account: myWx
-        }));
-    }
-    
-    // 初始渲染群聊列表
-    const groupContainer = document.getElementById('online-group-list');
-    if (groupContainer) {
-        renderOnlineGroupList(groupContainer);
-    }
 }
 
 // 隐藏联机状态页面
@@ -30607,33 +26558,15 @@ function hideOnlineStatusPage() {
 
 // 更新连接状态显示
 function updateOnlineConnectionStatus() {
-    const statusEl = document.getElementById('online-sync-status');
-    if (!statusEl) return;
+    const container = document.getElementById('online-status-connection');
+    if (!container) return;
     
     if (!onlineConnected) {
-        statusEl.innerHTML = `
-            <div style="display:flex; align-items:center; gap:8px;">
-                <span style="width:8px; height:8px; border-radius:50%; background:#ff3b30;"></span>
-                <span style="color:#ff3b30; font-weight:500;">未同步</span>
-            </div>
-            <div style="font-size:11px; color:#999; margin-top:4px;">未连接服务器，请在设置中配置</div>
-        `;
+        container.innerHTML = `<div style="background:#fff5f5; color:#ff3b30; padding:12px; border-radius:8px;">未连接服务器，请在设置中配置联机设置</div>`;
     } else if (!onlineUserData) {
-        statusEl.innerHTML = `
-            <div style="display:flex; align-items:center; gap:8px;">
-                <span style="width:8px; height:8px; border-radius:50%; background:#ff9800;"></span>
-                <span style="color:#ff9800; font-weight:500;">等待登录</span>
-            </div>
-            <div style="font-size:11px; color:#999; margin-top:4px;">已连接服务器，请先登录账号</div>
-        `;
+        container.innerHTML = `<div style="background:#fff8e1; color:#ff9800; padding:12px; border-radius:8px;">已连接服务器，请先登录</div>`;
     } else {
-        statusEl.innerHTML = `
-            <div style="display:flex; align-items:center; gap:8px;">
-                <span style="width:8px; height:8px; border-radius:50%; background:#4caf50; animation:pulse 2s infinite;"></span>
-                <span style="color:#4caf50; font-weight:500;">已同步</span>
-            </div>
-            <div style="font-size:11px; color:#666; margin-top:4px;">用户: ${onlineUserData.username} | 角色已自动上线</div>
-        `;
+        container.innerHTML = `<div style="background:#e8f5e9; color:#4caf50; padding:12px; border-radius:8px;">已连接 - ${onlineUserData.username}</div>`;
     }
 }
 
@@ -30646,11 +26579,9 @@ async function renderOnlineCharList() {
     const users = await db.characters.where('type').equals('user').toArray();
     
     // 检查每个角色的在线状态
-    // ✅ 修复：如果已登录，则认为所有有微信号的角色都在线（因为登录后会自动上线）
     const charList = users.map(char => {
         const wxAccount = char.identity?.account || '';
-        // 如果已连接并已登录，认为有微信号的角色都在线
-        const isOnline = wxAccount && onlineConnected && onlineUserData;
+        const isOnline = wxAccount && onlineCharacters.some(c => c.wx_account === wxAccount);
         return {
             id: char.id,
             name: char.remark || char.name,
@@ -30663,14 +26594,13 @@ async function renderOnlineCharList() {
     if (charList.length === 0) {
         container.innerHTML = `
             <div style="text-align:center; padding:40px 20px; color:#999;">
-                <div style="font-size:14px;">没有可用的角色</div>
-                <div style="font-size:12px; margin-top:8px;">请先在角色档案创建 User 类型角色，并设置微信号</div>
+                <div style="font-size:14px;">没有可上线的角色</div>
+                <div style="font-size:12px; margin-top:8px;">请先在角色档案创建User类型角色，并在微信中注册</div>
             </div>
         `;
         return;
     }
     
-    // 显示角色列表和在线状态，登录后会自动上线所有角色
     container.innerHTML = charList.map(char => `
         <div style="padding:12px 16px; background:#fff; display:flex; align-items:center; gap:12px; border-bottom:1px solid #f0f0f0;">
             <div style="width:44px; height:44px; border-radius:8px; background-image:url(${char.avatar}); background-size:cover; background-position:center; background-color:#e0e0e0;"></div>
@@ -30678,17 +26608,13 @@ async function renderOnlineCharList() {
                 <div style="font-size:15px; font-weight:500; color:#333;">${char.name}</div>
                 <div style="font-size:12px; color:#999; margin-top:2px;">${char.wxAccount}</div>
             </div>
-            <div style="display:flex; align-items:center;">
+            <div style="display:flex; align-items:center; gap:8px;">
                 ${char.isOnline ? `
-                    <span style="font-size:12px; color:#4caf50; padding:4px 10px; background:#e8f5e9; border-radius:10px; display:flex; align-items:center; gap:4px;">
-                        <span style="width:6px; height:6px; border-radius:50%; background:#4caf50;"></span>
-                        在线
-                    </span>
+                    <span style="font-size:12px; color:#4caf50;">● 在线</span>
+                    <button onclick="goOfflineWithCharacter('${char.wxAccount}')" style="padding:6px 12px; background:#f5f5f5; color:#ff3b30; border:none; border-radius:6px; font-size:13px; cursor:pointer;">下线</button>
                 ` : `
-                    <span style="font-size:12px; color:#999; padding:4px 10px; background:#f5f5f5; border-radius:10px; display:flex; align-items:center; gap:4px;">
-                        <span style="width:6px; height:6px; border-radius:50%; background:#999;"></span>
-                        离线
-                    </span>
+                    <span style="font-size:12px; color:#999;">○ 离线</span>
+                    <button onclick="goOnlineWithCharacter(${char.id})" style="padding:6px 12px; background:var(--ins-pink); color:#fff; border:none; border-radius:6px; font-size:13px; cursor:pointer;" ${!onlineConnected || !onlineUserData ? 'disabled style="opacity:0.5;padding:6px 12px; background:#ccc; color:#fff; border:none; border-radius:6px; font-size:13px;"' : ''}>上线</button>
                 `}
             </div>
         </div>
@@ -30703,2746 +26629,6 @@ async function refreshOnlineStatusPageContent() {
     // 刷新角色列表
     await renderOnlineCharList();
 }
-
-// 手动同步在线状态
-async function manualSyncOnline() {
-    const btn = document.getElementById('manual-sync-btn');
-    const btnText = document.getElementById('sync-btn-text');
-    const syncIcon = document.getElementById('sync-icon');
-    
-    if (!btn || !btnText) return;
-    
-    // 按钮变为同步中状态
-    btn.disabled = true;
-    btn.style.opacity = '0.7';
-    btnText.textContent = '同步中...';
-    if (syncIcon) {
-        syncIcon.style.animation = 'spin 1s linear infinite';
-    }
-    
-    try {
-        if (!onlineConnected) {
-            // 尝试重新连接服务器
-            const serverUrl = localStorage.getItem('online_server_url');
-            if (!serverUrl) {
-                showToast('请先在设置中配置服务器地址');
-                return;
-            }
-            
-            showToast('正在连接服务器...');
-            await connectToOnlineServer();
-            showToast('连接成功，正在同步...');
-        }
-        
-        // 如果已连接但未登录
-        if (onlineConnected && !onlineUserData) {
-            showToast('请先登录账号');
-            updateOnlineConnectionStatus();
-            return;
-        }
-        
-        // 如果已登录，重新同步所有角色
-        if (onlineConnected && onlineUserData) {
-            console.log('[Online] 手动同步：重新注册并上线所有角色');
-            
-            // 重新注册角色
-            await autoRegisterAllUserCharacters();
-            
-            // 重新上线所有角色
-            await autoGoOnlineAllUserCharacters();
-            
-            // 等待一下让服务器处理
-            await new Promise(resolve => setTimeout(resolve, 500));
-            
-            // 刷新角色列表
-            requestOnlineCharacters();
-            await refreshOnlineStatusPageContent();
-            
-            showToast('同步成功');
-        }
-        
-        updateOnlineConnectionStatus();
-        
-    } catch (error) {
-        console.error('[Online] 同步失败:', error);
-        showToast('同步失败: ' + (error.message || '未知错误'));
-    } finally {
-        // 恢复按钮状态
-        btn.disabled = false;
-        btn.style.opacity = '1';
-        btnText.textContent = '立即同步';
-        if (syncIcon) {
-            syncIcon.style.animation = '';
-        }
-    }
-}
-
-// 自动同步定时器（每30秒检查一次）
-let autoSyncTimer = null;
-
-function startAutoSync() {
-    // 清除旧的定时器
-    if (autoSyncTimer) {
-        clearInterval(autoSyncTimer);
-    }
-    
-    // 每30秒自动检查并同步
-    autoSyncTimer = setInterval(async () => {
-        // 只在已登录但未连接的情况下尝试自动重连
-        if (!onlineConnected && onlineToken && onlineUserData) {
-            console.log('[Online] 自动同步：检测到断开连接，尝试重新连接...');
-            try {
-                await connectToOnlineServer();
-                console.log('[Online] 自动重连成功');
-            } catch (error) {
-                console.error('[Online] 自动重连失败:', error);
-            }
-        }
-        
-        // 如果已连接，定期请求角色状态
-        if (onlineConnected && onlineUserData) {
-            requestOnlineCharacters();
-        }
-    }, 30000); // 30秒
-}
-
-function stopAutoSync() {
-    if (autoSyncTimer) {
-        clearInterval(autoSyncTimer);
-        autoSyncTimer = null;
-    }
-}
-
-// ==================== 联机群聊功能 ====================
-
-// 刷新联机群聊列表
-function refreshOnlineGroupList() {
-    // 如果群聊页面打开了，刷新显示
-    const container = document.getElementById('online-group-list');
-    if (container) {
-        renderOnlineGroupList(container);
-    }
-}
-
-// 渲染联机群聊列表
-function renderOnlineGroupList(container) {
-    if (onlineGroups.length === 0) {
-        container.innerHTML = `<div style="text-align:center; padding:40px; color:#999;">暂无联机群聊</div>`;
-        return;
-    }
-    
-    container.innerHTML = onlineGroups.map(g => `
-        <div onclick="openOnlineGroup('${g.id}')" style="padding:14px 16px; background:#fff; display:flex; align-items:center; gap:12px; border-bottom:1px solid #f0f0f0; cursor:pointer;">
-            <div style="width:48px; height:48px; border-radius:8px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); display:flex; align-items:center; justify-content:center; color:#fff; font-size:18px;">👥</div>
-            <div style="flex:1;">
-                <div style="font-size:15px; font-weight:500; color:#333;">${g.name}</div>
-                <div style="font-size:12px; color:#999; margin-top:2px;">联机群聊</div>
-            </div>
-            <svg viewBox="0 0 24 24" style="width:20px; height:20px; stroke:#ccc; fill:none;"><polyline points="9 18 15 12 9 6"></polyline></svg>
-        </div>
-    `).join('');
-}
-
-// 处理群聊邀请 - 保存到数据库，显示在"新的好友"页面
-async function handleOnlineGroupInvite(data) {
-    // 将群聊邀请保存到 friend_requests 表
-    const accountId = getCurrentAccountId();
-    if (!accountId) return;
-    
-    // 检查是否已存在相同的邀请
-    const existingInvites = await db.friend_requests
-        .where('toAccountId')
-        .equals(accountId)
-        .toArray();
-    const alreadyExists = existingInvites.some(r => 
-        r.isGroupInvite && 
-        r.groupData?.group_id === data.group_id &&
-        r.status === 'pending'
-    );
-    if (alreadyExists) return;
-    
-    // 创建群聊邀请记录
-    await db.friend_requests.add({
-        toAccountId: accountId,
-        isOnline: true,
-        isGroupInvite: true,
-        status: 'pending',
-        time: Date.now(),
-        groupData: {
-            group_id: data.group_id,
-            group_name: data.group_name,
-            inviter_wx: data.inviter_wx,
-            inviter_name: data.inviter_name
-        }
-    });
-    
-    // 显示通知
-    showToast(`${data.inviter_name} 邀请你加入群聊"${data.group_name}"`);
-    
-    // 如果新的好友页面正在显示，刷新它
-    if (document.getElementById('new-friends-page').style.display !== 'none') {
-        await renderNewFriendsPage();
-    }
-}
-
-// 在本地数据库创建联机群聊记录，让它显示在消息列表中
-async function createLocalOnlineGroupChat(group) {
-    const accountId = getCurrentAccountId();
-    if (!accountId) return;
-    
-    try {
-        // 检查是否已存在
-        const existing = await db.group_chats
-            .where('ownerAccountId').equals(accountId)
-            .filter(g => g.isOnlineGroup && g.onlineGroupId === group.id)
-            .first();
-        
-        if (existing) {
-            console.log('联机群聊已存在于本地，跳过创建');
-            return;
-        }
-        
-        // 创建本地群聊记录
-        const groupChat = {
-            name: group.name,
-            avatar: DEFAULT_GROUP_AVATAR,
-            memberIds: [], // 联机群聊的成员由服务器管理
-            ownerAccountId: accountId,
-            created_at: group.created_at || Date.now(),
-            updated_at: Date.now(),
-            is_pinned: false,
-            chat_history: [{
-                role: 'system',
-                content: '联机群聊已创建',
-                time: Date.now()
-            }],
-            isOnlineGroup: true, // 标记为联机群聊
-            onlineGroupId: group.id, // 联机群聊的ID
-            onlineGroupCreator: group.creator_wx // 创建者微信号
-        };
-        
-        await db.group_chats.add(groupChat);
-        console.log('已在本地创建联机群聊记录');
-        
-        // 刷新聊天列表
-        if (document.querySelector('.wechat-tab-item.active')?.innerText.includes('微信')) {
-            renderWechatList(document.getElementById('wechat-content'));
-        }
-    } catch (e) {
-        console.error('创建本地联机群聊记录失败:', e);
-    }
-}
-
-// 更新本地联机群聊的最后消息
-async function updateLocalOnlineGroupLastMessage(onlineGroupId, message) {
-    const accountId = getCurrentAccountId();
-    if (!accountId) return;
-    
-    try {
-        // 查找对应的本地群聊记录
-        const groups = await db.group_chats
-            .where('ownerAccountId').equals(accountId)
-            .filter(g => g.isOnlineGroup && g.onlineGroupId === onlineGroupId)
-            .toArray();
-        
-        if (groups.length === 0) {
-            console.log('未找到本地联机群聊记录');
-            return;
-        }
-        
-        const group = groups[0];
-        
-        // 添加消息到聊天历史
-        if (!group.chat_history) {
-            group.chat_history = [];
-        }
-        
-        // 构建消息记录
-        const chatMessage = {
-            role: 'assistant', // 群聊消息视为助手消息
-            content: message.content,
-            time: message.created_at || Date.now(),
-            sender_name: message.sender_name,
-            sender_type: message.sender_type,
-            character_name: message.character_name
-        };
-        
-        group.chat_history.push(chatMessage);
-        group.updated_at = Date.now();
-        
-        await db.group_chats.put(group);
-        
-        // 刷新聊天列表（如果正在显示）
-        if (document.querySelector('.wechat-tab-item.active')?.innerText.includes('微信')) {
-            renderWechatList(document.getElementById('wechat-content'));
-        }
-    } catch (e) {
-        console.error('更新本地联机群聊消息失败:', e);
-    }
-}
-
-// 显示加入群聊弹窗（选择要带入的角色）
-async function showJoinOnlineGroupModal(groupId, groupName) {
-    // 获取所有可用的角色（非User类型）
-    const chars = await db.characters.toArray();
-    const availableChars = chars.filter(c => c.type !== 'user' && c.type !== 'online_friend');
-    
-    const modal = document.createElement('div');
-    modal.id = 'join-group-modal';
-    modal.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;`;
-    
-    modal.innerHTML = `
-        <div style="background:#fff; border-radius:16px; padding:24px; width:85%; max-width:360px;">
-            <h3 style="margin:0 0 16px 0; text-align:center; font-size:18px;">加入「${groupName}」</h3>
-            
-            <div style="margin-bottom:16px;">
-                <div style="font-size:13px; color:#666; margin-bottom:8px;">选择要带入群聊的角色（可选）：</div>
-                <select id="join-group-char-select" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px;">
-                    <option value="">不带角色</option>
-                    ${availableChars.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
-                </select>
-            </div>
-            
-            <div style="font-size:12px; color:#999; margin-bottom:20px; line-height:1.5;">
-                带入角色后，你可以在群聊中让该角色发言（调用AI）
-            </div>
-            
-            <div style="display:flex; gap:12px;">
-                <button onclick="this.closest('#join-group-modal').remove()" style="flex:1; padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:15px;">取消</button>
-                <button onclick="doJoinOnlineGroup('${groupId}')" style="flex:1; padding:12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:15px;">加入</button>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(modal);
-}
-
-// 执行加入群聊
-async function doJoinOnlineGroup(groupId) {
-    const charSelect = document.getElementById('join-group-char-select');
-    const charId = charSelect?.value;
-    
-    let myChar = null;
-    if (charId) {
-        const char = await db.characters.get(parseInt(charId));
-        if (char) {
-            myChar = {
-                name: char.name,
-                avatar: char.avatar || '',
-                desc: char.description?.substring(0, 200) || ''
-            };
-        }
-    }
-    
-    // 获取我的上线微信号
-    const myWx = getMyOnlineWxAccount();
-    if (!myWx) {
-        alert('请先上线一个角色');
-        return;
-    }
-    
-    onlineSocket.send(JSON.stringify({
-        type: 'join_online_group',
-        group_id: groupId,
-        my_wx_account: myWx,
-        my_character: myChar
-    }));
-    
-    document.getElementById('join-group-modal')?.remove();
-}
-
-// 获取我当前上线的微信号
-function getMyOnlineWxAccount() {
-    if (!onlineCharacters || onlineCharacters.length === 0) return null;
-    return onlineCharacters[0]?.wx_account;
-}
-
-// 显示创建联机群聊弹窗
-async function showCreateOnlineGroupModal() {
-    if (!onlineConnected || !onlineUserData) {
-        alert('请先连接服务器并登录');
-        return;
-    }
-    
-    // 获取联机好友列表
-    const friends = await db.characters.where('type').equals('online_friend').toArray();
-    
-    // 获取可选的角色（非User类型）
-    const chars = await db.characters.toArray();
-    const availableChars = chars.filter(c => c.type !== 'user' && c.type !== 'online_friend');
-    
-    const modal = document.createElement('div');
-    modal.id = 'create-online-group-modal';
-    modal.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;`;
-    
-    modal.innerHTML = `
-        <div style="background:#fff; border-radius:16px; width:90%; max-width:400px; max-height:80vh; display:flex; flex-direction:column;">
-            <div style="padding:16px 20px; border-bottom:1px solid #f0f0f0; display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-size:17px; font-weight:600;">创建联机群聊</span>
-                <button onclick="this.closest('#create-online-group-modal').remove()" style="background:none; border:none; font-size:20px; color:#999; cursor:pointer;">×</button>
-            </div>
-            
-            <div style="flex:1; overflow-y:auto; padding:20px;">
-                <div style="margin-bottom:16px;">
-                    <label style="font-size:13px; color:#666; display:block; margin-bottom:6px;">群名称</label>
-                    <input type="text" id="og-name" placeholder="输入群聊名称" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px; box-sizing:border-box;">
-                </div>
-                
-                <div style="margin-bottom:16px;">
-                    <label style="font-size:13px; color:#666; display:block; margin-bottom:6px;">选择我要带入的角色（可选）</label>
-                    <select id="og-my-char" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px;">
-                        <option value="">不带角色</option>
-                        ${availableChars.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
-                    </select>
-                </div>
-                
-                <div style="margin-bottom:16px;">
-                    <label style="font-size:13px; color:#666; display:block; margin-bottom:6px;">邀请联机好友（可多选）</label>
-                    <div id="og-friends-list" style="max-height:200px; overflow-y:auto; border:1px solid #ddd; border-radius:8px;">
-                        ${friends.length === 0 ? 
-                            `<div style="padding:20px; text-align:center; color:#999;">暂无联机好友</div>` :
-                            friends.map(f => `
-                                <label style="display:flex; align-items:center; padding:10px 12px; border-bottom:1px solid #f5f5f5; cursor:pointer;">
-                                    <input type="checkbox" value="${f.onlineData?.wx_account || ''}" style="margin-right:10px;">
-                                    <div style="width:36px; height:36px; border-radius:6px; background-image:url(${f.avatar}); background-size:cover; background-color:#e0e0e0; margin-right:10px;"></div>
-                                    <span style="font-size:14px;">${f.name}</span>
-                                </label>
-                            `).join('')
-                        }
-                    </div>
-                </div>
-            </div>
-            
-            <div style="padding:16px 20px; border-top:1px solid #f0f0f0;">
-                <button onclick="doCreateOnlineGroup()" style="width:100%; padding:14px; background:var(--ins-pink); color:#fff; border:none; border-radius:10px; font-size:16px; font-weight:500;">创建群聊</button>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(modal);
-}
-
-// 执行创建联机群聊
-async function doCreateOnlineGroup() {
-    const name = document.getElementById('og-name').value.trim();
-    if (!name) {
-        alert('请输入群名称');
-        return;
-    }
-    
-    const myWx = getMyOnlineWxAccount();
-    if (!myWx) {
-        alert('请先上线一个角色');
-        return;
-    }
-    
-    // 获取选择的角色
-    let myChar = null;
-    const charId = document.getElementById('og-my-char').value;
-    if (charId) {
-        const char = await db.characters.get(parseInt(charId));
-        if (char) {
-            myChar = {
-                name: char.name,
-                avatar: char.avatar || '',
-                desc: char.description?.substring(0, 200) || ''
-            };
-        }
-    }
-    
-    // 获取邀请的好友
-    const checkboxes = document.querySelectorAll('#og-friends-list input[type="checkbox"]:checked');
-    const inviteWxs = Array.from(checkboxes).map(cb => cb.value).filter(v => v);
-    
-    onlineSocket.send(JSON.stringify({
-        type: 'create_online_group',
-        name: name,
-        my_wx_account: myWx,
-        invite_wx_accounts: inviteWxs,
-        my_character: myChar
-    }));
-    
-    document.getElementById('create-online-group-modal')?.remove();
-}
-
-// 打开联机群聊
-function openOnlineGroup(groupId) {
-    currentOnlineGroupId = groupId;
-    currentOnlineGroupMessages = [];
-    currentOnlineGroupMembers = [];
-    
-    const group = onlineGroups.find(g => g.id === groupId);
-    if (!group) return;
-    
-    // 显示群聊页面
-    showOnlineGroupChatPage(group);
-    
-    // 应用背景图（延迟一下确保页面已创建）
-    setTimeout(() => {
-        applyOnlineGroupBackground(groupId);
-    }, 100);
-    
-    // 请求群成员
-    const myWx = getMyOnlineWxAccount();
-    if (myWx) {
-        onlineSocket.send(JSON.stringify({
-            type: 'get_group_members',
-            group_id: groupId,
-            my_wx_account: myWx
-        }));
-        
-        // 请求消息记录
-        onlineSocket.send(JSON.stringify({
-            type: 'get_group_messages',
-            group_id: groupId,
-            my_wx_account: myWx,
-            limit: 100
-        }));
-    }
-}
-
-// 显示联机群聊页面
-function showOnlineGroupChatPage(group) {
-    // 创建或显示群聊页面
-    let page = document.getElementById('online-group-chat-page');
-    if (!page) {
-        page = document.createElement('div');
-        page.id = 'online-group-chat-page';
-        page.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:#ffffff; z-index:300; display:flex; flex-direction:column;`;
-        document.body.appendChild(page);
-    }
-    
-    page.innerHTML = `
-        <div class="wechat-header" style="background:#fff; border-bottom:1px solid #f0f0f0;">
-            <div class="back-btn" onclick="hideOnlineGroupChat()" style="margin:0; background:none; width:40px; justify-content:flex-start; color:#333;">
-                <svg class="svg-icon" viewBox="0 0 24 24" style="width:24px; height:24px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
-            </div>
-            <div class="wechat-title" id="online-group-chat-title" style="flex:1; text-align:center;">${group.name}</div>
-            <div onclick="showOnlineGroupInfo('${group.id}')" style="width:40px; display:flex; justify-content:flex-end; cursor:pointer;">
-                <svg viewBox="0 0 24 24" style="width:20px; height:20px; stroke:#333; fill:none;"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg>
-            </div>
-        </div>
-        
-        <div id="online-group-messages" style="flex:1; overflow-y:auto; padding:16px;">
-            <div style="text-align:center; padding:20px; color:#999;">加载中...</div>
-        </div>
-        
-        <div class="chat-footer" id="online-group-footer">
-            <div class="chat-input-bar">
-                <!-- 左侧：生成按钮 (让角色说话) -->
-                <div class="chat-icon-btn" onclick="letMyCharacterSpeak()" title="让角色说话">
-                    <svg class="svg-icon" viewBox="0 0 24 24"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M9 5H1"/></svg>
-                </div>
-                
-                <!-- 中间：输入框 -->
-                <input type="text" class="chat-input" id="online-group-input" placeholder="发送消息..." onfocus="closeOnlineGroupPanel()">
-                
-                <!-- 右侧：表情 -->
-                <div class="chat-icon-btn" onclick="toggleOnlineGroupPanel('emoji')">
-                    <svg class="svg-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><line x1="9" y1="9" x2="9.01" y2="9"></line><line x1="15" y1="9" x2="15.01" y2="9"></line></svg>
-                </div>
-                
-                <!-- 右侧：菜单 (+) -->
-                <div class="chat-icon-btn" id="online-group-btn-more" onclick="toggleOnlineGroupPanel('action')">
-                    <svg class="svg-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
-                </div>
-                
-                <!-- 右侧：发送 (Send) - 默认隐藏 -->
-                <div class="chat-send-btn" id="online-group-btn-send" onclick="sendOnlineGroupMsg()">
-                    <svg class="svg-icon" viewBox="0 0 24 24" style="width:18px; height:18px; stroke-width:3; transform: rotate(90deg) translateX(-2px);"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
-                </div>
-            </div>
-            
-            <!-- 面板容器 -->
-            <div class="chat-panel-container" id="online-group-panel-container">
-                <!-- 表情包 Tab -->
-                <div style="height: 40px; display: flex; border-bottom: 1px solid #eee; background: #fff;" id="online-group-emoji-tab-bar">
-                    <div class="wechat-tab-item active" onclick="switchOnlineGroupEmojiTab('emoji')" style="flex:1; font-size:14px;">Emoji</div>
-                    <div class="wechat-tab-item" onclick="switchOnlineGroupEmojiTab('sticker')" style="flex:1; font-size:14px;">表情包</div>
-                </div>
-                <!-- Emoji 面板 -->
-                <div class="emoji-panel" id="online-group-emoji-panel" style="height: calc(100% - 40px);">
-                    <!-- 动态生成表情 -->
-                </div>
-                <!-- 自定义表情包面板 -->
-                <div class="emoji-panel" id="online-group-sticker-panel" style="height: calc(100% - 40px); display: none; grid-template-columns: repeat(4, 1fr);">
-                    <!-- 动态生成自定义表情 -->
-                    <div style="text-align:center; grid-column:span 4; color:#999; margin-top:20px;">暂无表情包<br>请在详情页添加</div>
-                </div>
-
-                <!-- 功能菜单面板 -->
-                <div class="action-panel" id="online-group-action-panel">
-                    <div class="action-item" onclick="onlineGroupVoiceInput()">
-                        <div class="action-icon-box">
-                            <svg class="svg-icon" viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
-                        </div>
-                        <div class="action-name">语音输入</div>
-                    </div>
-                    <div class="action-item" onclick="onlineGroupSendImage()">
-                        <div class="action-icon-box">
-                            <svg class="svg-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
-                        </div>
-                        <div class="action-name">相册</div>
-                    </div>
-                    <div class="action-item" onclick="onlineGroupTransfer()">
-                        <div class="action-icon-box transfer-icon">
-                            <svg class="svg-icon" viewBox="0 0 24 24"><path d="M17 1l4 4-4 4"></path><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><path d="M7 23l-4-4 4-4"></path><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
-                        </div>
-                        <div class="action-name">转账</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    page.style.display = 'flex';
-    
-    // 绑定回车发送
-    const input = document.getElementById('online-group-input');
-    input.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') sendOnlineGroupMsg();
-    });
-    
-    // 绑定输入变化事件，控制发送按钮显示
-    input.addEventListener('input', function() {
-        const btnSend = document.getElementById('online-group-btn-send');
-        const btnMore = document.getElementById('online-group-btn-more');
-        if (this.value.trim()) {
-            btnSend.style.display = 'flex';
-            btnMore.style.display = 'none';
-        } else {
-            btnSend.style.display = 'none';
-            btnMore.style.display = 'flex';
-        }
-    });
-    
-    // 初始化Emoji面板
-    initOnlineGroupEmojiPanel();
-    
-    // 应用背景图
-    applyOnlineGroupBackground(group.id);
-}
-
-// 隐藏联机群聊页面
-function hideOnlineGroupChat() {
-    const page = document.getElementById('online-group-chat-page');
-    if (page) page.style.display = 'none';
-    currentOnlineGroupId = null;
-}
-
-// 处理群聊消息记录
-function handleOnlineGroupMessages(data) {
-    if (data.group_id !== currentOnlineGroupId) return;
-    currentOnlineGroupMessages = data.messages || [];
-    // 按时间戳排序，确保消息顺序正确
-    currentOnlineGroupMessages.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
-    renderOnlineGroupMessages();
-}
-
-// 处理实时群消息
-async function handleOnlineGroupMessage(data) {
-    // 更新本地群聊记录，让消息列表显示最新消息
-    await updateLocalOnlineGroupLastMessage(data.group_id, data.message);
-    
-    if (data.group_id !== currentOnlineGroupId) {
-        // 不是当前群，显示通知
-        showToast(`[${data.message.sender_name}] ${data.message.content.substring(0, 20)}...`);
-        return;
-    }
-    
-    // 如果是系统消息，检查是否是红包领取通知，如果是则更新红包状态
-    if (data.message.msg_type === 'system' && data.message.content.includes('领取了红包')) {
-        // 尝试从系统消息中提取红包ID和领取者信息
-        // 格式：XXX 领取了红包，获得 ¥X.XX
-        // 由于我们无法从系统消息中直接获取红包ID，这里只更新显示
-        // 实际的红包状态更新在 claimOnlineGroupRedPacket 中完成
-    }
-    
-    currentOnlineGroupMessages.push(data.message);
-    // 按时间戳排序，确保消息顺序正确
-    currentOnlineGroupMessages.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
-    renderOnlineGroupMessages();
-}
-
-// 处理群成员开始输入
-function handleGroupTypingStart(data) {
-    // 只在当前打开的群聊中显示
-    if (data.group_id !== currentOnlineGroupId) return;
-    
-    const chatTitleEl = document.getElementById('online-group-chat-title');
-    if (chatTitleEl) {
-        chatTitleEl.innerText = `${data.character_name} 正在输入中...`;
-    }
-}
-
-// 处理群成员停止输入
-function handleGroupTypingStop(data) {
-    // 只在当前打开的群聊中显示
-    if (data.group_id !== currentOnlineGroupId) return;
-    
-    const chatTitleEl = document.getElementById('online-group-chat-title');
-    const group = onlineGroups.find(g => g.id === currentOnlineGroupId);
-    if (chatTitleEl && group) {
-        chatTitleEl.innerText = group.name;
-    }
-}
-
-// 渲染群聊消息
-function renderOnlineGroupMessages() {
-    const container = document.getElementById('online-group-messages');
-    if (!container) return;
-    
-    const myWx = getMyOnlineWxAccount();
-    
-    container.innerHTML = currentOnlineGroupMessages.map(msg => {
-        // 处理系统消息
-        if (msg.msg_type === 'system' || msg.sender_type === 'system') {
-            return `<div style="text-align:center; padding:8px 16px; margin:8px 0;">
-                <span style="background:#fff; color:#999; font-size:12px; padding:4px 12px; border-radius:4px; border:1px solid #ddd;">${msg.content}</span>
-            </div>`;
-        }
-        
-        const isCharacter = msg.sender_type === 'character';
-        // 只有我发的真人消息才显示在右边，所有角色消息（包括我的角色）都显示在左边
-        const isMe = msg.sender_wx === myWx && !isCharacter;
-        const avatar = isCharacter ? (msg.character_avatar || '') : (msg.sender_avatar || '');
-        const name = isCharacter ? `${msg.character_name} (${msg.sender_name})` : msg.sender_name;
-        // 确保头像URL不为空字符串才设置背景图
-        const avatarStyle = (avatar && avatar.trim()) ? `background-image:url(${avatar})` : 'background:#ccc';
-        
-        let messageContent = '';
-        let isSpecialMsg = false;
-        
-        // 尝试解析JSON消息（语音、转账等特殊消息）
-        let parsedContent = null;
-        try {
-            if (msg.content && msg.content.startsWith('{') && msg.content.includes('__type')) {
-                parsedContent = JSON.parse(msg.content);
-            }
-        } catch(e) {}
-        
-        // 处理语音消息
-        if (parsedContent && parsedContent.__type === 'audio') {
-            isSpecialMsg = true;
-            const audioId = 'online_group_audio_' + (msg.id || msg.created_at);
-            const effectIcon = parsedContent.effect === 'loli' ? '🎀' : 
-                              parsedContent.effect === 'uncle' ? '🧔' :
-                              parsedContent.effect === 'robot' ? '🤖' : '🎙️';
-            messageContent = `
-                <div class="online-audio-bubble" style="min-width:120px; max-width:200px; padding:10px 14px; background:${isMe ? '#ffe4e8' : '#f2f2f7'}; border-radius:18px; display:flex; align-items:center; gap:10px; cursor:pointer;" onclick="playOnlineGroupAudio('${audioId}')">
-                    <div class="audio-play-icon" id="icon_${audioId}" data-original="${effectIcon}" style="font-size:20px;">${effectIcon}</div>
-                    <div style="flex:1; display:flex; flex-direction:column;">
-                        <div style="height:20px; background:#fff; border-radius:10px; position:relative; overflow:hidden;">
-                            <div style="height:100%; background:var(--ins-pink); width:0%; transition:width 0.1s;" id="progress_${audioId}"></div>
-                        </div>
-                        <div style="font-size:11px; color:#999; margin-top:2px;">${parsedContent.duration}"</div>
-                    </div>
-                    <audio id="${audioId}" src="${parsedContent.audio}" style="display:none;"></audio>
-                </div>
-            `;
-        }
-        // 处理红包消息
-        else if (msg.msg_type === 'redpacket') {
-            isSpecialMsg = true;
-            try {
-                const data = JSON.parse(msg.content);
-                const msgId = msg.id || ('rp_' + msg.created_at);
-                const claimedCount = (data.claimed || []).length;
-                const isAllClaimed = claimedCount >= data.count;
-                const myWx = getMyOnlineWxAccount();
-                const hasClaimed = data.claimed?.includes(myWx) || false;
-                
-                messageContent = `<div onclick="showOnlineGroupRedPacketDetail('${msgId}')" style="width:220px; background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.08); border:1px solid #eee; cursor:pointer;">
-                    <div style="padding:14px 16px; display:flex; align-items:center; gap:12px; background:linear-gradient(135deg, #ff6b6b 0%, #ff8e8e 100%);">
-                        <div style="width:40px; height:40px; background:#fff; border-radius:10px; display:flex; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,0.3);">
-                            <svg viewBox="0 0 24 24" style="width:20px; height:20px; stroke:#ff6b6b; fill:#ff6b6b; stroke-width:1.5;"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><circle cx="12" cy="15" r="2"/></svg>
-                        </div>
-                        <div style="flex:1;">
-                            <div style="font-size:13px; color:rgba(255,255,255,0.9); margin-bottom:2px;">${escapeHtml(data.wish || '恭喜发财')}</div>
-                            <div style="font-size:11px; color:rgba(255,255,255,0.7);">${data.redpacketType === 'lucky' ? '拼手气红包' : '普通红包'}</div>
-                        </div>
-                    </div>
-                    <div style="padding:8px 16px; display:flex; justify-content:space-between; align-items:center; border-top:1px solid #eee;">
-                        <span style="font-size:11px; color:#999;">${isAllClaimed ? '已领完' : `${claimedCount}/${data.count}个已领取`}</span>
-                        <span style="font-size:11px; color:#999;">${hasClaimed ? '已领取' : isAllClaimed ? '已领完' : '领取'}</span>
-                    </div>
-                </div>`;
-            } catch(e) {
-                messageContent = renderMessageContent(msg.content);
-                isSpecialMsg = false;
-            }
-        }
-        // 处理转账消息
-        else if (msg.msg_type === 'transfer') {
-            isSpecialMsg = true;
-            try {
-                const data = JSON.parse(msg.content);
-                const msgId = msg.id || ('trans_' + msg.created_at);
-                const targetHint = data.targetName ? `转给 ${data.targetName}` : '转账';
-                messageContent = `<div onclick="receiveOnlineGroupTransfer('${msgId}')" style="width:220px; background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.08); border:1px solid #eee; cursor:pointer;">
-                    <div style="padding:14px 16px; display:flex; align-items:center; gap:12px;">
-                        <div style="width:40px; height:40px; background:#fff; border-radius:10px; display:flex; align-items:center; justify-content:center; border:1px solid #eee;">
-                            <svg viewBox="0 0 24 24" style="width:20px; height:20px; stroke:#666; fill:none; stroke-width:1.5;"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
-                        </div>
-                        <div style="flex:1;">
-                            <div style="font-size:18px; font-weight:600; color:#333; margin-bottom:2px;">¥${data.amount}</div>
-                            <div style="font-size:12px; color:#999;">${escapeHtml(data.desc || '转账')}</div>
-                        </div>
-                    </div>
-                    <div style="padding:8px 16px; display:flex; justify-content:space-between; align-items:center; border-top:1px solid #eee;">
-                        <span style="font-size:11px; color:#999;">${targetHint}</span>
-                        <span style="font-size:11px; color:#999;">${data.status === 'received' ? '已收款' : '待收款'}</span>
-                    </div>
-                </div>`;
-            } catch(e) {
-                messageContent = renderMessageContent(msg.content);
-                isSpecialMsg = false;
-            }
-        } else {
-            // 普通消息
-            messageContent = renderMessageContent(msg.content);
-        }
-        
-        // 完全按照普通群聊的样式
-        if (isMe) {
-            // 我发的消息
-            if (isSpecialMsg) {
-                return `
-                    <div style="display:flex; flex-direction:row-reverse; align-items:flex-end; gap:8px; margin-bottom:12px;">
-                        <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
-                        <div style="display:flex; flex-direction:column; align-items:flex-end; max-width:70%;">
-                            <div style="font-size:12px; color:#999; margin-bottom:2px;">${name}${isCharacter ? ' 🎭' : ''}</div>
-                            <div style="display:flex; align-items:flex-end; gap:6px;">
-                                <div style="font-size:10px; color:#999;">${formatChatTime(msg.created_at)}</div>
-                                <div>${messageContent}</div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            } else {
-                return `
-                    <div style="display:flex; flex-direction:row-reverse; align-items:flex-end; gap:8px; margin-bottom:12px;">
-                        <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
-                        <div style="display:flex; flex-direction:column; align-items:flex-end; max-width:70%;">
-                            <div style="font-size:12px; color:#999; margin-bottom:2px;">${name}${isCharacter ? ' 🎭' : ''}</div>
-                            <div style="display:flex; align-items:flex-end; gap:6px;">
-                                <div style="font-size:10px; color:#999;">${formatChatTime(msg.created_at)}</div>
-                                <div style="background:#ffe4e8; color:#000; padding:6px 10px; border-radius:18px 18px 4px 18px; font-size:15px; line-height:1.5; word-break:break-word;">${messageContent}</div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }
-        } else {
-            // 别人发的消息
-            if (isSpecialMsg) {
-                return `
-                    <div style="display:flex; align-items:flex-end; gap:8px; margin-bottom:12px;">
-                        <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
-                        <div style="display:flex; flex-direction:column; max-width:70%;">
-                            <div style="font-size:12px; color:#999; margin-bottom:2px;">${name}${isCharacter ? ' 🎭' : ''}</div>
-                            <div style="display:flex; align-items:flex-end; gap:6px;">
-                                <div>${messageContent}</div>
-                                <div style="font-size:10px; color:#999;">${formatChatTime(msg.created_at)}</div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            } else {
-                return `
-                    <div style="display:flex; align-items:flex-end; gap:8px; margin-bottom:12px;">
-                        <div style="width:32px; height:32px; border-radius:50%; ${avatarStyle}; background-size:cover; background-position:center; flex-shrink:0; margin-bottom:2px;"></div>
-                        <div style="display:flex; flex-direction:column; max-width:70%;">
-                            <div style="font-size:12px; color:#999; margin-bottom:2px;">${name}${isCharacter ? ' 🎭' : ''}</div>
-                            <div style="display:flex; align-items:flex-end; gap:6px;">
-                                <div style="background:#f2f2f7; color:#000; padding:6px 10px; border-radius:18px 18px 18px 4px; font-size:15px; line-height:1.5; word-break:break-word;">${messageContent}</div>
-                                <div style="font-size:10px; color:#999;">${formatChatTime(msg.created_at)}</div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }
-        }
-    }).join('');
-    
-    // 为图片添加点击事件
-    container.querySelectorAll('.chat-image').forEach(img => {
-        img.onclick = () => showFullImage(img.src);
-    });
-    
-    container.scrollTop = container.scrollHeight;
-}
-
-// 收取联机群聊转账
-function receiveOnlineGroupTransfer(msgId) {
-    showToast('转账功能暂不支持收取，仅用于展示');
-}
-
-// 播放联机群聊语音消息
-let currentPlayingOnlineGroupAudio = null;
-function playOnlineGroupAudio(audioId) {
-    const audio = document.getElementById(audioId);
-    const icon = document.getElementById('icon_' + audioId);
-    const progress = document.getElementById('progress_' + audioId);
-    
-    if (!audio) return;
-    
-    // 如果有其他正在播放的，先停止
-    if (currentPlayingOnlineGroupAudio && currentPlayingOnlineGroupAudio !== audio) {
-        currentPlayingOnlineGroupAudio.pause();
-        currentPlayingOnlineGroupAudio.currentTime = 0;
-        // 重置之前音频的图标和进度条
-        const prevIcon = document.getElementById('icon_' + currentPlayingOnlineGroupAudio.id);
-        const prevProgress = document.getElementById('progress_' + currentPlayingOnlineGroupAudio.id);
-        if (prevIcon) {
-            const bubble = currentPlayingOnlineGroupAudio.closest('.online-audio-bubble');
-            if (bubble) {
-                const originalIcon = bubble.querySelector('.audio-play-icon');
-                if (originalIcon) prevIcon.textContent = prevIcon.dataset.original || '🎙️';
-            }
-        }
-        if (prevProgress) prevProgress.style.width = '0%';
-    }
-    
-    if (audio.paused) {
-        audio.play();
-        currentPlayingOnlineGroupAudio = audio;
-        if (icon) icon.textContent = '⏸️';
-        
-        // 更新进度条
-        audio.ontimeupdate = () => {
-            if (progress && audio.duration) {
-                const percent = (audio.currentTime / audio.duration) * 100;
-                progress.style.width = percent + '%';
-            }
-        };
-        
-        audio.onended = () => {
-            if (icon) icon.textContent = icon.dataset.original || '🎙️';
-            if (progress) progress.style.width = '0%';
-            currentPlayingOnlineGroupAudio = null;
-        };
-    } else {
-        audio.pause();
-        audio.currentTime = 0;
-        if (icon) icon.textContent = icon.dataset.original || '🎙️';
-        if (progress) progress.style.width = '0%';
-        currentPlayingOnlineGroupAudio = null;
-    }
-}
-
-// 处理群成员列表
-function handleOnlineGroupMembers(data) {
-    if (data.group_id !== currentOnlineGroupId) return;
-    currentOnlineGroupMembers = data.members || [];
-    
-    // 找到我的角色
-    const myWx = getMyOnlineWxAccount();
-    const myMember = currentOnlineGroupMembers.find(m => m.user_wx === myWx);
-    if (myMember && myMember.character_name) {
-        myOnlineGroupCharacter = {
-            name: myMember.character_name,
-            avatar: myMember.character_avatar,
-            desc: myMember.character_desc
-        };
-    } else {
-        myOnlineGroupCharacter = null;
-    }
-}
-
-// 切换联机群聊面板
-let currentOnlineGroupPanel = null;
-function toggleOnlineGroupPanel(panelType) {
-    const container = document.getElementById('online-group-panel-container');
-    const emojiTabBar = document.getElementById('online-group-emoji-tab-bar');
-    const emojiPanel = document.getElementById('online-group-emoji-panel');
-    const stickerPanel = document.getElementById('online-group-sticker-panel');
-    const actionPanel = document.getElementById('online-group-action-panel');
-    
-    if (!container) {
-        console.error('[Panel] Missing container!');
-        return;
-    }
-    
-    if (currentOnlineGroupPanel === panelType) {
-        // 关闭面板
-        container.classList.remove('open');
-        if (emojiTabBar) emojiTabBar.style.display = 'none';
-        if (emojiPanel) emojiPanel.style.display = 'none';
-        if (stickerPanel) stickerPanel.style.display = 'none';
-        if (actionPanel) actionPanel.style.display = 'none';
-        currentOnlineGroupPanel = null;
-    } else {
-        // 打开面板
-        container.classList.add('open');
-        if (panelType === 'emoji') {
-            if (emojiTabBar) emojiTabBar.style.display = 'flex';
-            if (emojiPanel) emojiPanel.style.display = 'grid';
-            if (stickerPanel) stickerPanel.style.display = 'none';
-            if (actionPanel) actionPanel.style.display = 'none';
-        } else if (panelType === 'action') {
-            if (emojiTabBar) emojiTabBar.style.display = 'none';
-            if (emojiPanel) emojiPanel.style.display = 'none';
-            if (stickerPanel) stickerPanel.style.display = 'none';
-            if (actionPanel) actionPanel.style.display = 'grid';
-        }
-        currentOnlineGroupPanel = panelType;
-    }
-}
-
-// 关闭联机群聊面板
-function closeOnlineGroupPanel() {
-    const container = document.getElementById('online-group-panel-container');
-    if (container) {
-        container.classList.remove('open');
-    }
-    const emojiTabBar = document.getElementById('online-group-emoji-tab-bar');
-    const emojiPanel = document.getElementById('online-group-emoji-panel');
-    const stickerPanel = document.getElementById('online-group-sticker-panel');
-    const actionPanel = document.getElementById('online-group-action-panel');
-    if (emojiTabBar) emojiTabBar.style.display = 'none';
-    if (emojiPanel) emojiPanel.style.display = 'none';
-    if (stickerPanel) stickerPanel.style.display = 'none';
-    if (actionPanel) actionPanel.style.display = 'none';
-    currentOnlineGroupPanel = null;
-}
-
-// 切换联机群聊表情Tab
-async function switchOnlineGroupEmojiTab(type) {
-    const tabs = document.querySelectorAll('#online-group-emoji-tab-bar .wechat-tab-item');
-    const emojiPanel = document.getElementById('online-group-emoji-panel');
-    const stickerPanel = document.getElementById('online-group-sticker-panel');
-
-    if (type === 'emoji') {
-        tabs[0].classList.add('active');
-        tabs[1].classList.remove('active');
-        emojiPanel.style.display = 'grid';
-        stickerPanel.style.display = 'none';
-    } else {
-        tabs[0].classList.remove('active');
-        tabs[1].classList.add('active');
-        emojiPanel.style.display = 'none';
-        stickerPanel.style.display = 'grid';
-        // 加载自定义表情包
-        await loadOnlineGroupStickers();
-    }
-}
-
-// 加载联机群聊的自定义表情包
-async function loadOnlineGroupStickers() {
-    const stickerPanel = document.getElementById('online-group-sticker-panel');
-    if (!stickerPanel) return;
-    
-    let html = '';
-    
-    // 获取所有表情包分类
-    const allCategories = await db.sticker_categories.toArray();
-    
-    if (allCategories.length === 0) {
-        stickerPanel.innerHTML = `<div style="text-align:center; grid-column:span 4; color:#999; margin-top:20px;">暂无表情包<br>请去【我-表情】添加</div>`;
-        return;
-    }
-    
-    // 显示所有分类的表情包
-    for (const cat of allCategories) {
-        if (cat.stickers && cat.stickers.length > 0) {
-            html += `<div style="grid-column:1/-1; font-size:12px; color:#999; margin:10px 0 5px; font-weight:500;">${cat.name}</div>`;
-            cat.stickers.forEach(s => {
-                const safeUrl = s.url.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                html += `<div class="emoji-item" onclick="sendOnlineGroupSticker('${safeUrl}')" style="background-image:url(${s.url}); background-size:cover; background-position:center; width:60px; height:60px; border-radius:8px; cursor:pointer;"></div>`;
-            });
-        }
-    }
-    
-    if (!html) {
-        stickerPanel.innerHTML = `<div style="text-align:center; grid-column:span 4; color:#999; margin-top:20px;">暂无表情包<br>请去【我-表情】添加</div>`;
-    } else {
-        stickerPanel.innerHTML = html;
-    }
-}
-
-// 发送联机群聊表情包
-function sendOnlineGroupSticker(stickerUrl) {
-    const myWx = getMyOnlineWxAccount();
-    const myChar = onlineCharacters.find(c => c.wx_account === myWx);
-    
-    const imgContent = `[img:${stickerUrl}]`;
-    
-    onlineSocket.send(JSON.stringify({
-        type: 'send_group_message',
-        group_id: currentOnlineGroupId,
-        my_wx_account: myWx,
-        sender_type: 'user',
-        sender_name: myChar?.nickname || myWx,
-        content: imgContent,
-        msg_type: 'image'
-    }));
-    
-    closeOnlineGroupPanel();
-}
-
-// 初始化联机群聊Emoji面板
-function initOnlineGroupEmojiPanel() {
-    const panel = document.getElementById('online-group-emoji-panel');
-    if (!panel) return;
-    
-    const emojis = [
-        '😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂',
-        '🙂', '🙃', '😉', '😊', '😇', '🥰', '😍', '🤩',
-        '😘', '😗', '😚', '😙', '😋', '😛', '😜', '🤪',
-        '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨',
-        '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥',
-        '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕',
-        '🤢', '🤮', '🤧', '🥵', '🥶', '🥴', '😵', '🤯',
-        '🤠', '🥳', '😎', '🤓', '🧐', '😕', '😟', '🙁',
-        '☹️', '😮', '😯', '😲', '😳', '🥺', '😦', '😧',
-        '😨', '😰', '😥', '😢', '😭', '😱', '😖', '😣',
-        '😞', '😓', '😩', '😫', '🥱', '😤', '😡', '😠',
-        '🤬', '😈', '👿', '💀', '☠️', '💩', '🤡', '👹',
-        '👺', '👻', '👽', '👾', '🤖', '😺', '😸', '😹',
-        '😻', '😼', '😽', '🙀', '😿', '😾', '👋', '🤚',
-        '🖐', '✋', '🖖', '👌', '🤏', '✌️', '🤞', '🤟',
-        '🤘', '🤙', '👈', '👉', '👆', '🖕', '👇', '☝️',
-        '👍', '👎', '✊', '👊', '🤛', '🤜', '👏', '🙌',
-        '👐', '🤲', '🤝', '🙏', '✍️', '💅', '🤳', '💪'
-    ];
-    
-    panel.innerHTML = emojis.map(emoji => 
-        `<div class="emoji-item" onclick="insertOnlineGroupEmoji('${emoji}')">${emoji}</div>`
-    ).join('');
-}
-
-// 插入Emoji到输入框
-function insertOnlineGroupEmoji(emoji) {
-    const input = document.getElementById('online-group-input');
-    if (input) {
-        input.value += emoji;
-        input.focus();
-        // 触发输入事件以更新发送按钮状态
-        input.dispatchEvent(new Event('input'));
-    }
-}
-
-// 联机群聊语音输入
-async function onlineGroupVoiceInput() {
-    closeOnlineGroupPanel();
-    
-    // 显示语音录制+变声弹窗（完全参照联机私聊）
-    const modal = document.createElement('div');
-    modal.id = 'online-group-voice-modal';
-    modal.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.5);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10000;
-    `;
-    
-    modal.innerHTML = `
-        <div style="background: white; border-radius: 16px; padding: 24px; width: 85%; max-width: 320px;">
-            <h3 style="margin: 0 0 20px 0; text-align: center; color: #333; font-size: 18px;">🎤 语音录制</h3>
-            
-            <div style="margin-bottom: 20px;">
-                <div style="font-size: 13px; color: #666; margin-bottom: 10px;">选择变声效果：</div>
-                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
-                    <label style="display: flex; align-items: center; padding: 12px; background: #f5f5f5; border-radius: 8px; cursor: pointer;">
-                        <input type="radio" name="online-group-voice-effect" value="normal" checked style="margin-right: 8px;">
-                        <span>🎙️ 原声</span>
-                    </label>
-                    <label style="display: flex; align-items: center; padding: 12px; background: #fff0f5; border-radius: 8px; cursor: pointer;">
-                        <input type="radio" name="online-group-voice-effect" value="loli" style="margin-right: 8px;">
-                        <span>🎀 萝莉音</span>
-                    </label>
-                    <label style="display: flex; align-items: center; padding: 12px; background: #f0f5ff; border-radius: 8px; cursor: pointer;">
-                        <input type="radio" name="online-group-voice-effect" value="uncle" style="margin-right: 8px;">
-                        <span>🧔 大叔音</span>
-                    </label>
-                    <label style="display: flex; align-items: center; padding: 12px; background: #f5fff0; border-radius: 8px; cursor: pointer;">
-                        <input type="radio" name="online-group-voice-effect" value="robot" style="margin-right: 8px;">
-                        <span>🤖 机器人</span>
-                    </label>
-                </div>
-            </div>
-            
-            <div id="online-group-voice-record-status" style="text-align: center; padding: 20px; background: #f9f9f9; border-radius: 12px; margin-bottom: 16px;">
-                <div style="font-size: 14px; color: #999;">点击下方按钮开始录音</div>
-                <div id="online-group-voice-record-time" style="font-size: 24px; font-weight: 600; color: #333; margin-top: 8px; display: none;">00:00</div>
-            </div>
-            
-            <div style="display: flex; flex-direction: column; gap: 10px;">
-                <button id="btn-start-online-group-record" onclick="startOnlineGroupVoiceRecord()" style="padding: 14px; background: var(--ins-pink); color: white; border: none; border-radius: 10px; font-size: 15px; font-weight: 500; cursor: pointer;">
-                    🎤 按住录音
-                </button>
-                <button onclick="closeOnlineGroupVoiceModal()" style="padding: 12px; background: #f0f0f0; color: #666; border: none; border-radius: 8px; font-size: 14px; cursor: pointer;">
-                    取消
-                </button>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(modal);
-}
-
-// 关闭联机群聊语音弹窗
-function closeOnlineGroupVoiceModal() {
-    document.getElementById('online-group-voice-modal')?.remove();
-}
-
-// ✅ 联机群聊语音录制变量
-let onlineGroupVoiceRecorder = null;
-let onlineGroupVoiceChunks = [];
-let onlineGroupVoiceStartTime = 0;
-let onlineGroupVoiceTimer = null;
-
-// 开始联机群聊语音录制
-async function startOnlineGroupVoiceRecord() {
-    const btn = document.getElementById('btn-start-online-group-record');
-    const statusDiv = document.getElementById('online-group-voice-record-status');
-    const timeDiv = document.getElementById('online-group-voice-record-time');
-    
-    // 如果正在录音，则停止
-    if (onlineGroupVoiceRecorder && onlineGroupVoiceRecorder.state === 'recording') {
-        stopOnlineGroupVoiceRecord();
-        return;
-    }
-    
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        
-        onlineGroupVoiceRecorder = new MediaRecorder(stream);
-        onlineGroupVoiceChunks = [];
-        onlineGroupVoiceStartTime = Date.now();
-        
-        onlineGroupVoiceRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) {
-                onlineGroupVoiceChunks.push(e.data);
-            }
-        };
-        
-        onlineGroupVoiceRecorder.onstop = async () => {
-            stream.getTracks().forEach(track => track.stop());
-            clearInterval(onlineGroupVoiceTimer);
-            
-            const duration = Math.round((Date.now() - onlineGroupVoiceStartTime) / 1000);
-            const blob = new Blob(onlineGroupVoiceChunks, { type: 'audio/webm' });
-            
-            // 获取选择的变声效果
-            const effectRadio = document.querySelector('input[name="online-group-voice-effect"]:checked');
-            const effect = effectRadio ? effectRadio.value : 'normal';
-            
-            statusDiv.innerHTML = '<div style="color: var(--ins-pink);">⏳ 正在处理...</div>';
-            
-            // 处理变声并发送
-            await processAndSendOnlineGroupVoice(blob, effect, duration);
-        };
-        
-        onlineGroupVoiceRecorder.start();
-        
-        // 更新UI
-        btn.textContent = '⏹️ 停止录音';
-        btn.style.background = '#ff3b30';
-        timeDiv.style.display = 'block';
-        statusDiv.querySelector('div').textContent = '🔴 正在录音...';
-        
-        // 计时器
-        onlineGroupVoiceTimer = setInterval(() => {
-            const elapsed = Math.round((Date.now() - onlineGroupVoiceStartTime) / 1000);
-            const min = Math.floor(elapsed / 60).toString().padStart(2, '0');
-            const sec = (elapsed % 60).toString().padStart(2, '0');
-            timeDiv.textContent = `${min}:${sec}`;
-        }, 1000);
-        
-    } catch (err) {
-        console.error('录音失败:', err);
-        alert('无法访问麦克风，请确保已授予权限');
-    }
-}
-
-// 停止联机群聊语音录制
-function stopOnlineGroupVoiceRecord() {
-    if (onlineGroupVoiceRecorder && onlineGroupVoiceRecorder.state === 'recording') {
-        onlineGroupVoiceRecorder.stop();
-    }
-}
-
-// 处理变声并发送联机群聊语音
-async function processAndSendOnlineGroupVoice(blob, effect, duration) {
-    try {
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const arrayBuffer = await blob.arrayBuffer();
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        
-        // 根据效果设置参数
-        let pitchRate = 1.0;
-        switch (effect) {
-            case 'loli':    pitchRate = 1.4; break;  // 萝莉音：提高音调
-            case 'uncle':   pitchRate = 0.7; break;  // 大叔音：降低音调
-            case 'robot':   pitchRate = 1.0; break;  // 机器人：特殊处理
-            default:        pitchRate = 1.0; break;
-        }
-        
-        // 创建离线音频上下文进行处理
-        const offlineContext = new OfflineAudioContext(
-            audioBuffer.numberOfChannels,
-            Math.ceil(audioBuffer.length / pitchRate),
-            audioBuffer.sampleRate
-        );
-        
-        const source = offlineContext.createBufferSource();
-        source.buffer = audioBuffer;
-        source.playbackRate.value = pitchRate;
-        
-        // 机器人效果：添加波形调制
-        if (effect === 'robot') {
-            const oscillator = offlineContext.createOscillator();
-            const gainNode = offlineContext.createGain();
-            oscillator.frequency.value = 50;
-            gainNode.gain.value = 0.3;
-            oscillator.connect(gainNode);
-            gainNode.connect(offlineContext.destination);
-            oscillator.start();
-        }
-        
-        source.connect(offlineContext.destination);
-        source.start();
-        
-        const renderedBuffer = await offlineContext.startRendering();
-        
-        // 将处理后的音频转为 base64
-        const wavBlob = await audioBufferToWavForOnlineGroup(renderedBuffer);
-        const base64 = await blobToBase64ForOnlineGroup(wavBlob);
-        
-        // 计算实际时长
-        const actualDuration = Math.ceil(duration / pitchRate);
-        
-        // 发送语音消息到群聊
-        await sendOnlineGroupVoiceMessage(base64, actualDuration, effect);
-        
-        closeOnlineGroupVoiceModal();
-        
-    } catch (err) {
-        console.error('语音处理失败:', err);
-        alert('语音处理失败: ' + err.message);
-    }
-}
-
-// AudioBuffer 转 WAV（联机群聊）
-function audioBufferToWavForOnlineGroup(buffer) {
-    const numChannels = buffer.numberOfChannels;
-    const sampleRate = buffer.sampleRate;
-    const format = 1; // PCM
-    const bitDepth = 16;
-    
-    const bytesPerSample = bitDepth / 8;
-    const blockAlign = numChannels * bytesPerSample;
-    
-    const data = [];
-    for (let i = 0; i < buffer.length; i++) {
-        for (let ch = 0; ch < numChannels; ch++) {
-            const sample = buffer.getChannelData(ch)[i];
-            const intSample = Math.max(-1, Math.min(1, sample));
-            data.push(intSample < 0 ? intSample * 0x8000 : intSample * 0x7FFF);
-        }
-    }
-    
-    const dataLength = data.length * bytesPerSample;
-    const headerLength = 44;
-    const totalLength = headerLength + dataLength;
-    
-    const arrayBuffer = new ArrayBuffer(totalLength);
-    const view = new DataView(arrayBuffer);
-    
-    // WAV header
-    const writeString = (offset, string) => {
-        for (let i = 0; i < string.length; i++) {
-            view.setUint8(offset + i, string.charCodeAt(i));
-        }
-    };
-    
-    writeString(0, 'RIFF');
-    view.setUint32(4, totalLength - 8, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, format, true);
-    view.setUint16(22, numChannels, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * blockAlign, true);
-    view.setUint16(32, blockAlign, true);
-    view.setUint16(34, bitDepth, true);
-    writeString(36, 'data');
-    view.setUint32(40, dataLength, true);
-    
-    let offset = 44;
-    for (let i = 0; i < data.length; i++, offset += 2) {
-        view.setInt16(offset, data[i], true);
-    }
-    
-    return new Blob([arrayBuffer], { type: 'audio/wav' });
-}
-
-// Blob 转 Base64（联机群聊）
-function blobToBase64ForOnlineGroup(blob) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-    });
-}
-
-// 发送联机群聊语音消息
-async function sendOnlineGroupVoiceMessage(audioBase64, duration, effect) {
-    if (!currentOnlineGroupId) return;
-    
-    const myWx = getMyOnlineWxAccount();
-    const myChar = onlineCharacters.find(c => c.wx_account === myWx);
-    
-    // 构建语音消息JSON
-    const voiceMsg = JSON.stringify({
-        __type: 'audio',
-        audio: audioBase64,
-        duration: duration,
-        effect: effect
-    });
-    
-    // 发送到服务器
-    onlineSocket.send(JSON.stringify({
-        type: 'send_group_message',
-        group_id: currentOnlineGroupId,
-        my_wx_account: myWx,
-        sender_type: 'user',
-        sender_name: myChar?.nickname || myWx,
-        content: voiceMsg
-    }));
-    
-    console.log('[联机群聊] 语音消息已发送，时长:', duration, '秒，效果:', effect);
-    showToast('语音已发送');
-}
-
-// 联机群聊发送图片
-function onlineGroupSendImage() {
-    closeOnlineGroupPanel();
-    
-    // 创建隐藏的文件输入
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.onchange = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        
-        // 读取图片并转为base64
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-            const base64 = event.target.result;
-            const imgContent = `[img:${base64}]`;
-            
-            // 发送图片消息
-            const myWx = getMyOnlineWxAccount();
-            const myChar = onlineCharacters.find(c => c.wx_account === myWx);
-            
-            onlineSocket.send(JSON.stringify({
-                type: 'send_group_message',
-                group_id: currentOnlineGroupId,
-                my_wx_account: myWx,
-                sender_type: 'user',
-                sender_name: myChar?.nickname || myWx,
-                content: imgContent,
-                msg_type: 'image'
-            }));
-            
-            showToast('图片已发送');
-        };
-        reader.readAsDataURL(file);
-    };
-    input.click();
-}
-
-// 联机群聊转账 - 显示类型选择弹窗
-function onlineGroupTransfer() {
-    closeOnlineGroupPanel();
-    
-    const modal = document.createElement('div');
-    modal.id = 'online-group-transfer-type-modal';
-    modal.className = 'modal-overlay';
-    modal.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.5);
-        z-index: 10000;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    `;
-    
-    modal.innerHTML = `
-        <div class="modal-box" style="max-width:300px; padding:0; overflow:hidden; border-radius:16px; background:#fff;">
-            <div style="padding:20px 16px; text-align:center; border-bottom:0.5px solid #f0f0f0;">
-                <div style="font-size:17px; font-weight:600; color:#333;">选择类型</div>
-            </div>
-            <div style="padding:16px;">
-                <div onclick="showOnlineGroupRedPacket()" style="display:flex; align-items:center; padding:14px 16px; background:#fafafa; border-radius:12px; margin-bottom:12px; cursor:pointer; transition:all 0.2s; border:1px solid #f0f0f0;">
-                    <div style="width:44px; height:44px; border-radius:12px; background:#fff; border:1px solid #eee; display:flex; align-items:center; justify-content:center; margin-right:14px;">
-                        <svg viewBox="0 0 24 24" style="width:22px; height:22px; stroke:var(--ins-pink); fill:none; stroke-width:1.5;"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><circle cx="12" cy="15" r="2"/></svg>
-                    </div>
-                    <div style="flex:1;">
-                        <div style="font-size:15px; font-weight:500; color:#333;">群红包</div>
-                        <div style="font-size:12px; color:#999; margin-top:2px;">拼手气或普通红包</div>
-                    </div>
-                    <svg viewBox="0 0 24 24" style="width:18px; height:18px; stroke:#ccc; fill:none;"><polyline points="9 18 15 12 9 6"></polyline></svg>
-                </div>
-                <div onclick="showOnlineGroupExclusiveTransfer()" style="display:flex; align-items:center; padding:14px 16px; background:#fafafa; border-radius:12px; cursor:pointer; transition:all 0.2s; border:1px solid #f0f0f0;">
-                    <div style="width:44px; height:44px; border-radius:12px; background:#fff; border:1px solid #eee; display:flex; align-items:center; justify-content:center; margin-right:14px;">
-                        <svg viewBox="0 0 24 24" style="width:22px; height:22px; stroke:var(--ins-pink); fill:none; stroke-width:1.5;"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
-                    </div>
-                    <div style="flex:1;">
-                        <div style="font-size:15px; font-weight:500; color:#333;">专属转账</div>
-                        <div style="font-size:12px; color:#999; margin-top:2px;">转给指定群成员</div>
-                    </div>
-                    <svg viewBox="0 0 24 24" style="width:18px; height:18px; stroke:#ccc; fill:none;"><polyline points="9 18 15 12 9 6"></polyline></svg>
-                </div>
-            </div>
-            <div onclick="document.getElementById('online-group-transfer-type-modal').remove()" style="padding:14px 16px; text-align:center; border-top:0.5px solid #f0f0f0; color:#999; font-size:15px; cursor:pointer;">取消</div>
-        </div>
-    `;
-    
-    document.body.appendChild(modal);
-}
-
-// 显示联机群聊红包页面
-function showOnlineGroupRedPacket() {
-    document.getElementById('online-group-transfer-type-modal')?.remove();
-    
-    // 创建或显示红包页面
-    let page = document.getElementById('online-group-redpacket-page');
-    if (!page) {
-        page = document.createElement('div');
-        page.id = 'online-group-redpacket-page';
-        page.className = 'transfer-modal';
-        page.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:#fff; z-index:350; display:none; flex-direction:column;';
-        document.body.appendChild(page);
-    }
-    
-    page.innerHTML = `
-        <div class="transfer-page-header" style="background:#fff; border-bottom:0.5px solid #f0f0f0;">
-            <div class="back-btn" onclick="hideOnlineGroupRedPacketPage()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:#333;">
-                <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
-            </div>
-            <div class="transfer-page-title" style="color:#333;">发红包</div>
-            <div style="width:40px;"></div>
-        </div>
-        
-        <div style="flex:1; background:#fff; padding:16px;">
-            <!-- 红包类型选择 -->
-            <div style="background:#fff; border-radius:12px; padding:16px; margin-bottom:12px; border:1px solid #eee;">
-                <div style="font-size:13px; color:#999; margin-bottom:12px;">红包类型</div>
-                <div style="display:flex; gap:12px;">
-                    <div id="online-rp-type-lucky" onclick="selectOnlineRedPacketType('lucky')" style="flex:1; padding:12px; border:1.5px solid #333; border-radius:10px; text-align:center; cursor:pointer; background:#fff;">
-                        <div style="font-size:14px; font-weight:500; color:#333;">拼手气红包</div>
-                        <div style="font-size:11px; color:#999; margin-top:4px;">金额随机</div>
-                    </div>
-                    <div id="online-rp-type-normal" onclick="selectOnlineRedPacketType('normal')" style="flex:1; padding:12px; border:1.5px solid #e8e8e8; border-radius:10px; text-align:center; cursor:pointer; background:#fff;">
-                        <div style="font-size:14px; font-weight:500; color:#666;">普通红包</div>
-                        <div style="font-size:11px; color:#999; margin-top:4px;">金额相同</div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- 红包金额 -->
-            <div style="background:#fff; border-radius:12px; padding:16px; margin-bottom:12px; border:1px solid #eee;">
-                <div style="display:flex; align-items:center; border-bottom:1px solid #f0f0f0; padding-bottom:14px; margin-bottom:14px;">
-                    <div style="font-size:14px; color:#999; width:70px;">总金额</div>
-                    <div style="flex:1; display:flex; align-items:center;">
-                        <span style="font-size:18px; color:#333; margin-right:4px;">¥</span>
-                        <input type="number" id="online-rp-amount-input" placeholder="0.00" style="flex:1; border:none; font-size:22px; font-weight:500; outline:none; color:#333;" oninput="checkOnlineRedPacketInput()">
-                    </div>
-                </div>
-                <div style="display:flex; align-items:center;">
-                    <div style="font-size:14px; color:#999; width:70px;">红包个数</div>
-                    <div style="flex:1; display:flex; align-items:center;">
-                        <input type="number" id="online-rp-count-input" placeholder="1" min="1" style="flex:1; border:none; font-size:16px; outline:none; color:#333;" oninput="checkOnlineRedPacketInput()">
-                        <span style="font-size:13px; color:#999;">个</span>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- 祝福语 -->
-            <div style="background:#fff; border-radius:12px; padding:14px 16px; margin-bottom:24px; border:1px solid #eee;">
-                <input type="text" id="online-rp-wish-input" placeholder="祝福语（选填）" maxlength="20" style="width:100%; border:none; font-size:14px; outline:none; box-sizing:border-box; color:#333;">
-            </div>
-            
-            <!-- 金额提示 -->
-            <div style="text-align:center; margin-bottom:20px;">
-                <span style="font-size:13px; color:#999;" id="online-rp-total-hint">共0.00元</span>
-            </div>
-            
-            <!-- 发送按钮 -->
-            <button id="btn-send-online-redpacket" onclick="sendOnlineGroupRedPacket()" disabled style="width:100%; padding:14px; background:#ccc; color:#fff; border:none; border-radius:24px; font-size:16px; font-weight:500; cursor:not-allowed; transition:all 0.2s;">
-                发红包
-            </button>
-        </div>
-    `;
-    
-    // 重置输入
-    document.getElementById('online-rp-amount-input').value = '';
-    document.getElementById('online-rp-count-input').value = '';
-    document.getElementById('online-rp-wish-input').value = '';
-    document.getElementById('online-rp-total-hint').innerText = '共0.00元';
-    document.getElementById('btn-send-online-redpacket').disabled = true;
-    document.getElementById('btn-send-online-redpacket').style.background = '#ccc';
-    document.getElementById('btn-send-online-redpacket').style.cursor = 'not-allowed';
-    
-    // 默认选中拼手气
-    selectOnlineRedPacketType('lucky');
-    
-    page.style.display = 'flex';
-}
-
-// 隐藏联机群聊红包页面
-function hideOnlineGroupRedPacketPage() {
-    const page = document.getElementById('online-group-redpacket-page');
-    if (page) page.style.display = 'none';
-}
-
-// 联机群聊红包类型
-let currentOnlineRedPacketType = 'lucky';
-
-// 选择联机群聊红包类型
-function selectOnlineRedPacketType(type) {
-    currentOnlineRedPacketType = type;
-    
-    const luckyEl = document.getElementById('online-rp-type-lucky');
-    const normalEl = document.getElementById('online-rp-type-normal');
-    
-    if (!luckyEl || !normalEl) return;
-    
-    if (type === 'lucky') {
-        luckyEl.style.borderColor = '#333';
-        luckyEl.style.background = '#fff';
-        luckyEl.querySelector('div:first-child').style.color = '#333';
-        
-        normalEl.style.borderColor = '#e8e8e8';
-        normalEl.style.background = '#fff';
-        normalEl.querySelector('div:first-child').style.color = '#666';
-    } else {
-        normalEl.style.borderColor = '#333';
-        normalEl.style.background = '#fff';
-        normalEl.querySelector('div:first-child').style.color = '#333';
-        
-        luckyEl.style.borderColor = '#e8e8e8';
-        luckyEl.style.background = '#fff';
-        luckyEl.querySelector('div:first-child').style.color = '#666';
-    }
-}
-
-// 检查联机群聊红包输入
-function checkOnlineRedPacketInput() {
-    const amount = parseFloat(document.getElementById('online-rp-amount-input')?.value || 0);
-    const count = parseInt(document.getElementById('online-rp-count-input')?.value || 0);
-    const btn = document.getElementById('btn-send-online-redpacket');
-    const hint = document.getElementById('online-rp-total-hint');
-    
-    if (!btn || !hint) return;
-    
-    if (amount > 0 && count > 0) {
-        hint.innerText = `共${amount.toFixed(2)}元`;
-        btn.disabled = false;
-        btn.style.background = '#333';
-        btn.style.cursor = 'pointer';
-    } else {
-        hint.innerText = '共0.00元';
-        btn.disabled = true;
-        btn.style.background = '#ccc';
-        btn.style.cursor = 'not-allowed';
-    }
-}
-
-// 发送联机群聊红包
-async function sendOnlineGroupRedPacket() {
-    if (!currentOnlineGroupId) return;
-    
-    const amount = parseFloat(document.getElementById('online-rp-amount-input')?.value);
-    const count = parseInt(document.getElementById('online-rp-count-input')?.value);
-    const wish = document.getElementById('online-rp-wish-input')?.value.trim() || '恭喜发财，大吉大利';
-    
-    if (!amount || amount <= 0 || !count || count <= 0) {
-        showToast('请填写正确的金额和个数');
-        return;
-    }
-    
-    // 检查余额
-    if (!currentMyCharId) {
-        showToast("请先设置User身份");
-        return;
-    }
-    const user = await db.characters.get(parseInt(currentMyCharId));
-    let currentBalance = 0;
-    if (user && user.identity && user.identity.balance) {
-        currentBalance = parseFloat(user.identity.balance.toString().replace(/,/g, ''));
-    }
-    
-    if (currentBalance < amount) {
-        showToast('余额不足 (当前: ¥' + currentBalance.toFixed(2) + ')');
-        return;
-    }
-    
-    // 扣款
-    const newBalance = currentBalance - amount;
-    user.identity.balance = newBalance.toFixed(2);
-    await db.characters.put(user);
-    
-    // 构建红包数据
-    const redPacketData = {
-        type: 'redpacket',
-        redpacketType: currentOnlineRedPacketType, // 'lucky' 或 'normal'
-        totalAmount: amount.toFixed(2),
-        count: count,
-        wish: wish,
-        claimed: [], // 已领取的成员微信号列表
-        claimedAmounts: {}, // 每个成员领取的金额 {wx_account: amount}
-        id: 'rp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
-    };
-    
-    // 发送到服务器
-    const myWx = getMyOnlineWxAccount();
-    const myChar = onlineCharacters.find(c => c.wx_account === myWx);
-    
-    onlineSocket.send(JSON.stringify({
-        type: 'send_group_message',
-        group_id: currentOnlineGroupId,
-        my_wx_account: myWx,
-        sender_type: 'user',
-        sender_name: myChar?.nickname || myWx,
-        content: JSON.stringify(redPacketData),
-        msg_type: 'redpacket'
-    }));
-    
-    // 记录账单
-    await addTransaction('expense', amount, '发红包', `联机群聊 · ${count}个红包`);
-    
-    hideOnlineGroupRedPacketPage();
-    showToast('红包已发出');
-}
-
-// 显示联机群聊红包详情
-function showOnlineGroupRedPacketDetail(msgId) {
-    // 在消息列表中找到红包消息
-    const msg = currentOnlineGroupMessages.find(m => {
-        if (m.msg_type !== 'redpacket') return false;
-        return (m.id || ('rp_' + m.created_at)) === msgId;
-    });
-    
-    if (!msg) {
-        showToast('红包不存在');
-        return;
-    }
-    
-    try {
-        const data = JSON.parse(msg.content);
-        const myWx = getMyOnlineWxAccount();
-        const hasClaimed = data.claimed?.includes(myWx) || false;
-        const claimedCount = (data.claimed || []).length;
-        const isAllClaimed = claimedCount >= data.count;
-        
-        // 创建或显示红包详情页面
-        let page = document.getElementById('online-group-redpacket-detail-page');
-        if (!page) {
-            page = document.createElement('div');
-            page.id = 'online-group-redpacket-detail-page';
-            page.className = 'transfer-modal';
-            page.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:#fff; z-index:360; display:none; flex-direction:column;';
-            document.body.appendChild(page);
-        }
-        
-        page.innerHTML = `
-            <div class="transfer-page-header" style="background:#fff; border-bottom:0.5px solid #f0f0f0;">
-                <div class="back-btn" onclick="hideOnlineGroupRedPacketDetail()" style="margin:0; background:none; width:40px; justify-content:flex-start; padding-left:0; color:#333;">
-                    <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
-                </div>
-                <div class="transfer-page-title" style="color:#333;">红包详情</div>
-                <div style="width:40px;"></div>
-            </div>
-            
-            <div style="flex:1; background:#fff; overflow-y:auto;">
-                <!-- 红包信息头部 -->
-                <div style="padding:30px 20px; text-align:center; border-bottom:1px solid #f0f0f0;">
-                    <div id="online-rp-detail-avatar" style="width:60px; height:60px; border-radius:50%; background:#eee; margin:0 auto 12px; background-size:cover; background-position:center;"></div>
-                    <div id="online-rp-detail-sender" style="font-size:15px; color:#333; margin-bottom:8px;">${msg.sender_name} 的红包</div>
-                    <div id="online-rp-detail-wish" style="font-size:18px; font-weight:500; color:#333; margin-bottom:6px;">${escapeHtml(data.wish || '恭喜发财')}</div>
-                    <div id="online-rp-detail-type" style="font-size:13px; color:#999;">${data.redpacketType === 'lucky' ? '拼手气红包' : '普通红包'}</div>
-                </div>
-                
-                <!-- 领取按钮区域 -->
-                <div id="online-rp-detail-action" style="padding:20px; border-bottom:1px solid #f0f0f0;">
-                    <button id="btn-claim-online-redpacket" onclick="claimOnlineGroupRedPacket('${msgId}', '${myWx}', null)" style="width:100%; padding:14px; background:${isAllClaimed || hasClaimed ? '#ccc' : '#333'}; color:#fff; border:none; border-radius:24px; font-size:16px; font-weight:500; cursor:${isAllClaimed || hasClaimed ? 'not-allowed' : 'pointer'};" ${isAllClaimed || hasClaimed ? 'disabled' : ''}>
-                        ${isAllClaimed ? '红包已领完' : hasClaimed ? `已领取 ¥${(data.claimedAmounts?.[myWx] || '0.00')}` : '领取红包'}
-                    </button>
-                </div>
-                
-                <!-- 已领取列表 -->
-                <div style="padding:16px 20px;">
-                    <div style="font-size:13px; color:#999; margin-bottom:12px;">
-                        <span id="online-rp-detail-claimed-count">${claimedCount}</span>/<span id="online-rp-detail-total-count">${data.count}</span> 已领取，共 <span id="online-rp-detail-total-amount">${Object.values(data.claimedAmounts || {}).reduce((a, b) => a + parseFloat(b), 0).toFixed(2)}</span> 元
-                    </div>
-                    <div id="online-rp-detail-claimed-list">
-                        ${data.claimed && data.claimed.length > 0 ? 
-                            data.claimed.map(wx => {
-                                const member = currentOnlineGroupMembers.find(m => m.user_wx === wx);
-                                const amount = data.claimedAmounts?.[wx] || '0.00';
-                                return `
-                                    <div style="display:flex; align-items:center; padding:12px 0; border-bottom:1px solid #f0f0f0;">
-                                        <div style="width:40px; height:40px; border-radius:50%; background:#eee; background-image:url(${member?.user_avatar || ''}); background-size:cover; background-position:center; margin-right:12px; flex-shrink:0;"></div>
-                                        <div style="flex:1;">
-                                            <div style="font-size:14px; color:#333;">${member?.user_name || wx}</div>
-                                        </div>
-                                        <div style="font-size:15px; font-weight:500; color:#333;">¥${amount}</div>
-                                    </div>
-                                `;
-                            }).join('') : 
-                            '<div style="text-align:center; color:#999; padding:30px 0; font-size:13px;">暂无人领取</div>'
-                        }
-                    </div>
-                </div>
-            </div>
-        `;
-        
-        // 设置发送者头像
-        const avatarEl = document.getElementById('online-rp-detail-avatar');
-        if (msg.sender_avatar) {
-            avatarEl.style.backgroundImage = `url(${msg.sender_avatar})`;
-        }
-        
-        page.style.display = 'flex';
-    } catch(e) {
-        console.error('显示红包详情失败:', e);
-        showToast('红包数据错误');
-    }
-}
-
-// 隐藏联机群聊红包详情
-function hideOnlineGroupRedPacketDetail() {
-    const page = document.getElementById('online-group-redpacket-detail-page');
-    if (page) page.style.display = 'none';
-}
-
-// 领取联机群聊红包（用户或角色都可以）
-async function claimOnlineGroupRedPacket(msgId, claimerWx, characterName) {
-    if (!currentOnlineGroupId || !onlineSocket || onlineSocket.readyState !== WebSocket.OPEN) {
-        showToast('未连接到服务器');
-        return;
-    }
-    
-    const myWx = getMyOnlineWxAccount();
-    const claimerName = characterName || (onlineCharacters.find(c => c.wx_account === myWx)?.nickname || myWx);
-    
-    // 发送领取请求到服务器
-    onlineSocket.send(JSON.stringify({
-        type: 'claim_group_redpacket',
-        group_id: currentOnlineGroupId,
-        my_wx_account: myWx,
-        message_id: msgId,
-        claimer_name: claimerName
-    }));
-}
-
-// 处理红包被领取的通知
-async function handleRedPacketClaimed(data) {
-    const { group_id, message_id, claimer_wx, claim_amount, redpacket_data } = data;
-    
-    if (group_id !== currentOnlineGroupId) return;
-    
-    // 更新本地消息中的红包数据
-    const msgIndex = currentOnlineGroupMessages.findIndex(m => m.id === message_id);
-    if (msgIndex !== -1) {
-        currentOnlineGroupMessages[msgIndex].content = JSON.stringify(redpacket_data);
-        renderOnlineGroupMessages();
-    }
-    
-    // 如果是自己领取的，更新钱包
-    const myWx = getMyOnlineWxAccount();
-    if (claimer_wx === myWx) {
-        const claimAmountNum = parseFloat(claim_amount);
-        
-        if (!currentMyCharId) {
-            showToast(`成功领取 ¥${claim_amount}`);
-            return;
-        }
-        
-        const user = await db.characters.get(parseInt(currentMyCharId));
-        if (user) {
-            if (!user.identity) user.identity = {};
-            let balance = parseFloat(user.identity.balance || 0);
-            balance += claimAmountNum;
-            user.identity.balance = balance.toFixed(2);
-            await db.characters.put(user);
-            
-            // 记录账单
-            const group = onlineGroups.find(g => g.id === currentOnlineGroupId);
-            await addTransaction('income', claimAmountNum, '红包', group?.name || '联机群聊');
-            
-            showToast(`成功领取 ¥${claim_amount}`);
-        }
-    }
-    
-    // 刷新红包详情页面（如果已打开）
-    const detailPage = document.getElementById('online-group-redpacket-detail-page');
-    if (detailPage && detailPage.style.display !== 'none') {
-        showOnlineGroupRedPacketDetail(message_id);
-    }
-}
-
-// 显示联机群聊专属转账选人页面
-async function showOnlineGroupExclusiveTransfer() {
-    document.getElementById('online-group-transfer-type-modal')?.remove();
-    
-    const listHtml = currentOnlineGroupMembers.map(m => {
-        const avatarStyle = m.user_avatar ? `background-image:url(${m.user_avatar})` : 'background:#ccc';
-        const myWx = getMyOnlineWxAccount();
-        if (m.user_wx === myWx) return ''; // 不显示自己
-        
-        return `
-            <div onclick="selectOnlineGroupTransferTarget('${m.user_wx}', '${m.user_name}')" style="display:flex; align-items:center; padding:12px 16px; cursor:pointer; transition:background 0.2s; border-bottom:0.5px solid #f0f0f0;">
-                <div style="width:44px; height:44px; border-radius:6px; ${avatarStyle}; background-size:cover; background-position:center; margin-right:12px;"></div>
-                <div style="flex:1;">
-                    <div style="font-size:16px; color:#333;">${m.user_name}</div>
-                    ${m.character_name ? `<div style="font-size:12px; color:#999;">${m.character_name}</div>` : ''}
-                </div>
-            </div>
-        `;
-    }).filter(h => h).join('');
-    
-    const modal = document.createElement('div');
-    modal.id = 'online-group-exclusive-modal';
-    modal.className = 'modal-overlay';
-    modal.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.5);
-        z-index: 10000;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    `;
-    
-    modal.innerHTML = `
-        <div style="background:#fff; border-radius:16px; width:85%; max-width:400px; max-height:70%; overflow:hidden; display:flex; flex-direction:column;">
-            <div style="padding:20px 16px; text-align:center; border-bottom:0.5px solid #f0f0f0;">
-                <div style="font-size:17px; font-weight:600; color:#333;">选择转账对象</div>
-            </div>
-            <div style="flex:1; overflow-y:auto;">
-                ${listHtml || '<div style="text-align:center; color:#999; padding:40px;">群内暂无其他成员</div>'}
-            </div>
-            <div onclick="document.getElementById('online-group-exclusive-modal').remove()" style="padding:14px 16px; text-align:center; border-top:0.5px solid #f0f0f0; color:#999; font-size:15px; cursor:pointer;">取消</div>
-        </div>
-    `;
-    
-    document.body.appendChild(modal);
-}
-
-// 选择联机群聊转账目标
-function selectOnlineGroupTransferTarget(targetWx, targetName) {
-    document.getElementById('online-group-exclusive-modal')?.remove();
-    
-    const modal = document.createElement('div');
-    modal.id = 'online-group-transfer-amount-modal';
-    modal.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.5);
-        z-index: 10000;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    `;
-    
-    modal.innerHTML = `
-        <div style="background:#fff; border-radius:16px; padding:24px; width:85%; max-width:360px;">
-            <h3 style="margin:0 0 16px 0; text-align:center; font-size:18px;">转账给 ${targetName}</h3>
-            
-            <div style="margin-bottom:16px;">
-                <label style="display:block; font-size:13px; color:#666; margin-bottom:8px;">转账金额</label>
-                <input type="number" id="online-group-transfer-amount" placeholder="输入金额" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px;">
-            </div>
-            
-            <div style="margin-bottom:20px;">
-                <label style="display:block; font-size:13px; color:#666; margin-bottom:8px;">转账说明</label>
-                <input type="text" id="online-group-transfer-note" placeholder="添加转账说明" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; font-size:14px;">
-            </div>
-            
-            <div style="display:flex; gap:12px;">
-                <button onclick="document.getElementById('online-group-transfer-amount-modal').remove()" style="flex:1; padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:15px;">取消</button>
-                <button onclick="sendOnlineGroupExclusiveTransfer('${targetWx}', '${targetName}')" style="flex:1; padding:12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:15px;">转账</button>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(modal);
-}
-
-// 发送联机群聊专属转账
-function sendOnlineGroupExclusiveTransfer(targetWx, targetName) {
-    const amount = document.getElementById('online-group-transfer-amount').value.trim();
-    const note = document.getElementById('online-group-transfer-note').value.trim();
-    
-    if (!amount || parseFloat(amount) <= 0) {
-        alert('请输入有效的金额');
-        return;
-    }
-    
-    const myWx = getMyOnlineWxAccount();
-    const myChar = onlineCharacters.find(c => c.wx_account === myWx);
-    
-    // 使用和普通群聊一样的JSON格式
-    const transferData = {
-        amount: parseFloat(amount),
-        desc: note || '转账',
-        status: 'pending',
-        targetWx: targetWx,
-        targetName: targetName
-    };
-    
-    onlineSocket.send(JSON.stringify({
-        type: 'send_group_message',
-        group_id: currentOnlineGroupId,
-        my_wx_account: myWx,
-        sender_type: 'user',
-        sender_name: myChar?.nickname || myWx,
-        content: JSON.stringify(transferData),
-        msg_type: 'transfer'
-    }));
-    
-    document.getElementById('online-group-transfer-amount-modal')?.remove();
-    showToast('转账已发送');
-}
-
-// 刷新群成员列表
-function refreshOnlineGroupMembers() {
-    const myWx = getMyOnlineWxAccount();
-    if (myWx && currentOnlineGroupId) {
-        onlineSocket.send(JSON.stringify({
-            type: 'get_group_members',
-            group_id: currentOnlineGroupId,
-            my_wx_account: myWx
-        }));
-    }
-}
-
-// 发送群消息
-function sendOnlineGroupMsg() {
-    const input = document.getElementById('online-group-input');
-    const content = input.value.trim();
-    if (!content || !currentOnlineGroupId) return;
-    
-    const myWx = getMyOnlineWxAccount();
-    const myChar = onlineCharacters.find(c => c.wx_account === myWx);
-    
-    onlineSocket.send(JSON.stringify({
-        type: 'send_group_message',
-        group_id: currentOnlineGroupId,
-        my_wx_account: myWx,
-        sender_type: 'user',
-        sender_name: myChar?.nickname || myWx,
-        content: content
-    }));
-    
-    input.value = '';
-    // 触发input事件以更新发送按钮状态
-    input.dispatchEvent(new Event('input'));
-    // 关闭面板
-    closeOnlineGroupPanel();
-}
-
-// 让我的角色说话（调用API）
-async function letMyCharacterSpeak() {
-    console.log('[联机群聊] ⚡ 触发 AI 回复');
-    
-    if (!myOnlineGroupCharacter) {
-        alert('你没有在这个群聊中设置角色。请在群聊设置中选择要带入的角色。');
-        return;
-    }
-    
-    if (currentOnlineGroupMessages.length === 0) {
-        alert('群聊中还没有消息，角色无法回复');
-        return;
-    }
-    
-    const myWx = getMyOnlineWxAccount();
-    const myUserName = onlineCharacters.find(c => c.wx_account === myWx)?.nickname || myWx;
-    
-    console.log('[联机群聊] 角色名称:', myOnlineGroupCharacter.name);
-    console.log('[联机群聊] 我的微信号:', myWx);
-    console.log('[联机群聊] 我的昵称:', myUserName);
-    console.log('[联机群聊] 📚 群聊消息条数:', currentOnlineGroupMessages.length);
-    console.log('[联机群聊] 👥 群成员数量:', currentOnlineGroupMembers.length);
-    
-    // 打印最近的消息
-    if (currentOnlineGroupMessages.length > 0) {
-        console.log('[联机群聊] 最近5条消息:');
-        currentOnlineGroupMessages.slice(-5).forEach((msg, idx) => {
-            const isChar = msg.sender_type === 'character';
-            const prefix = isChar ? `[角色]${msg.character_name}(${msg.sender_name})` : `[真人]${msg.sender_name}`;
-            console.log(`  [${currentOnlineGroupMessages.length - 5 + idx}] ${prefix}: ${msg.content}`);
-        });
-    }
-    
-    // 修改标题为正在输入
-    const chatTitleEl = document.getElementById('online-group-chat-title');
-    const group = onlineGroups.find(g => g.id === currentOnlineGroupId);
-    const originalTitle = group?.name || '联机群聊';
-    
-    if (chatTitleEl) {
-        chatTitleEl.innerText = `${myOnlineGroupCharacter.name} 正在输入中...`;
-        console.log('[联机群聊] 修改标题为:', `${myOnlineGroupCharacter.name} 正在输入中...`);
-    }
-    
-    // 通知群里其他人：我的角色正在输入
-    onlineSocket.send(JSON.stringify({
-        type: 'group_typing_start',
-        group_id: currentOnlineGroupId,
-        my_wx_account: myWx,
-        character_name: myOnlineGroupCharacter.name
-    }));
-    
-    showToast('正在生成回复...');
-    
-    try {
-        // 构建群成员信息（只有名字，没有人设）
-        let membersInfo = '群聊成员：\n';
-        currentOnlineGroupMembers.forEach(m => {
-            if (m.character_name) {
-                membersInfo += `- ${m.user_name}（带着角色"${m.character_name}"）\n`;
-            } else {
-                membersInfo += `- ${m.user_name}\n`;
-            }
-        });
-        console.log('[联机群聊] 群成员信息:\n', membersInfo);
-        
-        // 收集未领完的红包信息
-        let pendingRedPackets = [];
-        currentOnlineGroupMessages.forEach(msg => {
-            if (msg.msg_type === 'redpacket') {
-                try {
-                    const rpData = JSON.parse(msg.content);
-                    const claimedCount = (rpData.claimed || []).length;
-                    const isAllClaimed = claimedCount >= rpData.count;
-                    const myWx = getMyOnlineWxAccount();
-                    const hasClaimed = rpData.claimed?.includes(myWx) || false;
-                    
-                    if (!isAllClaimed && !hasClaimed) {
-                        pendingRedPackets.push({
-                            id: msg.id || ('rp_' + msg.created_at),
-                            wish: rpData.wish || '恭喜发财',
-                            remaining: rpData.count - claimedCount,
-                            claimed: rpData.claimed || []
-                        });
-                    }
-                } catch(e) {}
-            }
-        });
-        
-        // 构建上下文
-        const context = currentOnlineGroupMessages.map(msg => {
-            const isChar = msg.sender_type === 'character';
-            if (msg.msg_type === 'redpacket') {
-                try {
-                    const rpData = JSON.parse(msg.content);
-                    const claimedCount = (rpData.claimed || []).length;
-                    const isAllClaimed = claimedCount >= rpData.count;
-                    return `[${msg.sender_name}]: [发送了红包] "${rpData.wish || '恭喜发财'}" (红包ID: ${msg.id || ('rp_' + msg.created_at)}, ${isAllClaimed ? '已领完' : `还剩${rpData.count - claimedCount}个可领`})`;
-                } catch(e) {
-                    return `[${msg.sender_name}]: [发送了红包]`;
-                }
-            } else if (isChar) {
-                // 角色消息：显示角色名和主人名
-                return `[${msg.character_name}（${msg.sender_name}的角色）]: ${msg.content}`;
-            } else {
-                // 真人消息
-                return `[${msg.sender_name}]: ${msg.content}`;
-            }
-        }).join('\n');
-        console.log('[联机群聊] 上下文消息（前300字）:', context.substring(0, 300));
-        
-        // 构建提示词
-        const systemPrompt = `你是"${myOnlineGroupCharacter.name}"，是"${myUserName}"带入群聊的AI角色。
-
-【你的人设】
-${myOnlineGroupCharacter.desc || '（无特定人设）'}
-
-【${membersInfo}】
-
-${pendingRedPackets.length > 0 ? `
-🧧 群里有未领完的红包！
-${pendingRedPackets.map(rp => `- 红包ID: ${rp.id}, 祝福语: "${rp.wish}", 还剩 ${rp.remaining} 个可领`).join('\n')}
-提示：看到红包时，你可以积极去抢！使用 {"type": "claim_redpacket", "redpacketId": "红包ID"} 来领取红包。
-` : ''}
-
-【重要回复规则 - 必须严格遵守】
-1. **必须**模拟微信连发消息的习惯：请生成 ${myOnlineGroupCharacter.reply_min_count || 1} 到 ${myOnlineGroupCharacter.reply_max_count || 3} 条短消息${(myOnlineGroupCharacter.reply_min_count || 1) === 1 ? '' : '，不能只发一条'}！
-2. **必须**使用分隔符 "|||" 来隔开每一条消息。
-3. **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
-   - 错误示例：嘿在吗？刚刚看到个好玩的视频，发给你看看
-   - 正确示例：嘿在吗？|||刚刚看到个好玩的视频|||发给你看看
-4. 每条消息要简短，5-15个字最佳，像真实微信聊天一样分多条发送。
-5. 严禁只发送标点符号。每一条消息都必须有实际文字内容。
-6. 语气要自然、口语化，符合人设。
-7. 你只知道其他成员和角色的名字，不知道他们角色的具体人设
-8. 请根据群聊上下文，以"${myOnlineGroupCharacter.name}"的身份自然地参与对话
-9. 只回复你要说的内容，不要加任何前缀如"${myOnlineGroupCharacter.name}:"
-10. 回复要符合你的人设性格
-11. **领取红包**：如果群聊中有红包消息（msg_type为'redpacket'），你可以积极去领取！使用 {"type": "claim_redpacket", "redpacketId": "红包ID"} 来领取红包。红包会记入你主人的钱包余额。
-12. **发送红包**：你可以在适当的场合发红包（比如：过节、生日、表达感谢、活跃气氛、玩梗等），使用 {"type": "send_redpacket", "redpacketType": "红包类型", "totalAmount": 总金额, "count": 红包个数, "wish": "祝福语"} 来发送红包。角色发红包不会扣除任何人的余额，可以自由发送！
-   - redpacketType可选值: "lucky"(拼手气红包), "normal"(普通红包)
-   - 拼手气红包：每个人领到的金额随机，增加趣味性
-   - 普通红包：每个人领到的金额相同，公平分配
-   - 示例1: {"type": "send_redpacket", "redpacketType": "lucky", "totalAmount": 10, "count": 5, "wish": "大家周末快乐！"}
-   - 示例2: {"type": "send_redpacket", "redpacketType": "normal", "totalAmount": 20, "count": 10, "wish": "恭喜发财"}
-
-请以JSON格式返回，格式如下：
-{
-  "reply": "你的回复内容|||第二条内容|||第三条内容"
-}
-
-**特殊指令**：
-1. 领取红包：
-{
-  "type": "claim_redpacket",
-  "redpacketId": "红包ID",
-  "reply": "你的回复内容（可选）"
-}
-
-2. 发送红包：
-{
-  "type": "send_redpacket",
-  "redpacketType": "lucky或normal",
-  "totalAmount": 金额数字,
-  "count": 红包个数,
-  "wish": "祝福语",
-  "reply": "你的回复内容（可选）"
-}
-
-提示：发送红包后，红包会立即出现在群聊中，其他成员和角色就可以抢红包了！你可以在适当的场合发红包活跃气氛，角色发红包不会扣除任何人的余额，可以自由发送！
-
-请严格返回JSON格式，不要包含Markdown代码块标记。`;
-        
-        console.log('[联机群聊] 系统提示词（前500字）:', systemPrompt.substring(0, 500));
-        
-        // 构建消息数组（与 callAI 函数的标准格式一致）
-        const messages = [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: `群聊记录：\n${context}\n\n请以角色身份回复：` }
-        ];
-        
-        console.log('[联机群聊] 📤 准备发送给 AI - 完整信息汇总');
-        console.log('[联机群聊] - System Prompt 长度:', systemPrompt.length);
-        console.log('[联机群聊] - 上下文长度:', context.length);
-        console.log('[联机群聊] 🚀 开始调用 API...');
-        
-        // 先添加一条系统消息作为分割线
-        const systemMsg = {
-            id: 'sys_' + Date.now(),
-            sender_type: 'system',
-            msg_type: 'system',
-            content: `———— ${myOnlineGroupCharacter.name} 开始回复 ————`,
-            created_at: Date.now()
-        };
-        currentOnlineGroupMessages.push(systemMsg);
-        renderOnlineGroupMessages();
-        console.log('[联机群聊] ✅ 已添加系统消息分割线');
-        
-        // 调用统一的 AI 接口
-        const aiResponse = await callAI(messages);
-        
-        console.log('[联机群聊] ✅ API 调用成功');
-        console.log('[联机群聊] 原始响应:', aiResponse);
-        
-        // 尝试解析 JSON 格式（如果AI返回了JSON）
-        let replyText = "";
-        try {
-            // 尝试解析为JSON
-            let cleanResponse = aiResponse.trim();
-            // 清理可能的markdown标记
-            if (cleanResponse.startsWith('```')) {
-                cleanResponse = cleanResponse.replace(/```json?\n?/g, '').replace(/```$/g, '').trim();
-            }
-            const parsed = JSON.parse(cleanResponse);
-            
-            // 检查是否是发送红包指令
-            if (parsed.type === 'send_redpacket' && parsed.totalAmount && parsed.count && parsed.redpacketType) {
-                console.log('[联机群聊] 🧧 角色尝试发送红包');
-                
-                const totalAmount = parseFloat(parsed.totalAmount);
-                const count = parseInt(parsed.count);
-                const wish = parsed.wish || '恭喜发财';
-                const redpacketType = parsed.redpacketType;
-                
-                // 验证金额和数量
-                if (totalAmount > 0 && count > 0 && totalAmount <= 200 && count <= 100) {
-                    // 生成红包ID
-                    const redpacketId = 'rp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-                    
-                    // 构建红包数据
-                    const redpacketData = {
-                        id: redpacketId,
-                        totalAmount: totalAmount.toFixed(2),
-                        count: count,
-                        wish: wish,
-                        redpacketType: redpacketType,
-                        claimed: [],
-                        claimedAmounts: {}
-                    };
-                    
-                    // 发送红包消息到服务器
-                    onlineSocket.send(JSON.stringify({
-                        type: 'send_group_message',
-                        group_id: currentOnlineGroupId,
-                        my_wx_account: myWx,
-                        sender_type: 'character',
-                        sender_name: myUserName,
-                        character_name: myOnlineGroupCharacter.name,
-                        msg_type: 'redpacket',
-                        content: JSON.stringify(redpacketData)
-                    }));
-                    
-                    console.log('[联机群聊] ✅ 角色红包已发送，金额:', totalAmount, '个数:', count, '（不扣除用户余额）');
-                    
-                    // 如果有回复内容，也发送
-                    if (parsed.reply) {
-                        replyText = parsed.reply;
-                    } else {
-                        replyText = '';
-                    }
-                } else {
-                    // 参数无效
-                    console.log('[联机群聊] ⚠️ 红包参数无效');
-                    replyText = parsed.reply || '';
-                }
-            }
-            // 检查是否是领取红包指令
-            else if (parsed.type === 'claim_redpacket' && parsed.redpacketId) {
-                console.log('[联机群聊] 🧧 角色尝试领取红包:', parsed.redpacketId);
-                await claimOnlineGroupRedPacket(parsed.redpacketId, myWx, myOnlineGroupCharacter.name);
-                
-                // 如果有回复内容，也发送
-                if (parsed.reply) {
-                    replyText = parsed.reply;
-                } else {
-                    replyText = '';
-                }
-            } else {
-                replyText = parsed.reply || parsed.content || parsed.message || aiResponse;
-            }
-            console.log('[联机群聊] JSON解析成功，提取到回复内容:', replyText);
-        } catch (e) {
-            // 不是JSON格式，直接使用原始响应
-            replyText = aiResponse.trim();
-            console.log('[联机群聊] 不是JSON格式，使用原始响应');
-        }
-        
-        if (replyText) {
-            // 按照 ||| 分割成多条消息
-            const segments = replyText.split('|||').map(s => s.trim()).filter(s => s.length > 0);
-            console.log('[联机群聊] 分割成', segments.length, '条消息');
-            
-            // 依次发送每条消息，间隔100ms
-            for (let i = 0; i < segments.length; i++) {
-                const segment = segments[i];
-                console.log(`[联机群聊] 发送第 ${i+1}/${segments.length} 条消息:`, segment);
-                
-                onlineSocket.send(JSON.stringify({
-                    type: 'send_group_message',
-                    group_id: currentOnlineGroupId,
-                    my_wx_account: myWx,
-                    sender_type: 'character',
-                    sender_name: myUserName,
-                    character_name: myOnlineGroupCharacter.name,
-                    content: segment
-                }));
-                
-                // 等待一小段时间再发送下一条，避免消息顺序混乱
-                if (i < segments.length - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                }
-            }
-            
-            console.log('[联机群聊] 📤 所有消息已发送到服务器');
-        } else {
-            console.warn('[联机群聊] ⚠️ 回复内容为空');
-            // 如果没有回复内容，移除刚添加的系统消息
-            currentOnlineGroupMessages.pop();
-            renderOnlineGroupMessages();
-        }
-        
-        // 恢复标题
-        if (chatTitleEl) {
-            chatTitleEl.innerText = originalTitle;
-            console.log('[联机群聊] 恢复标题为:', originalTitle);
-        }
-        
-        // 通知群里其他人：输入结束
-        onlineSocket.send(JSON.stringify({
-            type: 'group_typing_stop',
-            group_id: currentOnlineGroupId,
-            my_wx_account: myWx
-        }));
-    } catch (e) {
-        console.error('[联机群聊] ❌ 角色回复失败:', e);
-        console.error('[联机群聊] 错误堆栈:', e.stack);
-        alert('角色回复失败: ' + e.message);
-        
-        // 出错时也要恢复标题
-        if (chatTitleEl) {
-            chatTitleEl.innerText = originalTitle;
-            console.log('[联机群聊] （出错）恢复标题为:', originalTitle);
-        }
-        
-        // 通知群里其他人：输入结束
-        onlineSocket.send(JSON.stringify({
-            type: 'group_typing_stop',
-            group_id: currentOnlineGroupId,
-            my_wx_account: myWx
-        }));
-    }
-}
-
-// 显示群聊信息页面
-function showOnlineGroupInfo(groupId) {
-    const group = onlineGroups.find(g => g.id === groupId);
-    if (!group) return;
-    
-    const myWx = getMyOnlineWxAccount();
-    
-    const page = document.createElement('div');
-    page.id = 'online-group-info-page';
-    page.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:#f5f5f5; z-index:310; display:flex; flex-direction:column;`;
-    
-    page.innerHTML = `
-        <div class="wechat-header" style="background:#fff; border-bottom:1px solid #f0f0f0;">
-            <div class="back-btn" onclick="document.getElementById('online-group-info-page').remove()" style="margin:0; background:none; width:40px; justify-content:flex-start; color:#333;">
-                <svg class="svg-icon" viewBox="0 0 24 24" style="width:24px; height:24px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
-            </div>
-            <div class="wechat-title">群聊资料</div>
-            <div style="width:40px;"></div>
-        </div>
-        
-        <div style="flex:1; overflow-y:auto;">
-            <div style="background:#fff; padding:20px; margin-bottom:10px; text-align:center;">
-                <div style="width:60px; height:60px; border-radius:12px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); margin:0 auto 12px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:24px;">👥</div>
-                <div style="font-size:18px; font-weight:600;">${group.name}</div>
-            </div>
-            
-            <div style="background:#fff; padding:16px; margin-bottom:10px;">
-                <div style="font-size:14px; font-weight:500; margin-bottom:12px;">群成员 (${currentOnlineGroupMembers.length})</div>
-                <div id="og-info-members" style="display:flex; flex-wrap:wrap; gap:12px;">
-                    ${currentOnlineGroupMembers.map(m => `
-                        <div style="text-align:center; width:60px;">
-                            <div style="width:48px; height:48px; border-radius:8px; margin:0 auto 4px; background-image:url(${m.user_avatar}); background-size:cover; background-color:#e0e0e0;"></div>
-                            <div style="font-size:12px; color:#333; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${m.user_name}</div>
-                            ${m.character_name ? `<div style="font-size:10px; color:#667eea;">🎭${m.character_name}</div>` : ''}
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-            
-            <div style="background:#fff; padding:16px; margin-bottom:10px;">
-                <div style="font-size:14px; font-weight:500; margin-bottom:12px;">我的群角色</div>
-                <div style="display:flex; align-items:center; justify-content:space-between;">
-                    <span style="color:#666;">${myOnlineGroupCharacter ? myOnlineGroupCharacter.name : '未设置角色'}</span>
-                    <button onclick="showChangeGroupCharacterModal('${groupId}')" style="padding:8px 16px; background:var(--ins-pink); color:#fff; border:none; border-radius:6px; font-size:13px;">
-                        ${myOnlineGroupCharacter ? '更换' : '设置'}角色
-                    </button>
-                </div>
-            </div>
-            
-            <div style="background:#fff; padding:16px; margin-bottom:10px;">
-                <div style="font-size:14px; font-weight:500; margin-bottom:12px;">聊天背景图</div>
-                <div style="display:flex; flex-direction:column; gap:12px;">
-                    <div style="display:flex; gap:8px;">
-                        <button onclick="document.getElementById('online-group-bg-input').setAttribute('data-group-id', '${groupId}'); document.getElementById('online-group-bg-input').click()" style="flex:1; padding:8px 12px; background:#f0f0f0; border:none; border-radius:6px; font-size:13px; color:#666; cursor:pointer;">上传背景</button>
-                        <button onclick="clearOnlineGroupBackground('${groupId}')" style="flex:1; padding:8px 12px; background:#f0f0f0; border:none; border-radius:6px; font-size:13px; color:#666; cursor:pointer;">清除背景</button>
-                    </div>
-                    <div id="online-group-bg-preview" style="width:100%; height:120px; border-radius:8px; background:#f5f5f5; background-size:cover; background-position:center; border:1px solid #e8e8e8; display:flex; align-items:center; justify-content:center; color:#999; font-size:12px;">
-                        暂无背景图
-                    </div>
-                </div>
-            </div>
-            
-            <div style="background:#fff; padding:16px;">
-                <button onclick="inviteFriendToGroup('${groupId}')" style="width:100%; padding:14px; background:#f5f5f5; color:#333; border:none; border-radius:8px; font-size:15px; margin-bottom:10px;">邀请好友</button>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(page);
-    
-    // 加载并显示背景图预览
-    loadOnlineGroupBackgroundPreview(groupId);
-}
-
-// 显示更换角色弹窗
-async function showChangeGroupCharacterModal(groupId) {
-    const chars = await db.characters.toArray();
-    const availableChars = chars.filter(c => c.type !== 'user' && c.type !== 'online_friend');
-    
-    const modal = document.createElement('div');
-    modal.id = 'change-char-modal';
-    modal.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;`;
-    
-    modal.innerHTML = `
-        <div style="background:#fff; border-radius:12px; padding:20px; width:80%; max-width:300px;">
-            <h3 style="margin:0 0 16px 0; text-align:center;">选择角色</h3>
-            <select id="change-char-select" style="width:100%; padding:12px; border:1px solid #ddd; border-radius:8px; margin-bottom:16px;">
-                <option value="">不使用角色</option>
-                ${availableChars.map(c => `<option value="${c.id}" ${myOnlineGroupCharacter?.name === c.name ? 'selected' : ''}>${c.name}</option>`).join('')}
-            </select>
-            <div style="display:flex; gap:10px;">
-                <button onclick="this.closest('#change-char-modal').remove()" style="flex:1; padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px;">取消</button>
-                <button onclick="doChangeGroupCharacter('${groupId}')" style="flex:1; padding:12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px;">确定</button>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(modal);
-}
-
-// 执行更换角色
-async function doChangeGroupCharacter(groupId) {
-    const charId = document.getElementById('change-char-select').value;
-    
-    let myChar = null;
-    if (charId) {
-        const char = await db.characters.get(parseInt(charId));
-        if (char) {
-            myChar = {
-                name: char.name,
-                avatar: char.avatar || '',
-                desc: char.description?.substring(0, 200) || ''
-            };
-        }
-    }
-    
-    const myWx = getMyOnlineWxAccount();
-    onlineSocket.send(JSON.stringify({
-        type: 'update_group_character',
-        group_id: groupId,
-        my_wx_account: myWx,
-        character: myChar
-    }));
-    
-    myOnlineGroupCharacter = myChar;
-    document.getElementById('change-char-modal')?.remove();
-    document.getElementById('online-group-info-page')?.remove();
-    showOnlineGroupInfo(groupId);
-}
-
-// 邀请好友到群聊
-async function inviteFriendToGroup(groupId) {
-    const friends = await db.characters.where('type').equals('online_friend').toArray();
-    
-    if (friends.length === 0) {
-        alert('暂无联机好友可邀请');
-        return;
-    }
-    
-    const modal = document.createElement('div');
-    modal.id = 'invite-friend-modal';
-    modal.style.cssText = `position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;`;
-    
-    modal.innerHTML = `
-        <div style="background:#fff; border-radius:12px; padding:20px; width:80%; max-width:300px; max-height:60vh; display:flex; flex-direction:column;">
-            <h3 style="margin:0 0 16px 0; text-align:center;">邀请好友</h3>
-            <div style="flex:1; overflow-y:auto;">
-                ${friends.map(f => `
-                    <div onclick="doInviteFriend('${groupId}', '${f.onlineData?.wx_account}')" style="display:flex; align-items:center; padding:12px; border-bottom:1px solid #f5f5f5; cursor:pointer;">
-                        <div style="width:40px; height:40px; border-radius:8px; background-image:url(${f.avatar}); background-size:cover; background-color:#e0e0e0; margin-right:12px;"></div>
-                        <span>${f.name}</span>
-                    </div>
-                `).join('')}
-            </div>
-            <button onclick="this.closest('#invite-friend-modal').remove()" style="margin-top:12px; padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px;">取消</button>
-        </div>
-    `;
-    
-    document.body.appendChild(modal);
-}
-
-// 执行邀请好友
-function doInviteFriend(groupId, friendWx) {
-    const myWx = getMyOnlineWxAccount();
-    onlineSocket.send(JSON.stringify({
-        type: 'invite_to_group',
-        group_id: groupId,
-        my_wx_account: myWx,
-        invite_wx_account: friendWx
-    }));
-    
-    document.getElementById('invite-friend-modal')?.remove();
-    showToast('邀请已发送');
-}
-
-// 设置联机群聊背景图
-async function setOnlineGroupBackground(input) {
-    if (!input.files || !input.files[0]) return;
-    
-    const groupId = input.getAttribute('data-group-id') || currentOnlineGroupId;
-    if (!groupId) {
-        showToast('无法获取群聊ID');
-        return;
-    }
-    
-    const file = input.files[0];
-    const reader = new FileReader();
-    
-    reader.onload = async function(e) {
-        const base64 = e.target.result;
-        const accountId = getCurrentAccountId();
-        if (!accountId) return;
-        
-        try {
-            // 查找对应的本地群聊记录
-            const groups = await db.group_chats
-                .where('ownerAccountId').equals(accountId)
-                .filter(g => g.isOnlineGroup && g.onlineGroupId === groupId)
-                .toArray();
-            
-            if (groups.length > 0) {
-                const group = groups[0];
-                group.chat_background = base64;
-                await db.group_chats.put(group);
-                
-                // 应用背景图
-                applyOnlineGroupBackground(groupId);
-                
-                // 更新预览
-                loadOnlineGroupBackgroundPreview(groupId);
-                
-                showToast('背景图已设置');
-            }
-        } catch (e) {
-            console.error('保存联机群聊背景图失败:', e);
-            showToast('保存失败');
-        }
-    };
-    
-    reader.readAsDataURL(file);
-}
-
-// 清除联机群聊背景图
-async function clearOnlineGroupBackground(groupId) {
-    const accountId = getCurrentAccountId();
-    if (!accountId) return;
-    
-    try {
-        // 查找对应的本地群聊记录
-        const groups = await db.group_chats
-            .where('ownerAccountId').equals(accountId)
-            .filter(g => g.isOnlineGroup && g.onlineGroupId === groupId)
-            .toArray();
-        
-        if (groups.length > 0) {
-            const group = groups[0];
-            group.chat_background = null;
-            await db.group_chats.put(group);
-            
-            // 应用背景图（清除）
-            applyOnlineGroupBackground(groupId);
-            
-            // 更新预览
-            loadOnlineGroupBackgroundPreview(groupId);
-            
-            showToast('背景图已清除');
-        }
-    } catch (e) {
-        console.error('清除联机群聊背景图失败:', e);
-        showToast('清除失败');
-    }
-}
-
-// 应用联机群聊背景图
-async function applyOnlineGroupBackground(groupId) {
-    const page = document.getElementById('online-group-chat-page');
-    if (!page) return;
-    
-    const accountId = getCurrentAccountId();
-    if (!accountId) return;
-    
-    try {
-        // 查找对应的本地群聊记录
-        const groups = await db.group_chats
-            .where('ownerAccountId').equals(accountId)
-            .filter(g => g.isOnlineGroup && g.onlineGroupId === groupId)
-            .toArray();
-        
-        if (groups.length > 0) {
-            const group = groups[0];
-            if (group.chat_background) {
-                page.style.backgroundImage = `url(${group.chat_background})`;
-                page.style.backgroundSize = 'cover';
-                page.style.backgroundPosition = 'center';
-                page.style.backgroundRepeat = 'no-repeat';
-                page.style.backgroundAttachment = 'fixed';
-            } else {
-                page.style.backgroundImage = '';
-                page.style.backgroundSize = '';
-                page.style.backgroundPosition = '';
-                page.style.backgroundRepeat = '';
-                page.style.backgroundAttachment = '';
-                page.style.backgroundColor = '#ffffff';
-            }
-        }
-    } catch (e) {
-        console.error('应用联机群聊背景图失败:', e);
-    }
-}
-
-// 加载联机群聊背景图预览
-async function loadOnlineGroupBackgroundPreview(groupId) {
-    const preview = document.getElementById('online-group-bg-preview');
-    if (!preview) return;
-    
-    const accountId = getCurrentAccountId();
-    if (!accountId) return;
-    
-    try {
-        // 查找对应的本地群聊记录
-        const groups = await db.group_chats
-            .where('ownerAccountId').equals(accountId)
-            .filter(g => g.isOnlineGroup && g.onlineGroupId === groupId)
-            .toArray();
-        
-        if (groups.length > 0) {
-            const group = groups[0];
-            if (group.chat_background) {
-                preview.style.backgroundImage = `url(${group.chat_background})`;
-                preview.innerHTML = '';
-            } else {
-                preview.style.backgroundImage = '';
-                preview.innerHTML = '暂无背景图';
-            }
-        } else {
-            preview.style.backgroundImage = '';
-            preview.innerHTML = '暂无背景图';
-        }
-    } catch (e) {
-        console.error('加载联机群聊背景图预览失败:', e);
-    }
-}
-
-// ==================== 联机群聊功能结束 ====================
 
 // 将联机相关函数暴露到全局作用域
 window.toggleOnlineSettings = toggleOnlineSettings;
@@ -33466,23 +26652,3 @@ window.updateOnlineFeatureSection = updateOnlineFeatureSection;
 window.refreshOnlineStatusPageContent = refreshOnlineStatusPageContent;
 window.renderOnlineCharList = renderOnlineCharList;
 window.updateOnlineConnectionStatus = updateOnlineConnectionStatus;
-window.manualSyncOnline = manualSyncOnline;
-
-// 联机群聊函数
-window.showCreateOnlineGroupModal = showCreateOnlineGroupModal;
-window.doCreateOnlineGroup = doCreateOnlineGroup;
-window.openOnlineGroup = openOnlineGroup;
-window.hideOnlineGroupChat = hideOnlineGroupChat;
-window.sendOnlineGroupMsg = sendOnlineGroupMsg;
-window.letMyCharacterSpeak = letMyCharacterSpeak;
-window.showOnlineGroupInfo = showOnlineGroupInfo;
-window.showChangeGroupCharacterModal = showChangeGroupCharacterModal;
-window.doChangeGroupCharacter = doChangeGroupCharacter;
-window.inviteFriendToGroup = inviteFriendToGroup;
-window.doInviteFriend = doInviteFriend;
-window.onlineGroupVoiceInput = onlineGroupVoiceInput;
-window.closeOnlineGroupVoiceModal = closeOnlineGroupVoiceModal;
-window.startOnlineGroupVoiceRecord = startOnlineGroupVoiceRecord;
-window.playOnlineGroupAudio = playOnlineGroupAudio;
-window.receiveOnlineGroupTransfer = receiveOnlineGroupTransfer;
-window.doJoinOnlineGroup = doJoinOnlineGroup;
