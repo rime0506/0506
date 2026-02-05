@@ -1171,10 +1171,60 @@ async function handleCreateOnlineGroup(ws, data) {
     
     // 添加创建者为成员
     const memberId = uuidv4();
-    await db.execute(
-        'INSERT INTO online_group_members (id, group_id, user_wx, character_name, character_avatar, character_desc, joined_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [memberId, groupId, my_wx_account, my_character?.name || null, my_character?.avatar || null, my_character?.desc || null, Date.now()]
-    );
+    try {
+        await db.execute(
+            'INSERT INTO online_group_members (id, group_id, user_wx, character_name, character_avatar, character_desc, joined_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [memberId, groupId, my_wx_account, my_character?.name || null, my_character?.avatar || null, my_character?.desc || null, Date.now()]
+        );
+    } catch (insertError) {
+        console.error('[创建群聊] 插入成员失败:', insertError.message);
+        // 如果是参数错误，尝试删除并重建表
+        if (insertError.message.includes('Incorrect arguments')) {
+            console.log('🔄 检测到表结构问题，正在修复...');
+            await db.execute('DROP TABLE IF EXISTS online_group_messages');
+            await db.execute('DROP TABLE IF EXISTS online_group_members');
+            
+            await db.execute(`
+                CREATE TABLE online_group_members (
+                    id VARCHAR(36) PRIMARY KEY,
+                    group_id VARCHAR(36) NOT NULL,
+                    user_wx VARCHAR(100) NOT NULL,
+                    character_name VARCHAR(100),
+                    character_avatar TEXT,
+                    character_desc TEXT,
+                    joined_at BIGINT DEFAULT 0,
+                    UNIQUE KEY unique_group_member (group_id, user_wx),
+                    INDEX idx_online_group_members_group (group_id),
+                    FOREIGN KEY (group_id) REFERENCES online_groups(id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            `);
+            
+            await db.execute(`
+                CREATE TABLE online_group_messages (
+                    id VARCHAR(36) PRIMARY KEY,
+                    group_id VARCHAR(36) NOT NULL,
+                    sender_type VARCHAR(20) NOT NULL,
+                    sender_wx VARCHAR(100) NOT NULL,
+                    sender_name VARCHAR(100) NOT NULL,
+                    character_name VARCHAR(100),
+                    content TEXT NOT NULL,
+                    msg_type VARCHAR(20) DEFAULT 'text',
+                    created_at BIGINT DEFAULT 0,
+                    INDEX idx_online_group_messages_group (group_id),
+                    FOREIGN KEY (group_id) REFERENCES online_groups(id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            `);
+            
+            console.log('✅ 表结构已修复，重新插入');
+            // 重新插入
+            await db.execute(
+                'INSERT INTO online_group_members (id, group_id, user_wx, character_name, character_avatar, character_desc, joined_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [memberId, groupId, my_wx_account, my_character?.name || null, my_character?.avatar || null, my_character?.desc || null, Date.now()]
+            );
+        } else {
+            throw insertError;
+        }
+    }
     
     // 获取创建者信息
     const [creatorChar] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [my_wx_account]);
