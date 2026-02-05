@@ -7052,6 +7052,11 @@ ${loreContext}
                         lastMsg = last.content;
                         if (lastMsg.startsWith('[img:')) lastMsg = '[图片]';
                         if (last.role === 'system') lastMsg = '[系统消息]';
+                        // ✅ 处理特殊消息类型
+                        if (last.type === 'transfer') lastMsg = '[转账]';
+                        if (last.type === 'familyCard') lastMsg = '[亲属卡]';
+                        if (last.type === 'audio') lastMsg = '[语音]';
+                        if (last.type === 'location') lastMsg = '[位置]';
                         
                         const d = new Date(last.time);
                         const now = new Date();
@@ -7140,6 +7145,11 @@ ${loreContext}
                     if (lastMsg.startsWith('[img:')) lastMsg = '[图片]';
                     if (lastMsg.startsWith('[voice:')) lastMsg = '[语音]';
                     if (lastMsg.startsWith('[imgcard:')) lastMsg = '[卡片]';
+                    // ✅ 处理转账和亲属卡消息
+                    if (last.type === 'transfer') lastMsg = '[转账]';
+                    if (last.type === 'familyCard') lastMsg = '[亲属卡]';
+                    if (last.type === 'audio') lastMsg = '[语音]';
+                    if (last.type === 'location') lastMsg = '[位置]';
                     
                     const d = new Date(last.time);
                     const now = new Date();
