@@ -5369,7 +5369,17 @@ ${loreContext}
         
     } catch (error) {
         console.error('[acceptMessageReply] ❌ 接受回复失败:', error);
-        alert('接受回复失败，请稍后重试');
+        
+        // 🚨 显示详细错误信息（使用Toast弹窗）
+        let errorMsg = error.message || error.toString() || '未知错误';
+        
+        // 如果是网络错误或API密钥错误，添加友好提示
+        if (errorMsg.includes('API') || errorMsg.includes('fetch') || errorMsg.includes('Failed')) {
+            errorMsg += '\n\n💡 可能的原因：API密钥未配置/已失效、网络连接问题、或API服务不可用';
+        }
+        
+        // 使用Toast弹窗显示错误
+        showApiErrorToast(errorMsg);
     }
 }
 
@@ -13741,6 +13751,8 @@ ${groupContextStr}
         let lastRenderedCharId = null;
         let lastRenderedHistoryLength = 0;
         let lastRenderedAccountId = null;
+        let currentRenderedCount = 0; // 跟踪已渲染的消息数量
+        let isLoadingMoreMessages = false; // 防止重复加载
 
         // 🎯 新增：只添加单条消息，不重新渲染整个聊天（性能优化）
         async function appendChatMessage(char, msg, msgIndex) {
@@ -13766,6 +13778,7 @@ ${groupContextStr}
             
             // 更新缓存计数
             lastRenderedHistoryLength = history.length;
+            currentRenderedCount++; // 更新已渲染计数
             
             // 滚动到底部
             setTimeout(() => {
@@ -13795,6 +13808,7 @@ ${groupContextStr}
             lastRenderedHistoryLength = history?.length || 0;
             
             body.innerHTML = '';
+            currentRenderedCount = 0; // 重置渲染计数
             
             // 切换多选模式样式
             if (isSelectionMode) {
@@ -13944,8 +13958,25 @@ ${groupContextStr}
             const userAvatarUrl = await getUserAvatarUrl(char.linked_user_id);
             const timeOffset = char.timeOffset || 0; // 获取虚拟时间偏移
 
-            history.forEach((msg, index) => {
-                const prevMsgTime = index > 0 ? history[index - 1].time : null;
+            // 🚀 优化：只渲染最近的50条消息
+            const renderWindow = 50;
+            const totalMessages = history.length;
+            const startIndex = Math.max(0, totalMessages - renderWindow);
+            const messagesToRender = history.slice(startIndex);
+            currentRenderedCount = messagesToRender.length;
+
+            // 如果还有更多消息，添加"加载更多"按钮
+            if (startIndex > 0) {
+                const loadMoreBtn = document.createElement('div');
+                loadMoreBtn.id = 'load-more-btn';
+                loadMoreBtn.style.cssText = 'text-align:center; padding:12px; margin:8px 0;';
+                loadMoreBtn.innerHTML = `<button onclick="loadMoreMessages()" style="background:#f0f0f0; border:none; padding:8px 20px; border-radius:16px; color:#666; font-size:13px; cursor:pointer;">加载更早的消息 (${startIndex}条)</button>`;
+                body.appendChild(loadMoreBtn);
+            }
+
+            messagesToRender.forEach((msg, relativeIndex) => {
+                const absoluteIndex = startIndex + relativeIndex;
+                const prevMsgTime = absoluteIndex > 0 ? history[absoluteIndex - 1].time : null;
                 
                 // 如果需要显示时间戳，先添加时间戳行（系统消息不显示时间戳）
                 if (msg.role !== 'system' && shouldShowTimestamp(msg.time, prevMsgTime)) {
@@ -13955,12 +13986,12 @@ ${groupContextStr}
                     body.appendChild(timeStamp);
                 }
                 
-                const row = createMessageElement(msg, index, char.avatar, userAvatarUrl, prevMsgTime, char.name);
+                const row = createMessageElement(msg, absoluteIndex, char.avatar, userAvatarUrl, prevMsgTime, char.name);
                 
                 // 如果在多选模式，恢复选中状态（系统消息除外）
                 if (isSelectionMode && msg.role !== 'system') {
                     const cb = row.querySelector('.msg-checkbox');
-                    if (cb && selectedIndices.has(index)) {
+                    if (cb && selectedIndices.has(absoluteIndex)) {
                         cb.classList.add('checked');
                     }
                 }
@@ -13997,6 +14028,98 @@ ${groupContextStr}
             // 应用聊天背景图
             applyChatBackground(char);
         }
+
+        // 🚀 加载更多消息（懒加载优化）
+        async function loadMoreMessages() {
+            if (isLoadingMoreMessages) return;
+            if (!currentChatCharId) return;
+            
+            isLoadingMoreMessages = true;
+            
+            const char = await db.characters.get(currentChatCharId);
+            const accountId = getCurrentAccountId();
+            const history = getChatHistory(char, accountId);
+            const body = document.getElementById('chat-body');
+            
+            // 计算要加载的消息范围
+            const renderWindow = 50;
+            const totalMessages = history.length;
+            const nextSliceStart = totalMessages - currentRenderedCount - renderWindow;
+            const nextSliceEnd = totalMessages - currentRenderedCount;
+            
+            if (nextSliceStart < 0 || nextSliceEnd <= 0) {
+                isLoadingMoreMessages = false;
+                return;
+            }
+            
+            const messagesToPrepend = history.slice(Math.max(0, nextSliceStart), nextSliceEnd);
+            
+            if (messagesToPrepend.length === 0) {
+                isLoadingMoreMessages = false;
+                return;
+            }
+            
+            // 保存当前滚动位置
+            const oldScrollHeight = body.scrollHeight;
+            
+            // 移除旧的"加载更多"按钮
+            const oldLoadMoreBtn = document.getElementById('load-more-btn');
+            if (oldLoadMoreBtn) {
+                oldLoadMoreBtn.remove();
+            }
+            
+            // 如果还有更多消息，添加新的"加载更多"按钮
+            const newStartIndex = Math.max(0, nextSliceStart);
+            if (newStartIndex > 0) {
+                const loadMoreBtn = document.createElement('div');
+                loadMoreBtn.id = 'load-more-btn';
+                loadMoreBtn.style.cssText = 'text-align:center; padding:12px; margin:8px 0;';
+                loadMoreBtn.innerHTML = `<button onclick="loadMoreMessages()" style="background:#f0f0f0; border:none; padding:8px 20px; border-radius:16px; color:#666; font-size:13px; cursor:pointer;">加载更早的消息 (${newStartIndex}条)</button>`;
+                body.insertBefore(loadMoreBtn, body.firstChild);
+            }
+            
+            // 准备要添加的消息元素
+            const userAvatarUrl = await getUserAvatarUrl(char.linked_user_id);
+            const timeOffset = char.timeOffset || 0;
+            const fragment = document.createDocumentFragment();
+            
+            messagesToPrepend.forEach((msg, relativeIndex) => {
+                const absoluteIndex = newStartIndex + relativeIndex;
+                const prevMsgTime = absoluteIndex > 0 ? history[absoluteIndex - 1].time : null;
+                
+                // 添加时间戳
+                if (msg.role !== 'system' && shouldShowTimestamp(msg.time, prevMsgTime)) {
+                    const timeStamp = document.createElement('div');
+                    timeStamp.className = 'message-timestamp';
+                    timeStamp.textContent = formatMessageTime(msg.time, prevMsgTime, timeOffset);
+                    fragment.appendChild(timeStamp);
+                }
+                
+                const row = createMessageElement(msg, absoluteIndex, char.avatar, userAvatarUrl, prevMsgTime, char.name);
+                fragment.appendChild(row);
+            });
+            
+            // 插入消息到顶部
+            const firstMessage = body.querySelector('.message-row, .message-system');
+            if (firstMessage) {
+                body.insertBefore(fragment, firstMessage);
+            } else {
+                body.appendChild(fragment);
+            }
+            
+            // 恢复滚动位置
+            const newScrollHeight = body.scrollHeight;
+            body.scrollTop = newScrollHeight - oldScrollHeight;
+            
+            // 更新已渲染计数
+            currentRenderedCount += messagesToPrepend.length;
+            
+            isLoadingMoreMessages = false;
+            console.log(`[loadMoreMessages] 加载了 ${messagesToPrepend.length} 条消息，总计已渲染 ${currentRenderedCount} 条`);
+        }
+        
+        // 暴露到全局作用域，供 HTML onclick 使用
+        window.loadMoreMessages = loadMoreMessages;
 
         // 追加单条消息 (主要用于 AI 回复时的流式输出，不重绘整个列表)
         // 注意：追加的消息需要重新绑定事件，且此时通常不在多选模式
@@ -15620,9 +15743,7 @@ ${groupContextStr}
                 await db.characters.put(char);
                 console.log(`[FastForward] Updated time offset by +${ms}ms (${unitText})`);
                 
-                // 4. 刷新聊天界面，更新时间戳显示
-                await renderChatBody(char);
-                console.log(`[FastForward] 聊天界面已刷新，时间戳已更新`);
+                // 时间戳会在下次渲染时自动更新，不需要立即重新渲染
             }
             
             // 2. 检查被拉黑的角色是否会联系
