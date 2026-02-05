@@ -20984,32 +20984,56 @@ async function showGiveFamilyCardModal() {
     const accountId = getCurrentAccountId();
     const allChars = await db.characters.toArray();
     
-    // 过滤出好友（非用户角色且是好友状态）
+    // 过滤出好友（包括本地好友和联机好友）
     const friends = allChars.filter(c => {
         if (c.type === 'user') return false;
+        // ✅ 包含联机好友
+        if (c.type === 'online_friend') return true;
+        // 检查普通好友状态
         const status = getFriendStatus(c, accountId);
         return status === 'friend';
     });
     
-    // 排除已经赠送过亲属卡的
+    console.log('[亲属卡] 找到好友总数:', friends.length, '其中联机好友:', friends.filter(f => f.type === 'online_friend').length);
+    
+    // 排除已经赠送过亲属卡的（本地好友）
     const givenCards = user?.identity?.familyCardsGiven || [];
     const givenIds = givenCards.map(c => c.charId);
-    const availableFriends = friends.filter(f => !givenIds.includes(f.id));
+    
+    // ✅ 排除已经在聊天记录中赠送过亲属卡的（联机好友）
+    const availableFriends = friends.filter(f => {
+        // 本地好友：检查 givenIds
+        if (f.type !== 'online_friend') {
+            return !givenIds.includes(f.id);
+        }
+        
+        // 联机好友：检查聊天记录中是否有已发送的亲属卡
+        const history = getChatHistory(f, accountId);
+        if (!history) return true;
+        const hasSent = history.some(msg => msg.role === 'user' && msg.type === 'familyCard');
+        return !hasSent;
+    });
     
     if (availableFriends.length === 0) {
         listEl.innerHTML = '<div style="text-align:center; padding:20px; color:#999;">没有可赠送的好友</div>';
     } else {
-        listEl.innerHTML = availableFriends.map(f => `
-            <div class="family-card-friend-item" onclick="selectFamilyCardFriend(${f.id}, this)">
-                <div class="family-card-friend-avatar" style="background-image:url(${f.avatar})"></div>
-                <div class="family-card-friend-name">${f.name}</div>
-                <div class="family-card-friend-check">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3">
-                        <polyline points="20 6 9 17 4 12"></polyline>
-                    </svg>
+        listEl.innerHTML = availableFriends.map(f => {
+            // ✅ 给联机好友添加标记
+            const isOnline = f.type === 'online_friend';
+            const onlineTag = isOnline ? '<span style="background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:#fff; font-size:10px; padding:2px 6px; border-radius:3px; margin-left:6px;">联机</span>' : '';
+            
+            return `
+                <div class="family-card-friend-item" onclick="selectFamilyCardFriend(${f.id}, this)">
+                    <div class="family-card-friend-avatar" style="background-image:url(${f.avatar})"></div>
+                    <div class="family-card-friend-name">${f.name}${onlineTag}</div>
+                    <div class="family-card-friend-check">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                    </div>
                 </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
     }
     
     document.getElementById('family-card-limit-input').value = '0';
@@ -21040,23 +21064,83 @@ async function confirmGiveFamilyCard() {
     const monthlyLimit = parseFloat(limitInput.value) || 0;
     
     const user = await db.characters.get(parseInt(currentMyCharId));
-    if (!user.identity) user.identity = {};
-    if (!user.identity.familyCardsGiven) user.identity.familyCardsGiven = [];
-    
-    // 添加亲属卡记录
-    user.identity.familyCardsGiven.push({
-        charId: selectedFamilyCardFriendId,
-        monthlyLimit: monthlyLimit,
-        usedThisMonth: 0,
-        records: [],
-        createdAt: Date.now()
-    });
-    
-    await db.characters.put(user);
-    
-    // 同时在角色那边添加收到的亲属卡记录
     const char = await db.characters.get(selectedFamilyCardFriendId);
-    if (char) {
+    
+    if (!char) {
+        showToast('好友不存在');
+        return;
+    }
+    
+    const accountId = getCurrentAccountId();
+    
+    // ✅ 判断是否是联机好友
+    if (char.type === 'online_friend') {
+        console.log('[亲属卡] 检测到联机好友，通过消息通道发送');
+        // 联机好友 - 通过消息通道发送（和转账一样）
+        const onlineUserChar = await getOrCreateOnlineUserChar();
+        
+        if (onlineUserChar && onlineConnected && char.onlineData?.wx_account) {
+            const fromWxAccount = onlineUserChar.identity.account;
+            const toWxAccount = char.onlineData.wx_account;
+            
+            // 通过消息通道发送
+            const familyCardContent = JSON.stringify({
+                __type: 'familyCard',
+                monthlyLimit: monthlyLimit,
+                fromName: onlineUserChar.name
+            });
+            
+            const sent = sendOnlineMessage(toWxAccount, familyCardContent, fromWxAccount);
+            
+            if (sent) {
+                // 保存到聊天记录
+                let history = getChatHistory(char, accountId);
+                const familyCardMsg = {
+                    role: 'user',
+                    type: 'familyCard',
+                    content: JSON.stringify({
+                        fromName: onlineUserChar.name,
+                        monthlyLimit: monthlyLimit,
+                        status: 'sent',
+                        isOnline: true
+                    }),
+                    time: Date.now()
+                };
+                
+                history.push(familyCardMsg);
+                await setChatHistory(char, accountId, history);
+                
+                console.log('[亲属卡] ✅ 联机亲属卡已发送');
+                showToast('已赠送亲属卡');
+            } else {
+                console.error('[亲属卡] ❌ 发送失败');
+                showToast('发送失败，请检查连接');
+                return;
+            }
+        } else {
+            console.error('[亲属卡] ❌ 条件不满足');
+            showToast('请确保已连接服务器');
+            return;
+        }
+    } else {
+        // 本地好友 - 原有逻辑
+        console.log('[亲属卡] 本地好友，使用原有逻辑');
+        
+        if (!user.identity) user.identity = {};
+        if (!user.identity.familyCardsGiven) user.identity.familyCardsGiven = [];
+        
+        // 添加亲属卡记录
+        user.identity.familyCardsGiven.push({
+            charId: selectedFamilyCardFriendId,
+            monthlyLimit: monthlyLimit,
+            usedThisMonth: 0,
+            records: [],
+            createdAt: Date.now()
+        });
+        
+        await db.characters.put(user);
+        
+        // 同时在角色那边添加收到的亲属卡记录
         if (!char.identity) char.identity = {};
         if (!char.identity.familyCardsReceived) char.identity.familyCardsReceived = [];
         
@@ -21071,10 +21155,8 @@ async function confirmGiveFamilyCard() {
         await db.characters.put(char);
         
         // 发送亲属卡消息到聊天
-        const accountId = getCurrentAccountId();
         let history = getChatHistory(char, accountId);
         
-        const limitText = monthlyLimit > 0 ? `每月额度 ¥${monthlyLimit}` : '不限额度';
         const familyCardMsg = {
             role: 'user',
             type: 'familyCard',
@@ -21088,6 +21170,8 @@ async function confirmGiveFamilyCard() {
         
         history.push(familyCardMsg);
         await setChatHistory(char, accountId, history);
+        
+        showToast('已赠送亲属卡');
     }
     
     hideGiveFamilyCardModal();
@@ -21099,8 +21183,6 @@ async function confirmGiveFamilyCard() {
         const freshChar = await db.characters.get(selectedFamilyCardFriendId);
         renderChatBody(freshChar);
     }
-    
-    showToast('已赠送亲属卡');
 }
 
 // 取消亲属卡
