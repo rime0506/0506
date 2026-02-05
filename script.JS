@@ -14741,9 +14741,34 @@ ${groupContextStr}
             await setChatHistory(char, accountId, newHistory);
             await db.characters.put(char);
             
-            // 🎯 优化：删除消息后重新渲染，避免时间戳问题
+            // 🚀 优化：只删除DOM元素，不完全重新渲染
+            const chatBody = document.getElementById('chat-body');
+            const messageRows = chatBody.querySelectorAll('.message-row, .message-system, .message-timestamp');
+            
+            // 倒序删除，避免索引变化
+            const sortedIndices = Array.from(selectedIndices).sort((a, b) => b - a);
+            sortedIndices.forEach(idx => {
+                if (messageRows[idx]) {
+                    // 检查前后是否有时间戳需要移除
+                    const prevEl = messageRows[idx].previousElementSibling;
+                    const nextEl = messageRows[idx].nextElementSibling;
+                    
+                    // 如果前一个是时间戳，且后面没有消息了，删除时间戳
+                    if (prevEl && prevEl.classList.contains('message-timestamp')) {
+                        if (!nextEl || nextEl.classList.contains('message-timestamp') || sortedIndices.includes(idx + 1)) {
+                            prevEl.remove();
+                        }
+                    }
+                    
+                    messageRows[idx].remove();
+                }
+            });
+            
+            // 更新缓存
+            lastRenderedHistoryLength = newHistory.length;
+            currentRenderedCount = Math.min(currentRenderedCount, newHistory.length);
+            
             exitSelectionMode();
-            await renderChatBody(char, true); // 强制重新渲染
         }
 
         // --- 新增：聊天交互逻辑 (面板/输入/AI触发) ---
@@ -15750,7 +15775,27 @@ ${groupContextStr}
             await checkBlockedCharactersContact(ms, unitText);
             
             // 3. 触发 AI 回复，带上时间流逝的系统提示
-            await triggerAiReply(`时间过去了 ${unitText}。这段时间里可能发生了一些变化。请根据你的人设和当前对话情境，考虑这段时间的流逝，主动推进对话、分享新的内容、提出新的话题，或者回应之前未完成的对话。不要简单重复之前说过的话，而是让对话自然地继续发展下去。`);
+            const accountId = getCurrentAccountId();
+            const history = getChatHistory(char, accountId);
+            const lastMessages = history.slice(-3).map(m => `${m.role}: ${m.content.substring(0, 50)}`).join(' | ');
+            
+            await triggerAiReply(`⏰ 【重要：时间快进】
+时间过去了 ${unitText}。
+
+📝 最近的对话内容：
+${lastMessages}
+
+💡 请注意：
+1. ⚠️ **严禁重复**你刚才说过的话！这非常重要！
+2. 时间已经过去了${unitText}，考虑在这段时间里可能发生的变化
+3. 可以：
+   - 主动分享这段时间发生的新事情
+   - 提出新的话题或想法
+   - 回应之前未完成的对话
+   - 询问对方的近况
+4. 让对话自然地向前发展，不要停滞在原地
+
+请开始你的回复（直接发送消息，不要重复之前的内容）：`);
         }
 
         // 检查被拉黑的角色是否会联系用户（使用新版本逻辑）
@@ -16589,7 +16634,7 @@ ${virtualTimeStr}${loanReminderText}`;
 
                 // 如果有额外系统信息（如时间流逝），插入到 Prompt
                 if (additionalSystemInfo) {
-                    systemPrompt += `\n\n【系统提示】\n${additionalSystemInfo}\n请根据这个情况（例如时间流逝后的变化、刚刚发生的事件）进行回复。这是一个新的回复请求，你需要生成**全新的内容**，考虑时间的流逝，推进对话的发展，不要重复之前已经说过的话。`;
+                    systemPrompt += `\n\n【系统提示】\n${additionalSystemInfo}`;
                 }
 
                 systemPrompt += `
@@ -18270,6 +18315,28 @@ ${loreContext}
                         .replace(/<[^>]*>/g, '') // 移除 HTML 标签
                         .replace(/[◇◆★☆●○■□▲△]/g, '') // 移除装饰字符
                         .trim();
+                }
+                
+                // 🚨 检测空的 choices 数组（API调用成功但没有返回内容）
+                if (data?.choices && Array.isArray(data.choices) && data.choices.length === 0) {
+                    console.error('[callAI] ❌ API返回了空的choices数组');
+                    console.error('[callAI] 完整响应:', JSON.stringify(data, null, 2));
+                    
+                    let errorMsg = 'API调用成功，但没有返回内容';
+                    
+                    // 检查usage信息，判断可能的原因
+                    if (data.usage) {
+                        const { prompt_tokens, completion_tokens, total_tokens } = data.usage;
+                        if (prompt_tokens === 0 && completion_tokens === 0) {
+                            errorMsg += '\n\n💡 可能的原因：\n';
+                            errorMsg += '- 内容被安全过滤拦截\n';
+                            errorMsg += '- 模型不支持当前请求\n';
+                            errorMsg += '- API配额不足或限流\n';
+                            errorMsg += '- 请求参数格式错误';
+                        }
+                    }
+                    
+                    throw new Error(errorMsg);
                 }
                 
                 // ✅ 兼容多种返回路径
