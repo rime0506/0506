@@ -20785,12 +20785,25 @@ async function addTransaction(type, amount, title, desc) {
 // ========== 亲属卡页面 ==========
 let selectedFamilyCardFriendId = null;
 
-function showFamilyCardPage() {
+async function showFamilyCardPage() {
     const page = document.getElementById('family-card-page');
     page.style.display = 'flex';
     page.offsetHeight;
     page.classList.add('active');
+    
+    // 先渲染本地缓存的数据
     renderFamilyCardList();
+    
+    // ✅ 如果已连接服务器，获取最新的亲属卡列表
+    const onlineUserChar = await getOrCreateOnlineUserChar();
+    if (onlineUserChar && onlineConnected && onlineSocket) {
+        console.log('[Online] 正在从服务器获取最新亲属卡列表...');
+        onlineSocket.send(JSON.stringify({
+            type: 'get_family_cards',
+            my_wx_account: onlineUserChar.identity.account
+        }));
+        // 当服务器返回数据时，handleFamilyCardsList 会自动刷新页面
+    }
 }
 
 function hideFamilyCardPage() {
