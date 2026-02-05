@@ -4729,10 +4729,12 @@ async function renderMessageList() {
 }
 
 // 格式化消息时间
-function formatMessageTime(timestamp) {
-    const now = Date.now();
-    const diff = now - timestamp;
-    const date = new Date(timestamp);
+function formatMessageTime(timestamp, timeOffset = 0) {
+    // 使用虚拟时间进行计算
+    const virtualNow = Date.now() + timeOffset;
+    const virtualTimestamp = timestamp + timeOffset;
+    const diff = virtualNow - virtualTimestamp;
+    const date = new Date(virtualTimestamp);
     
     // 1分钟内
     if (diff < 60000) {
@@ -4743,7 +4745,7 @@ function formatMessageTime(timestamp) {
         return Math.floor(diff / 60000) + '分钟前';
     }
     // 今天
-    const today = new Date();
+    const today = new Date(virtualNow);
     if (date.getDate() === today.getDate() && 
         date.getMonth() === today.getMonth() && 
         date.getFullYear() === today.getFullYear()) {
@@ -13213,11 +13215,15 @@ ${groupContextStr}
         }
 
         // 格式化时间戳
-        function formatMessageTime(timestamp, prevTimestamp) {
+        function formatMessageTime(timestamp, prevTimestamp, timeOffset = 0) {
             if (!timestamp) return '';
             
-            const msgTime = new Date(timestamp);
-            const now = new Date();
+            // 使用虚拟时间进行计算
+            const virtualTimestamp = timestamp + timeOffset;
+            const virtualNow = Date.now() + timeOffset;
+            
+            const msgTime = new Date(virtualTimestamp);
+            const now = new Date(virtualNow);
             const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
             const msgDate = new Date(msgTime.getFullYear(), msgTime.getMonth(), msgTime.getDate());
             const yesterday = new Date(today);
@@ -13230,7 +13236,7 @@ ${groupContextStr}
             } else if (msgDate.getTime() === yesterday.getTime()) {
                 // 昨天
                 timeStr = `昨天 ${msgTime.getHours()}:${msgTime.getMinutes().toString().padStart(2, '0')}`;
-            } else if (now.getTime() - msgTime.getTime() < 7 * 24 * 60 * 60 * 1000) {
+            } else if (virtualNow - virtualTimestamp < 7 * 24 * 60 * 60 * 1000) {
                 // 一周内：显示星期
                 const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
                 timeStr = `${weekdays[msgTime.getDay()]} ${msgTime.getHours()}:${msgTime.getMinutes().toString().padStart(2, '0')}`;
@@ -13620,8 +13626,63 @@ ${groupContextStr}
             return row;
         }
 
-        async function renderChatBody(char) {
+        // 缓存变量，避免不必要的重新渲染
+        let lastRenderedCharId = null;
+        let lastRenderedHistoryLength = 0;
+        let lastRenderedAccountId = null;
+
+        // 🎯 新增：只添加单条消息，不重新渲染整个聊天（性能优化）
+        async function appendChatMessage(char, msg, msgIndex) {
             const body = document.getElementById('chat-body');
+            const accountId = getCurrentAccountId();
+            const userAvatarUrl = await getUserAvatarUrl(char.linked_user_id);
+            const timeOffset = char.timeOffset || 0;
+            
+            // 获取前一条消息的时间
+            const history = getChatHistory(char, accountId);
+            const prevMsgTime = msgIndex > 0 && history[msgIndex - 1] ? history[msgIndex - 1].time : null;
+            
+            // 如果需要显示时间戳，先添加时间戳行
+            if (shouldShowTimestamp(msg.time, prevMsgTime)) {
+                const timeStamp = document.createElement('div');
+                timeStamp.className = 'message-timestamp';
+                timeStamp.textContent = formatMessageTime(msg.time, prevMsgTime, timeOffset);
+                body.appendChild(timeStamp);
+            }
+            
+            const row = createMessageElement(msg, msgIndex, char.avatar, userAvatarUrl, prevMsgTime, char.name);
+            body.appendChild(row);
+            
+            // 更新缓存计数
+            lastRenderedHistoryLength = history.length;
+            
+            // 滚动到底部
+            setTimeout(() => {
+                body.scrollTop = body.scrollHeight;
+            }, 0);
+            
+            console.log('[appendChatMessage] 添加单条消息，无需重新渲染');
+        }
+
+        async function renderChatBody(char, forceRender = false) {
+            const body = document.getElementById('chat-body');
+            const accountId = getCurrentAccountId();
+            const history = getChatHistory(char, accountId);
+            
+            // 🎯 优化：如果是同一个角色且消息没有变化，跳过渲染
+            if (!forceRender && 
+                lastRenderedCharId === char.id && 
+                lastRenderedAccountId === accountId &&
+                lastRenderedHistoryLength === (history?.length || 0) &&
+                !isSelectionMode) {
+                console.log('[renderChatBody] 跳过重复渲染');
+                return;
+            }
+            
+            lastRenderedCharId = char.id;
+            lastRenderedAccountId = accountId;
+            lastRenderedHistoryLength = history?.length || 0;
+            
             body.innerHTML = '';
             
             // 切换多选模式样式
@@ -13630,8 +13691,6 @@ ${groupContextStr}
             } else {
                 body.classList.remove('selection-mode');
             }
-            
-            const accountId = getCurrentAccountId();
             
             // ✅ 联机好友自动视为好友状态
             if (char.isOnlineFriend === true && accountId) {
@@ -13761,7 +13820,6 @@ ${groupContextStr}
                 return;
             }
             
-            const history = getChatHistory(char, accountId);
             if (!history || history.length === 0) return;
 
             // 应用气泡样式类名
@@ -13773,6 +13831,7 @@ ${groupContextStr}
             }
 
             const userAvatarUrl = await getUserAvatarUrl(char.linked_user_id);
+            const timeOffset = char.timeOffset || 0; // 获取虚拟时间偏移
 
             history.forEach((msg, index) => {
                 const prevMsgTime = index > 0 ? history[index - 1].time : null;
@@ -13781,7 +13840,7 @@ ${groupContextStr}
                 if (shouldShowTimestamp(msg.time, prevMsgTime)) {
                     const timeStamp = document.createElement('div');
                     timeStamp.className = 'message-timestamp';
-                    timeStamp.textContent = formatMessageTime(msg.time, prevMsgTime);
+                    timeStamp.textContent = formatMessageTime(msg.time, prevMsgTime, timeOffset);
                     body.appendChild(timeStamp);
                 }
                 
@@ -13860,6 +13919,7 @@ ${groupContextStr}
             }
             
             const userAvatarUrl = await getUserAvatarUrl(char.linked_user_id);
+            const timeOffset = char.timeOffset || 0; // 获取虚拟时间偏移
             
             // 获取前一条消息的时间
             const prevMsgTime = index > 0 && history[index - 1] ? history[index - 1].time : null;
@@ -13868,7 +13928,7 @@ ${groupContextStr}
             if (shouldShowTimestamp(msg.time, prevMsgTime)) {
                 const timeStamp = document.createElement('div');
                 timeStamp.className = 'message-timestamp';
-                timeStamp.textContent = formatMessageTime(msg.time, prevMsgTime);
+                timeStamp.textContent = formatMessageTime(msg.time, prevMsgTime, timeOffset);
                 body.appendChild(timeStamp);
             }
 
@@ -15454,6 +15514,10 @@ ${groupContextStr}
                 char.timeOffset += ms;
                 await db.characters.put(char);
                 console.log(`[FastForward] Updated time offset by +${ms}ms (${unitText})`);
+                
+                // 4. 刷新聊天界面，更新时间戳显示
+                await renderChatBody(char);
+                console.log(`[FastForward] 聊天界面已刷新，时间戳已更新`);
             }
             
             // 2. 检查被拉黑的角色是否会联系
@@ -28617,6 +28681,7 @@ async function renderOfflineChatBody(char) {
 
     const accountId = getCurrentAccountId();
     const userAvatarUrl = await getUserAvatarUrl(char.linked_user_id);
+    const timeOffset = char.timeOffset || 0; // 获取虚拟时间偏移
 
     offlineModeHistory.forEach((msg, index) => {
         const prevMsgTime = index > 0 ? offlineModeHistory[index - 1].time : null;
@@ -28626,7 +28691,7 @@ async function renderOfflineChatBody(char) {
             const timeStamp = document.createElement('div');
             timeStamp.className = 'message-timestamp';
             timeStamp.style.cssText = 'text-align:center; padding:8px 0; color:#999; font-size:12px; font-family:-apple-system, BlinkMacSystemFont, sans-serif;';
-            timeStamp.textContent = formatMessageTime(msg.time, prevMsgTime);
+            timeStamp.textContent = formatMessageTime(msg.time, prevMsgTime, timeOffset);
             body.appendChild(timeStamp);
         }
         
