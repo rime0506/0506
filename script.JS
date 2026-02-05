@@ -20233,18 +20233,23 @@ async function sendSecondReminder(loan) {
     // 发送给每个好友（短信形式）
     for (let friend of friends) {
         if (friend.type === 'local') {
-            // 本地角色：发送短信到信息App
-            const char = await db.characters.get(friend.id);
-            if (char && char.linked_user_id) {
-                // 如果角色关联了User，发送短信给该User
-                await sendSystemSMS(char.linked_user_id, message, '微信支付');
+            // 本地角色：如果关联了User，发送短信
+            if (friend.linkedUserId) {
+                await sendSystemSMS(friend.linkedUserId, message, '微信支付');
                 console.log(`[第二次提醒] 已发送短信给角色 ${friend.name} 关联的User`);
             }
             // 同时添加到AI上下文提示
             await addLoanReminderToCharContext(friend.id, message, user.name);
+            
         } else if (friend.type === 'online') {
-            // 联机好友：发送到短信系统
-            await sendSMSToOnlineFriend(friend.id, message);
+            // 联机好友：发送短信到信息App
+            await sendSystemSMS(friend.id, message, '微信支付');
+            console.log(`[第二次提醒] 已发送短信给联机好友 ${friend.name}`);
+            
+        } else if (friend.type === 'user') {
+            // User类型：直接发送短信
+            await sendSystemSMS(friend.id, message, '微信支付');
+            console.log(`[第二次提醒] 已发送短信给User ${friend.name}`);
         }
     }
     
@@ -20263,7 +20268,8 @@ async function getAllFriends(userId) {
         friends.push({
             id: char.id,
             name: char.name,
-            type: 'local'
+            type: 'local',
+            linkedUserId: char.linked_user_id // 关联的User ID
         });
     }
     
@@ -20274,14 +20280,25 @@ async function getAllFriends(userId) {
         for (let friend of onlineFriends) {
             if (friend.id && friend.id !== userId) {
                 friends.push({
-                    id: friend.id,
-                    name: friend.name || '联机好友',
-                    type: 'online'
+                    id: friend.accountId || friend.id, // 使用accountId作为接收短信的ID
+                    name: friend.name || friend.nickname || '联机好友',
+                    type: 'online',
+                    originalId: friend.id // 原始ID
                 });
             }
         }
     } catch (e) {
         console.warn('[获取联机好友失败]', e);
+    }
+    
+    // 3. 获取所有User类型的角色（他们也能收到短信）
+    const allUsers = allChars.filter(char => char.type === 'User' && char.id !== parseInt(userId));
+    for (let user of allUsers) {
+        friends.push({
+            id: user.id,
+            name: user.name,
+            type: 'user'
+        });
     }
     
     return friends;
@@ -20311,27 +20328,7 @@ async function addLoanReminderToCharContext(charId, message, borrowerName) {
     console.log(`[借款提醒] 已添加到角色 ${char.name} 的上下文`);
 }
 
-// 发送短信给联机好友
-async function sendSMSToOnlineFriend(friendId, message) {
-    console.log(`[发送短信给联机好友] ${friendId}`);
-    
-    // 如果是本地用户（有accountId），也发送短信
-    if (friendId) {
-        await sendSystemSMS(friendId, message, '微信支付');
-    }
-    
-    // 同时保存到联机待发送队列（如果有联机系统）
-    const smsQueue = JSON.parse(localStorage.getItem('onlineSMSQueue') || '[]');
-    smsQueue.push({
-        to: friendId,
-        message: message,
-        timestamp: Date.now(),
-        type: 'loan_reminder'
-    });
-    localStorage.setItem('onlineSMSQueue', JSON.stringify(smsQueue));
-    
-    console.log(`[借款提醒] 已发送短信给好友 ${friendId}`);
-}
+// 这个函数已不再需要，直接在主循环中发送
 
 // 发送系统短信（到信息App）
 async function sendSystemSMS(userId, message, senderName = '系统通知') {
