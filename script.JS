@@ -14140,16 +14140,24 @@ ${groupContextStr}
             const char = await db.characters.get(currentChatCharId);
             const accountId = getCurrentAccountId();
             const history = getChatHistory(char, accountId);
-            const index = history.length - 1;
             
-            // ✅ 使用数据库中的实际消息对象，而不是创建临时对象
-            // 这样可以确保转账消息的 ID 和时间戳与数据库一致
-            let msg = history[index];
+            // 🔧 修复：从后往前找到匹配 role 的最新消息，而不是简单取最后一条
+            // 因为最后一条可能是 system 消息（如时间戳）
+            let msg = null;
+            let index = history.length - 1;
+            for (let i = history.length - 1; i >= 0; i--) {
+                if (history[i].role === role) {
+                    msg = history[i];
+                    index = i;
+                    break;
+                }
+            }
             
-            // 如果数据库中没有找到消息，才使用临时对象（兼容旧逻辑）
+            // 如果数据库中没有找到匹配的消息，使用临时对象
             if (!msg) {
                 const cleanedContent = sanitizeMessage(content);
                 msg = { role, content: cleanedContent, time: Date.now() };
+                index = history.length;
             }
             
             const userAvatarUrl = await getUserAvatarUrl(char.linked_user_id);
@@ -15779,26 +15787,27 @@ ${groupContextStr}
             // 3. 触发 AI 回复（只有在有当前聊天时才触发）
             if (currentChatCharId && char) {
                 const accountId = getCurrentAccountId();
-                const history = getChatHistory(char, accountId);
-                const lastMessages = history.slice(-3).map(m => `${m.role}: ${m.content.substring(0, 50)}`).join(' | ');
                 
-                await triggerAiReply(`⏰ 【重要：时间快进】
-时间过去了 ${unitText}。
-
-📝 最近的对话内容：
-${lastMessages || '暂无对话'}
-
-💡 请注意：
-1. ⚠️ **严禁重复**你刚才说过的话！这非常重要！
-2. 时间已经过去了${unitText}，考虑在这段时间里可能发生的变化
-3. 可以：
-   - 主动分享这段时间发生的新事情
-   - 提出新的话题或想法
-   - 回应之前未完成的对话
-   - 询问对方的近况
-4. 让对话自然地向前发展，不要停滞在原地
-
-请开始你的回复（直接发送消息，不要重复之前的内容）：`);
+                // 🔧 添加时间戳消息到聊天记录，标记时间快进
+                const history = getChatHistory(char, accountId);
+                const newTime = Date.now() + (char.timeOffset || 0);
+                const timeSkipMsg = `时间过去了 ${unitText}`;
+                history.push({
+                    role: 'system',
+                    content: timeSkipMsg,
+                    time: newTime,
+                    isTimeSkip: true
+                });
+                await setChatHistory(char, accountId, history);
+                
+                // 🔧 立即显示时间戳到 UI
+                appendMessageToUI('system', timeSkipMsg);
+                
+                // 重新获取更新后的 char
+                char = await db.characters.get(currentChatCharId);
+                
+                // 触发 AI 回复，告诉角色时间过去了多久
+                await triggerAiReply(`时间快进了 ${unitText}。请根据这段时间的流逝，自然地继续对话。`);
             } else {
                 console.warn('[FastForward] 没有当前聊天，跳过AI回复');
             }
@@ -15917,8 +15926,9 @@ ${lastMessages || '暂无对话'}
                     
                 } catch (error) {
                     console.error(`[BlockedContact] ❌ 检查 ${char.name} 时出错:`, error);
-                    // 抛出错误，让用户看到具体问题
-                    throw error;
+                    // 🔧 改进：继续处理其他角色，不要中断整个流程
+                    console.warn(`[BlockedContact] 跳过 ${char.name}，继续处理其他角色`);
+                    continue;
                 }
             }
             
@@ -16869,6 +16879,7 @@ ${loreContext}
                 // ❌ BUG 发现：这里使用的是 char.chat_history，而不是前面获取的 getChatHistory(char, accountId)
                 // 应该使用 fullHistory 而不是 char.chat_history
                 const recentHistory = fullHistory.slice(-contextCount)
+                    .filter(m => m.role !== 'system') // 🔧 过滤掉 system 消息（如时间戳），不发送给 AI
                     .map(m => {
                         let content = m.content || '';
                         // 如果有图片描述，拼接在后面给 AI 看
@@ -16888,6 +16899,19 @@ ${loreContext}
                     { role: 'system', content: systemPrompt },
                     ...recentHistory
                 ];
+                
+                // 🔧 修复：如果最后一条消息是 assistant（角色发的），需要添加一条 user 消息触发回复
+                // 否则 API 会认为"已经回复完了"，返回空 choices
+                if (messages.length > 1) {
+                    const lastMsg = messages[messages.length - 1];
+                    if (lastMsg.role === 'assistant') {
+                        console.log('[triggerAiReply] ⚠️ 最后一条是角色消息，添加触发消息');
+                        messages.push({
+                            role: 'user',
+                            content: `[系统指令] 对方没有回复，请你作为${char.name}继续这个话题，自然地接着聊。可以是：追问、补充、分享新想法、或者换个相关话题。按照设定的回复条数（${char.reply_min_count || 1}-${char.reply_max_count || 3}条）来回复。`
+                        });
+                    }
+                }
                 
                 // 添加详细日志查看发送给 AI 的完整消息
                 console.log('='.repeat(80));
@@ -18237,9 +18261,10 @@ ${loreContext}
             const hasNonSystemMessage = cleanMessages.some(m => m.role !== 'system');
             if (!hasNonSystemMessage) {
                 console.warn('[callAI] 只有 system 消息，添加一个占位 user 消息');
+                // 🔧 修复：添加更完整的占位消息，避免 Gemini 代理返回空 choices
                 cleanMessages.push({
                     role: 'user',
-                    content: '请继续对话'
+                    content: '请根据你的人设，发送一条消息。保持角色扮演，自然地开始或继续对话。'
                 });
             }
 
@@ -18345,31 +18370,76 @@ ${loreContext}
                     throw new Error(errorMsg);
                 }
                 
-                // ✅ 兼容多种返回路径
-                const content = 
-                    data?.choices?.[0]?.message?.content ??  // OpenAI 标准格式
-                    data?.choices?.[0]?.text ??              // 一些旧版 API
-                    data?.output_text ??                     // 一些自定义格式
-                    data?.message ??                         // 简化格式
-                    data?.content ??                         // 直接返回内容
-                    data?.reply ??                           // 自定义字段
-                    '';
+                // ✅ 兼容多种返回路径（包括Gemini）
+                let content = '';
+                
+                // 1. Gemini格式：data.candidates[0].content.parts[0].text
+                if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+                    content = data.candidates[0].content.parts[0].text;
+                    console.log('[callAI] ✅ 使用Gemini格式提取内容');
+                }
+                // 2. OpenAI标准格式：data.choices[0].message.content
+                else if (data?.choices?.[0]?.message?.content) {
+                    content = data.choices[0].message.content;
+                    console.log('[callAI] ✅ 使用OpenAI格式提取内容');
+                }
+                // 3. 其他兼容格式
+                else {
+                    content = 
+                        data?.choices?.[0]?.text ??              // 一些旧版 API
+                        data?.output_text ??                     // 一些自定义格式
+                        data?.message ??                         // 简化格式
+                        data?.content ??                         // 直接返回内容
+                        data?.reply ??                           // 自定义字段
+                        '';
+                }
                 
                 if (!content) {
-                    // 如果所有路径都没有内容，尝试直接使用原始文本
-                    console.warn('[callAI] 无法从标准路径提取内容，尝试使用原始返回');
-                    console.log('[callAI] 解析后的数据结构:', JSON.stringify(data).substring(0, 300));
+                    // 如果所有路径都没有内容，记录详细日志
+                    console.error('[callAI] ❌ 无法从任何路径提取内容');
+                    console.error('[callAI] 完整响应结构:', JSON.stringify(data, null, 2).substring(0, 1000));
                     
-                    // 如果data本身就是字符串，直接返回
-                    if (typeof data === 'string') {
-                        return data;
+                    // 检查是否是Gemini的空返回
+                    if (data?.candidates && Array.isArray(data.candidates) && data.candidates.length === 0) {
+                        throw new Error('Gemini API返回了空的candidates数组，可能是内容被过滤或请求格式错误');
                     }
                     
-                    // 否则返回清理后的原始文本
-                    return rawText
+                    // 如果data本身就是字符串，检查是否是JSON字符串
+                    if (typeof data === 'string') {
+                        // 如果是JSON字符串，尝试解析
+                        try {
+                            const parsed = JSON.parse(data);
+                            // 如果解析成功，递归调用提取逻辑
+                            if (parsed.candidates?.[0]?.content?.parts?.[0]?.text) {
+                                return parsed.candidates[0].content.parts[0].text;
+                            }
+                            if (parsed.choices?.[0]?.message?.content) {
+                                return parsed.choices[0].message.content;
+                            }
+                        } catch {
+                            // 不是JSON，直接返回字符串
+                            return data;
+                        }
+                    }
+                    
+                    // 🚨 最后检查：如果rawText看起来像JSON对象，不要返回它
+                    if (rawText.trim().startsWith('{') && rawText.trim().endsWith('}')) {
+                        console.error('[callAI] ❌ 检测到返回的是原始JSON对象，不应该显示给用户');
+                        throw new Error('API返回了原始JSON对象而非文本内容。这可能是API配置问题或模型响应格式错误。');
+                    }
+                    
+                    // 最后尝试：返回清理后的原始文本（但这种情况不应该发生）
+                    const fallback = rawText
                         .replace(/<[^>]*>/g, '')
                         .replace(/[◇◆★☆●○■□▲△]/g, '')
-                        .trim() || '(AI 返回为空)';
+                        .trim();
+                    
+                    if (fallback && fallback.length > 10 && !fallback.startsWith('{')) {
+                        console.warn('[callAI] ⚠️ 使用原始文本作为fallback');
+                        return fallback;
+                    }
+                    
+                    throw new Error('API返回了空内容，无法提取有效文本。请检查API配置和模型响应。');
                 }
                 
                 return content;
