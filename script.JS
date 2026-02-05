@@ -20224,8 +20224,17 @@ async function sendSecondReminder(loan) {
     if (!user) return;
     
     const overdueHours = Math.floor((Date.now() - loan.dueTime) / (60 * 60 * 1000));
+    const overdueMonths = Math.floor(overdueHours / 12); // 12小时 = 1个月
     
-    const message = `【逾期提醒】${user.name}在微信借款¥${loan.amount.toLocaleString()}已逾期${overdueHours}小时未还，剩余¥${loan.remainingAmount.toFixed(2)}，请提醒TA尽快还款。`;
+    // 根据逾期时间显示不同的单位
+    let overdueText = '';
+    if (overdueMonths >= 1) {
+        overdueText = `${overdueMonths}个月`;
+    } else {
+        overdueText = `${overdueHours}小时`;
+    }
+    
+    const message = `【逾期提醒】${user.name}在微信借款¥${loan.amount.toLocaleString()}已逾期${overdueText}未还，剩余¥${loan.remainingAmount.toFixed(2)}，请提醒TA尽快还款。`;
     
     // 获取所有好友列表
     const friends = await getAllFriends(loan.userId);
@@ -20414,16 +20423,17 @@ async function testLoanReminder() {
             return;
         }
         
-        // 创建一个测试借款记录
+        // 创建一个测试借款记录（逾期1个月 = 12小时）
         const now = Date.now();
+        const oneMonthAgo = now - (12 * 60 * 60 * 1000); // 12小时前
         testLoanRecord = {
             id: now,
             amount: 5000,
             term: 3,
             totalAmount: 5225,
             monthlyPayment: 1741.67,
-            date: new Date(now - 1000).toISOString(), // 1秒前
-            dueTime: now - 1000, // 已经逾期
+            date: new Date(oneMonthAgo - (3 * 12 * 60 * 60 * 1000)).toISOString(), // 借款日期：4个月前
+            dueTime: oneMonthAgo, // 到期时间：1个月前（已逾期12小时）
             status: 'pending',
             paidAmount: 0,
             remainingAmount: 5225,
