@@ -11618,20 +11618,22 @@ ${loreContext}
                         
                         // ✅ 检查是否是联机好友
                         if (freshChar.isOnlineFriend && freshChar.onlineData?.wx_account) {
-                            // 联机好友 - 通过服务器发送亲属卡
+                            // 联机好友 - 使用和转账一样的方式发送（通过消息通道）
                             const onlineUserChar = await getOrCreateOnlineUserChar();
                             
                             if (onlineUserChar && onlineConnected) {
                                 const fromWxAccount = onlineUserChar.identity.account;
                                 const toWxAccount = freshChar.onlineData.wx_account;
                                 
-                                onlineSocket.send(JSON.stringify({
-                                    type: 'send_family_card',
-                                    from_wx_account: fromWxAccount,
-                                    to_wx_account: toWxAccount,
-                                    monthly_limit: monthlyLimit,
-                                    message: textBeforeFamilyCard || ''
-                                }));
+                                // 🎯 使用和转账一样的方式：通过 sendOnlineMessage 发送带特殊标记的消息
+                                const familyCardContent = JSON.stringify({
+                                    __type: 'familyCard',
+                                    monthlyLimit: monthlyLimit,
+                                    message: textBeforeFamilyCard || '',
+                                    fromName: onlineUserChar.name
+                                });
+                                
+                                sendOnlineMessage(toWxAccount, familyCardContent, fromWxAccount);
                                 
                                 // ✅ 在发送方这边也保存亲属卡消息到聊天记录
                                 const familyCardMsg = {
@@ -11655,7 +11657,7 @@ ${loreContext}
                                     renderChatBody(freshChar);
                                 }
                                 
-                                console.log('[Online] 亲属卡已发送到服务器');
+                                console.log('[Online] 亲属卡已通过消息通道发送（和转账一样）');
                                 showToast('亲属卡已赠送');
                             } else {
                                 console.warn('[Online] 无法发送联机亲属卡：未连接服务器');
@@ -20801,19 +20803,8 @@ async function showFamilyCardPage() {
     page.offsetHeight;
     page.classList.add('active');
     
-    // 先渲染本地缓存的数据
+    // 🎯 直接渲染（亲属卡现在保存在聊天记录中，和转账一样）
     renderFamilyCardList();
-    
-    // ✅ 如果已连接服务器，获取最新的亲属卡列表
-    const onlineUserChar = await getOrCreateOnlineUserChar();
-    if (onlineUserChar && onlineConnected && onlineSocket) {
-        console.log('[Online] 正在从服务器获取最新亲属卡列表...');
-        onlineSocket.send(JSON.stringify({
-            type: 'get_family_cards',
-            my_wx_account: onlineUserChar.identity.account
-        }));
-        // 当服务器返回数据时，handleFamilyCardsList 会自动刷新页面
-    }
 }
 
 function hideFamilyCardPage() {
@@ -20858,31 +20849,29 @@ async function renderFamilyCardList() {
         }
     }
     
-    // 2. 联机亲属卡
-    const onlineGivenCards = JSON.parse(localStorage.getItem('online_family_cards_given') || '[]');
-    console.log('[亲属卡调试] 我赠送的联机亲属卡:', onlineGivenCards);
+    // 2. 联机亲属卡（从聊天记录中查找，和转账一样）
+    console.log('[亲属卡] 开始查找联机亲属卡...');
+    const allOnlineFriends = await db.characters.where('type').equals('online_friend').toArray();
+    console.log('[亲属卡] 找到联机好友数量:', allOnlineFriends.length);
     
-    for (const card of onlineGivenCards) {
-        // 查找对应的联机好友
-        const allChars = await db.characters.where('type').equals('online_friend').toArray();
-        console.log('[亲属卡调试] 所有联机好友:', allChars.map(c => ({
-            name: c.name,
-            wx_account: c.onlineData?.wx_account,
-            identity_account: c.identity?.account
-        })));
-        console.log('[亲属卡调试] 查找 wx_account:', card.to_wx_account);
+    for (const friendChar of allOnlineFriends) {
+        const history = getChatHistory(friendChar, accountId);
+        if (!history) continue;
         
-        // 尝试两种匹配方式：onlineData.wx_account 或 identity.account
-        const friendChar = allChars.find(c => 
-            c.onlineData?.wx_account === card.to_wx_account || 
-            c.identity?.account === card.to_wx_account
-        );
+        // 查找我发送的亲属卡消息（role='user' 且 type='familyCard'）
+        const myFamilyCards = history.filter(msg => msg.role === 'user' && msg.type === 'familyCard');
         
-        if (friendChar) {
-            console.log('[亲属卡调试] 找到对应好友:', friendChar.name);
-            const usedThisMonth = parseFloat(card.used_this_month) || 0;
-            const monthlyLimit = card.monthly_limit || 0;
-            const limitText = monthlyLimit > 0 ? `已用 ¥${usedThisMonth.toFixed(2)} / ¥${monthlyLimit}` : `已用 ¥${usedThisMonth.toFixed(2)} (不限额)`;
+        if (myFamilyCards.length > 0) {
+            // 只显示最后一张（最新的）
+            const lastCard = myFamilyCards[myFamilyCards.length - 1];
+            let cardData = {};
+            try {
+                cardData = JSON.parse(lastCard.content);
+            } catch (e) {
+                cardData = { monthlyLimit: 0 };
+            }
+            
+            const limitText = cardData.monthlyLimit > 0 ? `额度 ¥${cardData.monthlyLimit}` : '不限额度';
             givenHtml += `
                 <div class="family-card-item">
                     <div class="family-card-avatar" style="background-image:url(${friendChar.avatar})"></div>
@@ -20891,21 +20880,15 @@ async function renderFamilyCardList() {
                         <div class="family-card-detail">${limitText}</div>
                     </div>
                     <div class="family-card-actions">
-                        <button class="family-card-btn view" onclick="showToast('联机亲属卡记录查看功能开发中')">记录</button>
+                        <button class="family-card-btn view" onclick="showToast('联机亲属卡暂不支持查看记录')">记录</button>
                     </div>
                 </div>
             `;
-        } else {
-            console.warn('[亲属卡调试] 未找到对应的联机好友，to_wx_account:', card.to_wx_account);
+            console.log('[亲属卡] 找到赠送给', friendChar.name, '的亲属卡');
         }
     }
     
-    if (!givenHtml && onlineGivenCards.length > 0) {
-        console.error('[亲属卡] ⚠️ 有联机亲属卡数据但无法匹配到好友！');
-        givenListEl.innerHTML = '<div style="padding:20px;color:#ff6b6b;text-align:center;">⚠️ 检测到亲属卡数据，但无法找到对应好友<br>请查看控制台了解详情</div>';
-    } else {
-        givenListEl.innerHTML = givenHtml || '';
-    }
+    givenListEl.innerHTML = givenHtml || '';
     
     // ========== 我收到的亲属卡 ==========
     const receivedListEl = document.getElementById('family-card-received-list');
@@ -20935,26 +20918,25 @@ async function renderFamilyCardList() {
         }
     }
     
-    // 2. 联机亲属卡
-    const onlineReceivedCards = JSON.parse(localStorage.getItem('online_family_cards_received') || '[]');
-    console.log('[亲属卡调试] 我收到的联机亲属卡:', onlineReceivedCards);
-    
-    for (const card of onlineReceivedCards) {
-        // 查找对应的联机好友
-        const allChars = await db.characters.where('type').equals('online_friend').toArray();
-        console.log('[亲属卡调试] 查找 from_wx_account:', card.from_wx_account);
+    // 2. 联机亲属卡（从聊天记录中查找，和转账一样）
+    for (const friendChar of allOnlineFriends) {
+        const history = getChatHistory(friendChar, accountId);
+        if (!history) continue;
         
-        // 尝试两种匹配方式：onlineData.wx_account 或 identity.account
-        const friendChar = allChars.find(c => 
-            c.onlineData?.wx_account === card.from_wx_account || 
-            c.identity?.account === card.from_wx_account
-        );
+        // 查找对方发送的亲属卡消息（role='char' 且 type='familyCard'）
+        const receivedFamilyCards = history.filter(msg => msg.role === 'char' && msg.type === 'familyCard');
         
-        if (friendChar) {
-            console.log('[亲属卡调试] 找到对应好友:', friendChar.name);
-            const usedThisMonth = parseFloat(card.used_this_month) || 0;
-            const monthlyLimit = card.monthly_limit || 0;
-            const limitText = monthlyLimit > 0 ? `本月可用 ¥${(monthlyLimit - usedThisMonth).toFixed(2)}` : '不限额';
+        if (receivedFamilyCards.length > 0) {
+            // 只显示最后一张（最新的）
+            const lastCard = receivedFamilyCards[receivedFamilyCards.length - 1];
+            let cardData = {};
+            try {
+                cardData = JSON.parse(lastCard.content);
+            } catch (e) {
+                cardData = { monthlyLimit: 0 };
+            }
+            
+            const limitText = cardData.monthlyLimit > 0 ? `额度 ¥${cardData.monthlyLimit}` : '不限额';
             receivedHtml += `
                 <div class="family-card-item">
                     <div class="family-card-avatar" style="background-image:url(${friendChar.avatar})"></div>
@@ -20963,17 +20945,12 @@ async function renderFamilyCardList() {
                         <div class="family-card-detail">${limitText}</div>
                     </div>
                     <div class="family-card-actions">
-                        <button class="family-card-btn view" onclick="showToast('联机亲属卡记录查看功能开发中')">记录</button>
+                        <button class="family-card-btn view" onclick="showToast('联机亲属卡暂不支持查看记录')">记录</button>
                     </div>
                 </div>
             `;
-        } else {
-            console.warn('[亲属卡调试] 未找到对应的联机好友，from_wx_account:', card.from_wx_account);
+            console.log('[亲属卡] 找到来自', friendChar.name, '的亲属卡');
         }
-    }
-    
-    if (!receivedHtml && onlineReceivedCards.length > 0) {
-        console.error('[亲属卡] ⚠️ 有联机亲属卡数据但无法匹配到好友！');
     }
     
     if (receivedHtml) {
@@ -28478,6 +28455,17 @@ async function handleOnlineIncomingMessage(data) {
             });
             msgObj.id = 'trans_' + Date.now();
             console.log('[Online] 收到转账消息:', parsed);
+        } else if (parsed.__type === 'familyCard') {
+            // 🎯 这是亲属卡消息（和转账一样的处理方式）
+            msgObj.type = 'familyCard';
+            msgObj.content = JSON.stringify({
+                fromName: parsed.fromName || data.from_nickname,
+                monthlyLimit: parsed.monthlyLimit || 0,
+                status: 'received',
+                isOnline: true,
+                message: parsed.message || ''
+            });
+            console.log('[Online] 收到亲属卡消息:', parsed);
         } else if (parsed.__type === 'audio') {
             // 这是语音消息
             msgObj.type = 'audio';
@@ -28497,8 +28485,8 @@ async function handleOnlineIncomingMessage(data) {
     
     // 如果当前正在查看这个聊天，更新UI
     if (currentChatCharId === targetChar.id) {
-        // 特殊消息类型需要重新渲染整个聊天（包括图片、转账、语音）
-        if (msgObj.type === 'transfer' || msgObj.type === 'audio' || data.content.startsWith('[img:')) {
+        // 特殊消息类型需要重新渲染整个聊天（包括图片、转账、语音、亲属卡）
+        if (msgObj.type === 'transfer' || msgObj.type === 'familyCard' || msgObj.type === 'audio' || data.content.startsWith('[img:')) {
             renderChatBody(targetChar);
         } else {
             // ✅ 使用服务器发送的头像，如果没有则使用本地头像
@@ -28509,6 +28497,7 @@ async function handleOnlineIncomingMessage(data) {
         // 发送通知
         let notifyContent = data.content;
         if (msgObj.type === 'transfer') notifyContent = '[转账]';
+        if (msgObj.type === 'familyCard') notifyContent = '[亲属卡]';
         if (msgObj.type === 'audio') notifyContent = '[语音消息]';
         if (data.content.startsWith('[img:')) notifyContent = '[图片]';
         sendSystemNotification(targetChar.name, notifyContent);
