@@ -207,6 +207,81 @@ async function initDB() {
             }
         }
         
+        // ✅ 修复可能的表结构不匹配问题
+        console.log('🔧 检查并修复表结构...');
+        try {
+            // 删除可能存在的旧表（如果表结构有问题）
+            // 检查 online_group_members 表结构
+            const [columns] = await db.execute(`
+                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+                WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'online_group_members'
+            `, [dbConfig.database]);
+            
+            const columnNames = columns.map(c => c.COLUMN_NAME);
+            const requiredColumns = ['id', 'group_id', 'user_wx', 'character_name', 'character_avatar', 'character_desc', 'joined_at'];
+            
+            // 检查是否缺少必要字段
+            const missingColumns = requiredColumns.filter(col => !columnNames.includes(col));
+            
+            if (missingColumns.length > 0) {
+                console.log(`⚠️  检测到 online_group_members 表缺少字段: ${missingColumns.join(', ')}`);
+                console.log('🔄 正在重建表...');
+                
+                // 删除旧表并重建
+                await db.execute('DROP TABLE IF EXISTS online_group_messages');
+                await db.execute('DROP TABLE IF EXISTS online_group_members');
+                await db.execute('DROP TABLE IF EXISTS online_groups');
+                
+                // 重新创建群聊表
+                await db.execute(`
+                    CREATE TABLE online_groups (
+                        id VARCHAR(36) PRIMARY KEY,
+                        name VARCHAR(100) NOT NULL,
+                        avatar TEXT,
+                        creator_wx VARCHAR(100) NOT NULL,
+                        created_at BIGINT DEFAULT 0
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                `);
+                
+                await db.execute(`
+                    CREATE TABLE online_group_members (
+                        id VARCHAR(36) PRIMARY KEY,
+                        group_id VARCHAR(36) NOT NULL,
+                        user_wx VARCHAR(100) NOT NULL,
+                        character_name VARCHAR(100),
+                        character_avatar TEXT,
+                        character_desc TEXT,
+                        joined_at BIGINT DEFAULT 0,
+                        UNIQUE KEY unique_group_member (group_id, user_wx),
+                        INDEX idx_online_group_members_group (group_id),
+                        FOREIGN KEY (group_id) REFERENCES online_groups(id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                `);
+                
+                await db.execute(`
+                    CREATE TABLE online_group_messages (
+                        id VARCHAR(36) PRIMARY KEY,
+                        group_id VARCHAR(36) NOT NULL,
+                        sender_type VARCHAR(20) NOT NULL,
+                        sender_wx VARCHAR(100) NOT NULL,
+                        sender_name VARCHAR(100) NOT NULL,
+                        character_name VARCHAR(100),
+                        content TEXT NOT NULL,
+                        msg_type VARCHAR(20) DEFAULT 'text',
+                        created_at BIGINT DEFAULT 0,
+                        INDEX idx_online_group_messages_group (group_id),
+                        FOREIGN KEY (group_id) REFERENCES online_groups(id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                `);
+                
+                console.log('✅ 群聊表已重建');
+            } else {
+                console.log('✅ 表结构检查通过');
+            }
+        } catch (checkError) {
+            console.log('ℹ️ 表结构检查:', checkError.message);
+        }
+        
     } catch (error) {
         console.error('❌ 数据库初始化失败:', error);
         throw error;
