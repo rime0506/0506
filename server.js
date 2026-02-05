@@ -147,30 +147,13 @@ async function initDB() {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         `);
         
-        // 联机群聊表 - 先删除旧表（如果存在且有问题）
-        console.log('🔄 检查群聊表结构...');
-        try {
-            // 尝试查询表结构
-            const [cols] = await db.execute(`
-                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
-                WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'online_group_members'
-            `, [dbConfig.database]);
-            
-            const colNames = cols.map(c => c.COLUMN_NAME);
-            const required = ['id', 'group_id', 'user_wx', 'character_name', 'character_avatar', 'character_desc', 'joined_at'];
-            const missing = required.filter(c => !colNames.includes(c));
-            
-            if (missing.length > 0 || cols.length === 0) {
-                console.log('⚠️  群聊表结构不完整，重建中...');
-                await db.execute('SET FOREIGN_KEY_CHECKS = 0');
-                await db.execute('DROP TABLE IF EXISTS online_group_messages');
-                await db.execute('DROP TABLE IF EXISTS online_group_members');
-                await db.execute('DROP TABLE IF EXISTS online_groups');
-                await db.execute('SET FOREIGN_KEY_CHECKS = 1');
-            }
-        } catch (e) {
-            // 表不存在，继续创建
-        }
+        // 联机群聊表 - 强制重建（修复表结构问题）
+        console.log('🔄 重建群聊表...');
+        await db.execute('SET FOREIGN_KEY_CHECKS = 0');
+        await db.execute('DROP TABLE IF EXISTS online_group_messages');
+        await db.execute('DROP TABLE IF EXISTS online_group_members');
+        await db.execute('DROP TABLE IF EXISTS online_groups');
+        await db.execute('SET FOREIGN_KEY_CHECKS = 1');
         
         await db.execute(`
             CREATE TABLE IF NOT EXISTS online_groups (
