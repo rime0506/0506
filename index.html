@@ -1092,8 +1092,28 @@
             <div style="width:40px;"></div>
         </div>
         
-        <div id="online-status-connection" style="padding:16px; text-align:center; font-size:14px;">
-            <!-- 连接状态动态更新 -->
+        <!-- 联机状态卡片 -->
+        <div style="padding:16px;">
+            <div style="background:#fff; border-radius:12px; padding:16px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+                    <div style="flex:1;">
+                        <div style="font-size:14px; font-weight:500; color:#333; margin-bottom:6px;">联机状态</div>
+                        <div id="online-sync-status" style="font-size:13px;">
+                            <!-- 状态动态更新 -->
+                        </div>
+                    </div>
+                    <button onclick="manualSyncOnline()" id="manual-sync-btn" style="padding:8px 16px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:13px; cursor:pointer; display:flex; align-items:center; gap:6px; transition:all 0.3s;">
+                        <svg id="sync-icon" viewBox="0 0 24 24" style="width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2;">
+                            <polyline points="23 4 23 10 17 10"></polyline>
+                            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                        </svg>
+                        <span id="sync-btn-text">立即同步</span>
+                    </button>
+                </div>
+                <div style="font-size:11px; color:#999; line-height:1.5;">
+                    系统会自动尝试保持在线，您也可以手动点击同步
+                </div>
+            </div>
         </div>
         
         <div style="flex:1; overflow-y:auto;">
@@ -1106,8 +1126,8 @@
                 <!-- 群聊列表动态更新 -->
             </div>
             
-            <div style="padding:12px 16px; font-size:13px; color:#888; margin-top:10px;">
-                我的User角色（可上线）
+            <div style="padding:12px 16px; font-size:13px; color:#888;">
+                我的User角色
             </div>
             <div id="online-status-char-list">
                 <!-- 角色列表动态更新 -->

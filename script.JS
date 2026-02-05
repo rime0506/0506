@@ -9284,7 +9284,7 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                                myChars.find(c => onlineCharacters.some(oc => oc.wx_account === c.identity?.account));
                 
                 if (!myChar || !myChar.identity?.account) {
-                    alert('请先上线一个角色');
+                    alert('请先创建User角色并设置微信号');
                     return;
                 }
                 
@@ -9385,7 +9385,7 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             
             const myWx = getMyOnlineWxAccount();
             if (!myWx) {
-                alert('请先上线一个角色');
+                alert('请先创建User角色并设置微信号');
                 return;
             }
             
@@ -9448,7 +9448,7 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             
             const myWx = getMyOnlineWxAccount();
             if (!myWx) {
-                alert('请先上线一个角色');
+                alert('请先创建User角色并设置微信号');
                 return;
             }
             
@@ -27157,6 +27157,9 @@ async function initOnlineSystem() {
         }
     }
     
+    // 启动自动同步定时器
+    startAutoSync();
+    
     // 如果有服务器地址，自动连接
     if (serverUrl) {
         console.log('[Online] 自动连接服务器:', serverUrl);
@@ -27416,6 +27419,9 @@ async function handleOnlineMessage(data) {
         case 'online_characters':
             // 已上线的角色列表
             onlineCharacters = data.characters || [];
+            console.log('[Online] 收到在线角色列表:', onlineCharacters.length, '个', onlineCharacters.map(c => c.wx_account).join(', '));
+            // 刷新联机状态页面（如果打开的话）
+            refreshOnlineStatusPageContent();
             break;
             
         case 'character_online':
@@ -27642,16 +27648,19 @@ async function showOnlineSearchModal() {
         return;
     }
     
-    // 检查是否有已上线的角色
-    if (onlineCharacters.length === 0) {
-        alert('请先在「我」页面上线至少一个User角色');
+    // ✅ 检查是否有可用的User角色（有微信号）
+    const userChars = await db.characters.where('type').equals('user').toArray();
+    const availableChars = userChars.filter(c => c.identity?.account);
+    
+    if (availableChars.length === 0) {
+        alert('请先创建至少一个User角色并设置微信号');
         return;
     }
     
-    // 填充身份选择下拉框
+    // 填充身份选择下拉框 - 使用本地User角色列表
     const select = document.getElementById('online-search-my-persona');
-    select.innerHTML = onlineCharacters.map(char => 
-        `<option value="${char.wx_account}">${char.nickname} (${char.wx_account})</option>`
+    select.innerHTML = availableChars.map(char => 
+        `<option value="${char.identity.account}">${char.remark || char.name} (${char.identity.account})</option>`
     ).join('');
     
     // 清空之前的搜索结果
@@ -27999,21 +28008,32 @@ async function autoRegisterAllUserCharacters() {
         let registerCount = 0;
         for (const char of userChars) {
             const wxAccount = char.identity?.account;
-            if (!wxAccount) {
-                console.log(`[Online] 角色 ${char.name} 没有微信号，跳过注册`);
+            const nickname = char.remark || char.name;
+            
+            // 验证必填字段
+            if (!wxAccount || !nickname) {
+                console.log(`[Online] 角色 ${char.name} 缺少微信号或昵称，跳过注册`);
                 continue;
             }
             
             // 注册角色到服务器（不上线，is_online = 0）
-            console.log(`[Online] 注册角色到服务器: ${char.name} (${wxAccount})`);
-            onlineSocket.send(JSON.stringify({
-                type: 'register_character',
-                wx_account: wxAccount,
-                nickname: char.remark || char.name,
-                avatar: char.avatar || '',
-                bio: char.description?.substring(0, 100) || ''
-            }));
-            registerCount++;
+            console.log(`[Online] 注册角色到服务器: ${nickname} (${wxAccount})`);
+            
+            try {
+                onlineSocket.send(JSON.stringify({
+                    type: 'register_character',
+                    wx_account: wxAccount,
+                    nickname: nickname,
+                    avatar: char.avatar || '',
+                    bio: (char.description || '').substring(0, 100)
+                }));
+                registerCount++;
+                
+                // 添加小延迟避免请求过快
+                await new Promise(resolve => setTimeout(resolve, 100));
+            } catch (sendError) {
+                console.error(`[Online] 注册角色失败: ${nickname}`, sendError);
+            }
         }
         
         if (registerCount > 0) {
@@ -28039,25 +28059,33 @@ async function autoGoOnlineAllUserCharacters() {
         let onlineCount = 0;
         for (const char of userChars) {
             const wxAccount = char.identity?.account;
-            if (!wxAccount) {
-                console.log(`[Online] 角色 ${char.name} 没有微信号，跳过`);
+            const nickname = char.remark || char.name;
+            
+            // 验证必填字段
+            if (!wxAccount || !nickname) {
+                console.log(`[Online] 角色 ${char.name} 缺少微信号或昵称，跳过上线`);
                 continue;
             }
             
-            // 不再检查 isCharacterOnline，直接尝试上线（服务器会处理重复上线）
-            // 因为 onlineCharacters 可能还没更新
-            
             // 上线角色
-            console.log(`[Online] 自动上线角色: ${char.name} (${wxAccount})`);
-            onlineSocket.send(JSON.stringify({
-                type: 'go_online',
-                wx_account: wxAccount,
-                nickname: char.remark || char.name,
-                avatar: char.avatar || '',
-                bio: char.description?.substring(0, 100) || '',
-                local_char_id: char.id
-            }));
-            onlineCount++;
+            console.log(`[Online] 自动上线角色: ${nickname} (${wxAccount})`);
+            
+            try {
+                onlineSocket.send(JSON.stringify({
+                    type: 'go_online',
+                    wx_account: wxAccount,
+                    nickname: nickname,
+                    avatar: char.avatar || '',
+                    bio: (char.description || '').substring(0, 100),
+                    local_char_id: char.id
+                }));
+                onlineCount++;
+                
+                // 添加小延迟避免请求过快
+                await new Promise(resolve => setTimeout(resolve, 150));
+            } catch (sendError) {
+                console.error(`[Online] 上线角色失败: ${nickname}`, sendError);
+            }
         }
         
         if (onlineCount > 0) {
@@ -28203,15 +28231,33 @@ function hideOnlineStatusPage() {
 
 // 更新连接状态显示
 function updateOnlineConnectionStatus() {
-    const container = document.getElementById('online-status-connection');
-    if (!container) return;
+    const statusEl = document.getElementById('online-sync-status');
+    if (!statusEl) return;
     
     if (!onlineConnected) {
-        container.innerHTML = `<div style="background:#fff5f5; color:#ff3b30; padding:12px; border-radius:8px;">未连接服务器，请在设置中配置联机设置</div>`;
+        statusEl.innerHTML = `
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="width:8px; height:8px; border-radius:50%; background:#ff3b30;"></span>
+                <span style="color:#ff3b30; font-weight:500;">未同步</span>
+            </div>
+            <div style="font-size:11px; color:#999; margin-top:4px;">未连接服务器，请在设置中配置</div>
+        `;
     } else if (!onlineUserData) {
-        container.innerHTML = `<div style="background:#fff8e1; color:#ff9800; padding:12px; border-radius:8px;">已连接服务器，请先登录</div>`;
+        statusEl.innerHTML = `
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="width:8px; height:8px; border-radius:50%; background:#ff9800;"></span>
+                <span style="color:#ff9800; font-weight:500;">等待登录</span>
+            </div>
+            <div style="font-size:11px; color:#999; margin-top:4px;">已连接服务器，请先登录账号</div>
+        `;
     } else {
-        container.innerHTML = `<div style="background:#e8f5e9; color:#4caf50; padding:12px; border-radius:8px;">已连接 - ${onlineUserData.username}</div>`;
+        statusEl.innerHTML = `
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span style="width:8px; height:8px; border-radius:50%; background:#4caf50; animation:pulse 2s infinite;"></span>
+                <span style="color:#4caf50; font-weight:500;">已同步</span>
+            </div>
+            <div style="font-size:11px; color:#666; margin-top:4px;">用户: ${onlineUserData.username} | 角色已自动上线</div>
+        `;
     }
 }
 
@@ -28224,9 +28270,11 @@ async function renderOnlineCharList() {
     const users = await db.characters.where('type').equals('user').toArray();
     
     // 检查每个角色的在线状态
+    // ✅ 修复：如果已登录，则认为所有有微信号的角色都在线（因为登录后会自动上线）
     const charList = users.map(char => {
         const wxAccount = char.identity?.account || '';
-        const isOnline = wxAccount && onlineCharacters.some(c => c.wx_account === wxAccount);
+        // 如果已连接并已登录，认为有微信号的角色都在线
+        const isOnline = wxAccount && onlineConnected && onlineUserData;
         return {
             id: char.id,
             name: char.remark || char.name,
@@ -28246,8 +28294,7 @@ async function renderOnlineCharList() {
         return;
     }
     
-    // 简化显示：只显示角色列表和状态，不需要手动上线/下线按钮
-    // 登录后会自动上线所有角色
+    // 显示角色列表和在线状态，登录后会自动上线所有角色
     container.innerHTML = charList.map(char => `
         <div style="padding:12px 16px; background:#fff; display:flex; align-items:center; gap:12px; border-bottom:1px solid #f0f0f0;">
             <div style="width:44px; height:44px; border-radius:8px; background-image:url(${char.avatar}); background-size:cover; background-position:center; background-color:#e0e0e0;"></div>
@@ -28257,9 +28304,15 @@ async function renderOnlineCharList() {
             </div>
             <div style="display:flex; align-items:center;">
                 ${char.isOnline ? `
-                    <span style="font-size:12px; color:#4caf50; padding:4px 10px; background:#e8f5e9; border-radius:10px;">● 已同步</span>
+                    <span style="font-size:12px; color:#4caf50; padding:4px 10px; background:#e8f5e9; border-radius:10px; display:flex; align-items:center; gap:4px;">
+                        <span style="width:6px; height:6px; border-radius:50%; background:#4caf50;"></span>
+                        在线
+                    </span>
                 ` : `
-                    <span style="font-size:12px; color:#999; padding:4px 10px; background:#f5f5f5; border-radius:10px;">○ 未同步</span>
+                    <span style="font-size:12px; color:#999; padding:4px 10px; background:#f5f5f5; border-radius:10px; display:flex; align-items:center; gap:4px;">
+                        <span style="width:6px; height:6px; border-radius:50%; background:#999;"></span>
+                        离线
+                    </span>
                 `}
             </div>
         </div>
@@ -28273,6 +28326,115 @@ async function refreshOnlineStatusPageContent() {
     
     // 刷新角色列表
     await renderOnlineCharList();
+}
+
+// 手动同步在线状态
+async function manualSyncOnline() {
+    const btn = document.getElementById('manual-sync-btn');
+    const btnText = document.getElementById('sync-btn-text');
+    const syncIcon = document.getElementById('sync-icon');
+    
+    if (!btn || !btnText) return;
+    
+    // 按钮变为同步中状态
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    btnText.textContent = '同步中...';
+    if (syncIcon) {
+        syncIcon.style.animation = 'spin 1s linear infinite';
+    }
+    
+    try {
+        if (!onlineConnected) {
+            // 尝试重新连接服务器
+            const serverUrl = localStorage.getItem('online_server_url');
+            if (!serverUrl) {
+                showToast('请先在设置中配置服务器地址');
+                return;
+            }
+            
+            showToast('正在连接服务器...');
+            await connectToOnlineServer();
+            showToast('连接成功，正在同步...');
+        }
+        
+        // 如果已连接但未登录
+        if (onlineConnected && !onlineUserData) {
+            showToast('请先登录账号');
+            updateOnlineConnectionStatus();
+            return;
+        }
+        
+        // 如果已登录，重新同步所有角色
+        if (onlineConnected && onlineUserData) {
+            console.log('[Online] 手动同步：重新注册并上线所有角色');
+            
+            // 重新注册角色
+            await autoRegisterAllUserCharacters();
+            
+            // 重新上线所有角色
+            await autoGoOnlineAllUserCharacters();
+            
+            // 等待一下让服务器处理
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // 刷新角色列表
+            requestOnlineCharacters();
+            await refreshOnlineStatusPageContent();
+            
+            showToast('同步成功');
+        }
+        
+        updateOnlineConnectionStatus();
+        
+    } catch (error) {
+        console.error('[Online] 同步失败:', error);
+        showToast('同步失败: ' + (error.message || '未知错误'));
+    } finally {
+        // 恢复按钮状态
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btnText.textContent = '立即同步';
+        if (syncIcon) {
+            syncIcon.style.animation = '';
+        }
+    }
+}
+
+// 自动同步定时器（每30秒检查一次）
+let autoSyncTimer = null;
+
+function startAutoSync() {
+    // 清除旧的定时器
+    if (autoSyncTimer) {
+        clearInterval(autoSyncTimer);
+    }
+    
+    // 每30秒自动检查并同步
+    autoSyncTimer = setInterval(async () => {
+        // 只在已登录但未连接的情况下尝试自动重连
+        if (!onlineConnected && onlineToken && onlineUserData) {
+            console.log('[Online] 自动同步：检测到断开连接，尝试重新连接...');
+            try {
+                await connectToOnlineServer();
+                console.log('[Online] 自动重连成功');
+            } catch (error) {
+                console.error('[Online] 自动重连失败:', error);
+            }
+        }
+        
+        // 如果已连接，定期请求角色状态
+        if (onlineConnected && onlineUserData) {
+            requestOnlineCharacters();
+        }
+    }, 30000); // 30秒
+}
+
+function stopAutoSync() {
+    if (autoSyncTimer) {
+        clearInterval(autoSyncTimer);
+        autoSyncTimer = null;
+    }
 }
 
 // ==================== 联机群聊功能 ====================
@@ -30366,19 +30528,38 @@ ${pendingRedPackets.map(rp => `- 红包ID: ${rp.id}, 祝福语: "${rp.wish}", �
 8. 请根据群聊上下文，以"${myOnlineGroupCharacter.name}"的身份自然地参与对话
 9. 只回复你要说的内容，不要加任何前缀如"${myOnlineGroupCharacter.name}:"
 10. 回复要符合你的人设性格
-11. **领取红包**：如果群聊中有红包消息（msg_type为'redpacket'），你可以积极去领取！使用 {"type": "claim_redpacket", "redpacketId": "红包ID"} 来领取红包。红包会记入你的钱包余额。
+11. **领取红包**：如果群聊中有红包消息（msg_type为'redpacket'），你可以积极去领取！使用 {"type": "claim_redpacket", "redpacketId": "红包ID"} 来领取红包。红包会记入你主人的钱包余额。
+12. **发送红包**：你可以在适当的场合发红包（比如：过节、生日、表达感谢、活跃气氛、玩梗等），使用 {"type": "send_redpacket", "redpacketType": "红包类型", "totalAmount": 总金额, "count": 红包个数, "wish": "祝福语"} 来发送红包。角色发红包不会扣除任何人的余额，可以自由发送！
+   - redpacketType可选值: "lucky"(拼手气红包), "normal"(普通红包)
+   - 拼手气红包：每个人领到的金额随机，增加趣味性
+   - 普通红包：每个人领到的金额相同，公平分配
+   - 示例1: {"type": "send_redpacket", "redpacketType": "lucky", "totalAmount": 10, "count": 5, "wish": "大家周末快乐！"}
+   - 示例2: {"type": "send_redpacket", "redpacketType": "normal", "totalAmount": 20, "count": 10, "wish": "恭喜发财"}
 
 请以JSON格式返回，格式如下：
 {
   "reply": "你的回复内容|||第二条内容|||第三条内容"
 }
 
-**特殊指令**：如果群聊中有未领取的红包，你可以使用以下格式领取：
+**特殊指令**：
+1. 领取红包：
 {
   "type": "claim_redpacket",
   "redpacketId": "红包ID",
   "reply": "你的回复内容（可选）"
 }
+
+2. 发送红包：
+{
+  "type": "send_redpacket",
+  "redpacketType": "lucky或normal",
+  "totalAmount": 金额数字,
+  "count": 红包个数,
+  "wish": "祝福语",
+  "reply": "你的回复内容（可选）"
+}
+
+提示：发送红包后，红包会立即出现在群聊中，其他成员和角色就可以抢红包了！你可以在适当的场合发红包活跃气氛，角色发红包不会扣除任何人的余额，可以自由发送！
 
 请严格返回JSON格式，不要包含Markdown代码块标记。`;
         
@@ -30424,8 +30605,59 @@ ${pendingRedPackets.map(rp => `- 红包ID: ${rp.id}, 祝福语: "${rp.wish}", �
             }
             const parsed = JSON.parse(cleanResponse);
             
+            // 检查是否是发送红包指令
+            if (parsed.type === 'send_redpacket' && parsed.totalAmount && parsed.count && parsed.redpacketType) {
+                console.log('[联机群聊] 🧧 角色尝试发送红包');
+                
+                const totalAmount = parseFloat(parsed.totalAmount);
+                const count = parseInt(parsed.count);
+                const wish = parsed.wish || '恭喜发财';
+                const redpacketType = parsed.redpacketType;
+                
+                // 验证金额和数量
+                if (totalAmount > 0 && count > 0 && totalAmount <= 200 && count <= 100) {
+                    // 生成红包ID
+                    const redpacketId = 'rp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                    
+                    // 构建红包数据
+                    const redpacketData = {
+                        id: redpacketId,
+                        totalAmount: totalAmount.toFixed(2),
+                        count: count,
+                        wish: wish,
+                        redpacketType: redpacketType,
+                        claimed: [],
+                        claimedAmounts: {}
+                    };
+                    
+                    // 发送红包消息到服务器
+                    onlineSocket.send(JSON.stringify({
+                        type: 'send_group_message',
+                        group_id: currentOnlineGroupId,
+                        my_wx_account: myWx,
+                        sender_type: 'character',
+                        sender_name: myUserName,
+                        character_name: myOnlineGroupCharacter.name,
+                        msg_type: 'redpacket',
+                        content: JSON.stringify(redpacketData)
+                    }));
+                    
+                    console.log('[联机群聊] ✅ 角色红包已发送，金额:', totalAmount, '个数:', count, '（不扣除用户余额）');
+                    
+                    // 如果有回复内容，也发送
+                    if (parsed.reply) {
+                        replyText = parsed.reply;
+                    } else {
+                        replyText = '';
+                    }
+                } else {
+                    // 参数无效
+                    console.log('[联机群聊] ⚠️ 红包参数无效');
+                    replyText = parsed.reply || '';
+                }
+            }
             // 检查是否是领取红包指令
-            if (parsed.type === 'claim_redpacket' && parsed.redpacketId) {
+            else if (parsed.type === 'claim_redpacket' && parsed.redpacketId) {
                 console.log('[联机群聊] 🧧 角色尝试领取红包:', parsed.redpacketId);
                 await claimOnlineGroupRedPacket(parsed.redpacketId, myWx, myOnlineGroupCharacter.name);
                 
@@ -30858,6 +31090,7 @@ window.updateOnlineFeatureSection = updateOnlineFeatureSection;
 window.refreshOnlineStatusPageContent = refreshOnlineStatusPageContent;
 window.renderOnlineCharList = renderOnlineCharList;
 window.updateOnlineConnectionStatus = updateOnlineConnectionStatus;
+window.manualSyncOnline = manualSyncOnline;
 
 // 联机群聊函数
 window.showCreateOnlineGroupModal = showCreateOnlineGroupModal;

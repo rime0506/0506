@@ -570,6 +570,14 @@
             from { transform: translateY(100%); }
             to { transform: translateY(0); }
         }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
         .setting-header {
             background: rgba(242, 242, 247, 0.9); /* 与背景同色，略透明 */
             backdrop-filter: blur(10px);
