@@ -10529,6 +10529,88 @@ ${chatContext || '（没有聊天记录）'}
             renderChatBody(char);
         }
 
+        // --- 戳一戳功能 ---
+        let currentPokeCharName = '';
+        
+        async function showPokeModal(charName) {
+            currentPokeCharName = charName;
+            
+            // 获取当前用户名
+            const accountId = getCurrentAccountId();
+            const myChar = await db.characters.get(parseInt(accountId));
+            const userName = myChar ? (myChar.nick || myChar.name) : '用户';
+            
+            // 设置名字
+            document.getElementById('poke-user-name').textContent = userName;
+            document.getElementById('poke-char-name').textContent = charName;
+            
+            // 设置默认值
+            document.getElementById('poke-action').value = '戳了戳';
+            document.getElementById('poke-part').value = '脑袋';
+            
+            // 更新预览
+            updatePokePreview();
+            
+            // 显示弹窗
+            document.getElementById('poke-modal').style.display = 'flex';
+            
+            // 监听输入变化
+            document.getElementById('poke-action').oninput = updatePokePreview;
+            document.getElementById('poke-part').oninput = updatePokePreview;
+        }
+        
+        function updatePokePreview() {
+            const userName = document.getElementById('poke-user-name').textContent;
+            const charName = document.getElementById('poke-char-name').textContent;
+            const action = document.getElementById('poke-action').value || '戳了戳';
+            const part = document.getElementById('poke-part').value || '脑袋';
+            
+            const preview = `${userName}${action}${charName}的${part}`;
+            document.getElementById('poke-preview').textContent = preview;
+        }
+        
+        async function confirmPoke() {
+            const action = document.getElementById('poke-action').value || '戳了戳';
+            const part = document.getElementById('poke-part').value || '脑袋';
+            const userName = document.getElementById('poke-user-name').textContent;
+            const charName = currentPokeCharName;
+            
+            // 关闭弹窗
+            document.getElementById('poke-modal').style.display = 'none';
+            
+            // 生成戳一戳系统消息
+            const pokeText = `${userName}${action}${charName}的${part}`;
+            
+            // 获取当前角色
+            if (!currentChatCharId) return;
+            const char = await db.characters.get(currentChatCharId);
+            if (!char) return;
+            
+            const accountId = getCurrentAccountId();
+            let history = getChatHistory(char, accountId);
+            
+            // 添加系统消息
+            const sysMsg = { 
+                role: 'system', 
+                content: pokeText, 
+                time: Date.now(),
+                type: 'poke'
+            };
+            
+            history.push(sysMsg);
+            await setChatHistory(char, accountId, history);
+            
+            // 在界面上显示系统消息
+            await appendMessageToUI('system', pokeText);
+            
+            console.log('[Poke] 戳一戳:', pokeText);
+        }
+        
+        // 关闭弹窗的通用函数
+        window.closeModal = function(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        };
+
         // --- 聊天详情页逻辑 ---
         // 统一入口：根据当前是私聊还是群聊显示对应详情页
         function showChatOrGroupDetail() {
@@ -13258,6 +13340,16 @@ ${groupContextStr}
         // 构造消息 DOM
         function createMessageElement(msg, index, charAvatar, userAvatar, prevMsgTime, charName = 'AI') {
             const row = document.createElement('div');
+            
+            // 🎯 特殊处理：系统消息（如戳一戳）
+            if (msg.role === 'system') {
+                row.className = 'message-system';
+                row.style.cssText = 'text-align:center; padding:8px 16px; margin:8px 0;';
+                row.innerHTML = `<span style="background:#fff; color:#999; font-size:12px; padding:4px 12px; border-radius:4px; border:1px solid #ddd;">${msg.content}</span>`;
+                row.dataset.index = index;
+                return row;
+            }
+            
             row.className = `message-row ${msg.role === 'user' ? 'self' : 'other'}`;
             row.dataset.index = index;
 
@@ -13272,11 +13364,30 @@ ${groupContextStr}
             
             if (msg.role === 'char') {
                 if (charAvatar) avatar.style.backgroundImage = `url(${charAvatar})`;
-                // 给角色头像添加点击事件，显示心声
+                // 给角色头像添加点击和双击事件
                 avatar.style.cursor = 'pointer';
+                
+                let clickCount = 0;
+                let clickTimer = null;
+                
                 avatar.onclick = async (e) => {
                     e.stopPropagation(); // 阻止冒泡，避免触发消息选择
-                    await showCharacterThoughts(currentChatCharId, index);
+                    
+                    clickCount++;
+                    
+                    if (clickCount === 1) {
+                        // 第一次点击，等待350ms判断是单击还是双击
+                        clickTimer = setTimeout(async () => {
+                            // 单击：显示心声
+                            await showCharacterThoughts(currentChatCharId, index);
+                            clickCount = 0;
+                        }, 350);
+                    } else if (clickCount === 2) {
+                        // 双击：戳一戳
+                        clearTimeout(clickTimer);
+                        showPokeModal(charName);
+                        clickCount = 0;
+                    }
                 };
             } else {
                 if (userAvatar) {
@@ -13642,8 +13753,8 @@ ${groupContextStr}
             const history = getChatHistory(char, accountId);
             const prevMsgTime = msgIndex > 0 && history[msgIndex - 1] ? history[msgIndex - 1].time : null;
             
-            // 如果需要显示时间戳，先添加时间戳行
-            if (shouldShowTimestamp(msg.time, prevMsgTime)) {
+            // 如果需要显示时间戳，先添加时间戳行（系统消息不显示时间戳）
+            if (msg.role !== 'system' && shouldShowTimestamp(msg.time, prevMsgTime)) {
                 const timeStamp = document.createElement('div');
                 timeStamp.className = 'message-timestamp';
                 timeStamp.textContent = formatMessageTime(msg.time, prevMsgTime, timeOffset);
@@ -13836,8 +13947,8 @@ ${groupContextStr}
             history.forEach((msg, index) => {
                 const prevMsgTime = index > 0 ? history[index - 1].time : null;
                 
-                // 如果需要显示时间戳，先添加时间戳行
-                if (shouldShowTimestamp(msg.time, prevMsgTime)) {
+                // 如果需要显示时间戳，先添加时间戳行（系统消息不显示时间戳）
+                if (msg.role !== 'system' && shouldShowTimestamp(msg.time, prevMsgTime)) {
                     const timeStamp = document.createElement('div');
                     timeStamp.className = 'message-timestamp';
                     timeStamp.textContent = formatMessageTime(msg.time, prevMsgTime, timeOffset);
@@ -13846,10 +13957,10 @@ ${groupContextStr}
                 
                 const row = createMessageElement(msg, index, char.avatar, userAvatarUrl, prevMsgTime, char.name);
                 
-                // 如果在多选模式，恢复选中状态
-                if (isSelectionMode) {
+                // 如果在多选模式，恢复选中状态（系统消息除外）
+                if (isSelectionMode && msg.role !== 'system') {
                     const cb = row.querySelector('.msg-checkbox');
-                    if (selectedIndices.has(index)) {
+                    if (cb && selectedIndices.has(index)) {
                         cb.classList.add('checked');
                     }
                 }
@@ -14490,6 +14601,7 @@ ${groupContextStr}
                 await db.group_chats.put(group);
                 
                 exitSelectionMode();
+                // 重新渲染会自动处理时间戳
                 await renderGroupChatBody(group);
                 return;
             }
@@ -14506,16 +14618,9 @@ ${groupContextStr}
             await setChatHistory(char, accountId, newHistory);
             await db.characters.put(char);
             
-            const chatBody = document.getElementById('chat-body');
-            const messageRows = chatBody.querySelectorAll('.message-row');
-            const sortedIndices = Array.from(selectedIndices).sort((a, b) => b - a);
-            sortedIndices.forEach(idx => {
-                if (messageRows[idx]) {
-                    messageRows[idx].remove();
-                }
-            });
-            
+            // 🎯 优化：删除消息后重新渲染，避免时间戳问题
             exitSelectionMode();
+            await renderChatBody(char, true); // 强制重新渲染
         }
 
         // --- 新增：聊天交互逻辑 (面板/输入/AI触发) ---

@@ -1214,6 +1214,34 @@
         </div>
     </div>
 
+    <!-- 戳一戳弹窗 -->
+    <div class="modal-overlay" id="poke-modal">
+        <div class="modal-box" style="width: 85%; max-width: 320px;">
+            <div class="modal-title">戳一戳</div>
+            <div style="font-size:13px; color:#666; margin-bottom:20px; text-align:center;">自定义戳一戳动作</div>
+            
+            <div style="margin-bottom:20px;">
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:15px;">
+                    <span id="poke-user-name" style="font-size:15px; font-weight:600; color:#333;">用户</span>
+                    <input type="text" id="poke-action" class="modal-input" placeholder="戳了戳" value="戳了戳" style="flex:1; margin-bottom:0; text-align:center; font-size:14px;">
+                    <span id="poke-char-name" style="font-size:15px; font-weight:600; color:#333;">角色</span>
+                    <span style="font-size:15px; color:#666;">的</span>
+                    <input type="text" id="poke-part" class="modal-input" placeholder="脑袋" value="脑袋" style="width:80px; margin-bottom:0; text-align:center; font-size:14px;">
+                </div>
+                
+                <div style="background:#f5f5f5; padding:12px; border-radius:8px; text-align:center;">
+                    <div style="font-size:12px; color:#999; margin-bottom:6px;">预览效果</div>
+                    <div id="poke-preview" style="font-size:14px; color:#333; line-height:1.6;"></div>
+                </div>
+            </div>
+
+            <div class="modal-btns">
+                <button class="modal-btn btn-cancel" onclick="closeModal('poke-modal')">取消</button>
+                <button class="modal-btn btn-confirm" onclick="confirmPoke()">确认</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 创建群聊弹窗 -->
     <div class="modal-overlay" id="create-group-modal">
         <div class="modal-box" style="height:80%; max-width:400px;">
