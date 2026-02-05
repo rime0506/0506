@@ -3459,6 +3459,561 @@
     text-align: center;
 }
 
+/* =================
+   借钱页面样式 (白色INS风格)
+   ================= */
+
+/* 可借额度卡片 */
+.loan-header-card {
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 32px 24px;
+    margin-bottom: 24px;
+    text-align: center;
+    box-shadow: 0 4px 24px rgba(255, 192, 203, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.8);
+}
+
+.loan-header-icon {
+    width: 80px;
+    height: 80px;
+    background: #fff5f7;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 20px;
+}
+
+.loan-header-title {
+    font-size: 14px;
+    color: #999;
+    margin-bottom: 12px;
+    letter-spacing: 0.5px;
+}
+
+.loan-header-amount {
+    font-size: 42px;
+    font-weight: 700;
+    color: #333;
+    margin-bottom: 8px;
+    letter-spacing: -1px;
+}
+
+.loan-header-subtitle {
+    font-size: 12px;
+    color: #bbb;
+}
+
+/* 借款金额选择区域 */
+.loan-amount-section {
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+.loan-section-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 20px;
+}
+
+.loan-amount-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.loan-amount-btn {
+    background: #f8f8f8;
+    border: 2px solid transparent;
+    border-radius: 16px;
+    padding: 20px 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.loan-amount-btn:active {
+    transform: scale(0.98);
+}
+
+.loan-amount-btn.selected {
+    background: #fff5f7;
+    border-color: #ffb3c6;
+    box-shadow: 0 4px 12px rgba(255, 179, 198, 0.2);
+}
+
+.loan-amount-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: #333;
+    margin-bottom: 6px;
+}
+
+.loan-amount-desc {
+    font-size: 12px;
+    color: #999;
+}
+
+.loan-amount-btn.selected .loan-amount-value {
+    color: #ff6b9d;
+}
+
+.loan-amount-btn.selected .loan-amount-desc {
+    color: #ff6b9d;
+}
+
+/* 自定义金额输入 */
+.loan-custom-amount {
+    padding-top: 20px;
+    border-top: 1px solid #f0f0f0;
+}
+
+.loan-custom-label {
+    font-size: 14px;
+    color: #999;
+    margin-bottom: 12px;
+}
+
+.loan-custom-input-wrapper {
+    display: flex;
+    align-items: center;
+    background: #f8f8f8;
+    border-radius: 12px;
+    padding: 0 16px;
+    border: 2px solid transparent;
+    transition: all 0.3s ease;
+}
+
+.loan-custom-input-wrapper:focus-within {
+    background: #fff5f7;
+    border-color: #ffb3c6;
+}
+
+.loan-currency {
+    font-size: 18px;
+    font-weight: 600;
+    color: #666;
+    margin-right: 8px;
+}
+
+.loan-custom-input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    font-size: 18px;
+    font-weight: 600;
+    color: #333;
+    padding: 16px 0;
+    outline: none;
+}
+
+.loan-custom-input::placeholder {
+    color: #ccc;
+    font-weight: 400;
+}
+
+/* 借款信息卡片 */
+.loan-info-card {
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+.loan-info-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 0;
+}
+
+.loan-info-item:not(:last-child) {
+    border-bottom: 1px solid #f7f7f7;
+}
+
+.loan-info-label {
+    font-size: 15px;
+    color: #666;
+}
+
+.loan-info-value {
+    font-size: 15px;
+    font-weight: 600;
+    color: #333;
+}
+
+.loan-info-value.loan-highlight {
+    font-size: 18px;
+    color: #ff6b9d;
+}
+
+.loan-select {
+    border: none;
+    background: transparent;
+    font-size: 15px;
+    font-weight: 600;
+    color: #333;
+    outline: none;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: background 0.2s;
+}
+
+.loan-select:hover {
+    background: #f8f8f8;
+}
+
+/* 借款提交按钮 */
+.loan-submit-btn {
+    width: 100%;
+    padding: 18px;
+    background: #ff6b9d;
+    color: #ffffff;
+    border: none;
+    border-radius: 16px;
+    font-size: 18px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 24px;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(255, 107, 157, 0.3);
+}
+
+.loan-submit-btn:active {
+    transform: scale(0.98);
+}
+
+.loan-submit-btn:disabled {
+    background: #e0e0e0;
+    color: #999;
+    cursor: not-allowed;
+    box-shadow: none;
+    opacity: 0.6;
+}
+
+/* 温馨提示 */
+.loan-tips {
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+.loan-tips-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 12px;
+}
+
+.loan-tips-content {
+    font-size: 13px;
+    color: #999;
+    line-height: 1.8;
+}
+
+.loan-tip-item {
+    margin-bottom: 6px;
+}
+
+.loan-tip-item:last-child {
+    margin-bottom: 0;
+}
+
+/* 借款记录 */
+.loan-history-section {
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+.loan-history-list {
+    margin-top: 16px;
+}
+
+.loan-empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #ccc;
+    font-size: 14px;
+}
+
+.loan-history-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 0;
+    border-bottom: 1px solid #f7f7f7;
+}
+
+.loan-history-item:last-child {
+    border-bottom: none;
+}
+
+.loan-history-info {
+    flex: 1;
+}
+
+.loan-history-amount {
+    font-size: 18px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 4px;
+}
+
+.loan-history-date {
+    font-size: 12px;
+    color: #999;
+}
+
+.loan-history-status {
+    font-size: 14px;
+    padding: 6px 12px;
+    border-radius: 12px;
+    font-weight: 500;
+}
+
+.loan-history-status.pending {
+    background: #fff5e6;
+    color: #ff9800;
+}
+
+.loan-history-status.repaid {
+    background: #e8f5e9;
+    color: #4caf50;
+}
+
+.loan-history-status.overdue {
+    background: #ffebee;
+    color: #f44336;
+}
+
+.loan-history-status.profit {
+    background: #e8f5e9;
+    color: #4caf50;
+}
+
+.loan-history-status.loss {
+    background: #fff3e0;
+    color: #ff9800;
+}
+
+.loan-repay-btn-small {
+    font-size: 12px;
+    padding: 4px 12px;
+    background: var(--ins-pink);
+    color: #fff;
+    border-radius: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.loan-repay-btn-small:active {
+    transform: scale(0.95);
+    opacity: 0.8;
+}
+
+/* =================
+   刮刮乐页面样式 (白色INS风格)
+   ================= */
+
+/* 余额显示卡片 */
+.scratch-balance-card {
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 24px;
+    margin-bottom: 24px;
+    text-align: center;
+    box-shadow: 0 4px 24px rgba(255, 192, 203, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.8);
+}
+
+.scratch-balance-label {
+    font-size: 14px;
+    color: #999;
+    margin-bottom: 8px;
+}
+
+.scratch-balance-amount {
+    font-size: 32px;
+    font-weight: 700;
+    color: #333;
+}
+
+/* 刮刮乐卡片容器 */
+.scratch-card-container {
+    margin-bottom: 24px;
+    display: flex;
+    justify-content: center;
+}
+
+.scratch-card-wrapper {
+    width: 100%;
+    max-width: 320px;
+}
+
+.scratch-card {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 2 / 1;
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: 0 4px 24px rgba(255, 192, 203, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.8);
+    cursor: pointer;
+    user-select: none;
+    touch-action: none;
+    background: #ffffff;
+}
+
+/* 刮刮乐覆盖层 */
+.scratch-card-cover {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, #ffe4e8 0%, #fff5f7 50%, #fffbfc 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    transition: opacity 0.3s ease;
+    overflow: hidden;
+}
+
+.scratch-card-cover.scratched {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.scratch-card-cover canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    cursor: crosshair;
+    touch-action: none;
+}
+
+.scratch-cover-pattern {
+    width: 100%;
+    height: 100%;
+    background-image: 
+        repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,255,255,0.1) 10px, rgba(255,255,255,0.1) 20px),
+        repeating-linear-gradient(-45deg, transparent, transparent 10px, rgba(255,255,255,0.1) 10px, rgba(255,255,255,0.1) 20px);
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+.scratch-cover-text {
+    position: relative;
+    z-index: 1;
+    font-size: 18px;
+    font-weight: 600;
+    color: #ffb6c1;
+    text-shadow: 0 1px 2px rgba(255,255,255,0.8);
+    letter-spacing: 2px;
+}
+
+/* 刮刮乐内容层 */
+.scratch-card-content {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: #ffffff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+.scratch-result-icon {
+    font-size: 40px;
+    margin-bottom: 16px;
+    opacity: 0.9;
+    display: none;
+}
+
+.scratch-result-text {
+    font-size: 15px;
+    font-weight: 500;
+    color: #999;
+    margin-bottom: 12px;
+    text-align: center;
+    letter-spacing: 0.5px;
+}
+
+.scratch-result-amount {
+    font-size: 42px;
+    font-weight: 700;
+    color: #333;
+    letter-spacing: -1px;
+    transition: color 0.3s ease;
+}
+
+/* 购买按钮 */
+.scratch-buy-btn {
+    width: 100%;
+    padding: 18px;
+    background: var(--ins-pink);
+    color: #ffffff;
+    border: none;
+    border-radius: 16px;
+    font-size: 18px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 24px;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(255, 182, 193, 0.3);
+}
+
+.scratch-buy-btn:active {
+    transform: scale(0.98);
+}
+
+.scratch-buy-btn:disabled {
+    background: #e0e0e0;
+    color: #999;
+    cursor: not-allowed;
+    box-shadow: none;
+    opacity: 0.6;
+}
+
+/* 中奖记录区域 */
+.scratch-history-section {
+    background: #ffffff;
+    border-radius: 20px;
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
 /* 钱包详情页样式 */
 .wallet-nav {
     height: 88px; /* 与微信页面顶栏一致 */

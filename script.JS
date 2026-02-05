@@ -16254,12 +16254,30 @@ ${recentSms.length > 0 ? `- ⚠️ 重要：不要重复上面【短信】中已
 
                 // 计算虚拟时间
                 const virtualTimeStr = getFormattedVirtualTime(char.timeOffset);
+                
+                // 检查是否有借款提醒
+                let loanReminderText = "";
+                if (char.loanReminders && char.loanReminders.length > 0) {
+                    const unreadReminders = char.loanReminders.filter(r => !r.read);
+                    if (unreadReminders.length > 0) {
+                        loanReminderText = "\n\n【未读短信提醒】\n";
+                        unreadReminders.forEach(reminder => {
+                            const timeStr = new Date(reminder.timestamp).toLocaleString('zh-CN');
+                            loanReminderText += `[${timeStr}] ${reminder.message}\n`;
+                        });
+                        loanReminderText += "\n💡 提示：你收到了关于朋友借款逾期的短信提醒，可以在对话中自然地提及或关心一下这件事。";
+                        
+                        // 标记为已读
+                        char.loanReminders.forEach(r => r.read = true);
+                        await db.characters.put(char);
+                    }
+                }
 
                 // 2. 准备 Context
                  let systemPrompt = `# 🎭 你就是这个角色本身，你正在真实地活着
 
 【当前时间】
-${virtualTimeStr}`;
+${virtualTimeStr}${loanReminderText}`;
 
                 // 如果有额外系统信息（如时间流逝），插入到 Prompt
                 if (additionalSystemInfo) {
@@ -19662,6 +19680,1312 @@ function submitRecharge() {
 // 导出到全局作用域
 window.showPhoneRechargePage = showPhoneRechargePage;
 window.hidePhoneRechargePage = hidePhoneRechargePage;
+
+// 借钱页面相关函数
+let selectedLoanAmount = 0;
+let selectedLoanTerm = 6;
+
+function showLoanPage() {
+    const page = document.getElementById('loan-page');
+    page.style.display = 'flex';
+    page.offsetHeight;
+    page.classList.add('slide-in');
+    
+    // 重置选择
+    selectedLoanAmount = 0;
+    selectedLoanTerm = 6;
+    document.getElementById('loan-term-select').value = '6';
+    document.getElementById('loan-custom-input').value = '';
+    updateLoanButtons();
+    updateLoanInfo();
+    loadLoanHistory();
+}
+
+function hideLoanPage() {
+    const page = document.getElementById('loan-page');
+    page.classList.remove('slide-in');
+    setTimeout(() => {
+        page.style.display = 'none';
+    }, 300);
+}
+
+function selectLoanAmount(amount) {
+    selectedLoanAmount = amount;
+    // 清除自定义输入
+    document.getElementById('loan-custom-input').value = '';
+    // 更新按钮状态
+    updateLoanButtons();
+    updateLoanInfo();
+}
+
+function handleCustomLoanAmount(value) {
+    const amount = parseInt(value) || 0;
+    if (amount >= 100 && amount <= 50000) {
+        selectedLoanAmount = amount;
+        // 清除预设按钮选择
+        document.querySelectorAll('.loan-amount-btn').forEach(btn => {
+            btn.classList.remove('selected');
+        });
+        updateLoanInfo();
+    } else {
+        selectedLoanAmount = 0;
+    }
+    updateLoanButtons();
+}
+
+function updateLoanButtons() {
+    const submitBtn = document.getElementById('loan-submit-btn');
+    if (selectedLoanAmount > 0) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = `立即借款 ¥${selectedLoanAmount.toLocaleString()}`;
+    } else {
+        submitBtn.disabled = true;
+        submitBtn.textContent = '请选择借款金额';
+    }
+}
+
+function updateLoanInfo() {
+    selectedLoanTerm = parseInt(document.getElementById('loan-term-select').value) || 6;
+    
+    if (selectedLoanAmount > 0) {
+        // 计算总还款额：本金 + 利息
+        // 日利率 0.05%，月利率约 1.5%
+        const monthlyRate = 0.015;
+        const totalInterest = selectedLoanAmount * monthlyRate * selectedLoanTerm;
+        const totalAmount = selectedLoanAmount + totalInterest;
+        
+        document.getElementById('loan-total-amount').textContent = `¥${totalAmount.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    } else {
+        document.getElementById('loan-total-amount').textContent = '¥0.00';
+    }
+}
+
+async function submitLoan() {
+    if (selectedLoanAmount <= 0) {
+        return;
+    }
+    
+    // 计算还款信息
+    const monthlyRate = 0.015;
+    const totalInterest = selectedLoanAmount * monthlyRate * selectedLoanTerm;
+    const totalAmount = selectedLoanAmount + totalInterest;
+    const monthlyPayment = totalAmount / selectedLoanTerm;
+    
+    // 确认对话框
+    const confirmMsg = `确认借款信息：\n\n借款金额：¥${selectedLoanAmount.toLocaleString()}\n借款期限：${selectedLoanTerm}个月\n日利率：0.05%\n预计还款总额：¥${totalAmount.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}\n每月还款：¥${monthlyPayment.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    
+    if (confirm(confirmMsg)) {
+        if (!currentMyCharId) {
+            alert('请先选择一个 User 身份');
+            return;
+        }
+        
+        // 添加借款金额到余额
+        const user = await db.characters.get(parseInt(currentMyCharId));
+        if (!user) {
+            alert('未找到用户信息');
+            return;
+        }
+        
+        let userBalance = parseFloat(user.identity?.balance || 0);
+        userBalance = userBalance + selectedLoanAmount;
+        
+        if (!user.identity) user.identity = {};
+        user.identity.balance = userBalance.toFixed(2);
+        await db.characters.put(user);
+        
+        // 更新余额显示
+        await updateBalancePageDisplay();
+        await updateWalletBalanceDisplay();
+        
+        // 保存借款记录到本地存储
+        const now = Date.now();
+        const dueTime = now + (selectedLoanTerm * 12 * 60 * 60 * 1000); // 1个月=12小时
+        
+        const loanRecord = {
+            id: now,
+            amount: selectedLoanAmount,
+            term: selectedLoanTerm,
+            totalAmount: totalAmount,
+            monthlyPayment: monthlyPayment,
+            date: new Date().toISOString(),
+            dueTime: dueTime, // 到期时间戳
+            status: 'pending', // pending, repaid, overdue
+            paidAmount: 0, // 已还金额
+            remainingAmount: totalAmount, // 剩余应还金额
+            firstReminderSent: false, // 第一次提醒已发送
+            secondReminderSent: false, // 第二次提醒已发送
+            userId: currentMyCharId // 借款人ID
+        };
+        
+        let loanHistory = JSON.parse(localStorage.getItem('loanHistory') || '[]');
+        loanHistory.unshift(loanRecord);
+        localStorage.setItem('loanHistory', JSON.stringify(loanHistory));
+        
+        // 显示成功提示
+        alert(`借款成功\n\n借款金额：¥${selectedLoanAmount.toLocaleString()}\n已添加到钱包余额`);
+        
+        // 重置页面
+        selectedLoanAmount = 0;
+        document.getElementById('loan-custom-input').value = '';
+        document.querySelectorAll('.loan-amount-btn').forEach(btn => {
+            btn.classList.remove('selected');
+        });
+        updateLoanButtons();
+        updateLoanInfo();
+        loadLoanHistory();
+    }
+}
+
+function loadLoanHistory() {
+    const historyList = document.getElementById('loan-history-list');
+    const loanHistory = JSON.parse(localStorage.getItem('loanHistory') || '[]');
+    
+    if (loanHistory.length === 0) {
+        historyList.innerHTML = '<div class="loan-empty-state">暂无借款记录</div>';
+        return;
+    }
+    
+    historyList.innerHTML = loanHistory.map(record => {
+        const date = new Date(record.date);
+        const dateStr = date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+        const statusText = {
+            'pending': '待还款',
+            'repaid': '已还清',
+            'overdue': '已逾期'
+        };
+        
+        const remainingAmount = record.remainingAmount !== undefined ? record.remainingAmount : record.totalAmount;
+        const paidAmount = record.paidAmount || 0;
+        
+        return `
+            <div class="loan-history-item" onclick="showRepayPage(${record.id})" style="cursor: pointer;">
+                <div class="loan-history-info">
+                    <div class="loan-history-amount">¥${record.amount.toLocaleString()}</div>
+                    <div class="loan-history-date">${dateStr} · ${record.term}个月</div>
+                    ${record.status === 'pending' ? `<div style="font-size: 12px; color: #999; margin-top: 4px;">剩余应还：¥${remainingAmount.toFixed(2)}</div>` : ''}
+                </div>
+                <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
+                    <div class="loan-history-status ${record.status}">${statusText[record.status]}</div>
+                    ${record.status === 'pending' ? '<div class="loan-repay-btn-small">还款</div>' : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// 初始化借款金额按钮点击事件
+document.addEventListener('DOMContentLoaded', function() {
+    // 为预设金额按钮添加选中状态切换
+    document.querySelectorAll('.loan-amount-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.loan-amount-btn').forEach(b => b.classList.remove('selected'));
+            this.classList.add('selected');
+        });
+    });
+});
+
+window.showLoanPage = showLoanPage;
+window.hideLoanPage = hideLoanPage;
+window.selectLoanAmount = selectLoanAmount;
+window.handleCustomLoanAmount = handleCustomLoanAmount;
+window.updateLoanInfo = updateLoanInfo;
+window.submitLoan = submitLoan;
+
+// =================
+// 还款功能
+// =================
+
+let currentRepayLoanId = null;
+let currentRepayLoan = null;
+let selectedRepayAmount = 0;
+
+// 显示还款页面
+async function showRepayPage(loanId) {
+    const page = document.getElementById('repay-page');
+    page.style.display = 'flex';
+    page.offsetHeight;
+    page.classList.add('slide-in');
+    
+    currentRepayLoanId = loanId;
+    
+    // 加载借款信息
+    const loanHistory = JSON.parse(localStorage.getItem('loanHistory') || '[]');
+    currentRepayLoan = loanHistory.find(loan => loan.id === loanId);
+    
+    if (!currentRepayLoan) {
+        alert('未找到借款记录');
+        hideRepayPage();
+        return;
+    }
+    
+    // 更新余额显示
+    await updateRepayBalance();
+    
+    // 更新页面信息
+    updateRepayPageInfo();
+    
+    // 重置选择
+    selectedRepayAmount = 0;
+    document.getElementById('repay-custom-input').value = '';
+    updateRepayButtons();
+}
+
+// 隐藏还款页面
+function hideRepayPage() {
+    const page = document.getElementById('repay-page');
+    page.classList.remove('slide-in');
+    setTimeout(() => {
+        page.style.display = 'none';
+    }, 300);
+    
+    currentRepayLoanId = null;
+    currentRepayLoan = null;
+    selectedRepayAmount = 0;
+}
+
+// 更新余额显示
+async function updateRepayBalance() {
+    if (!currentMyCharId) {
+        document.getElementById('repay-current-balance').textContent = '¥0.00';
+        return;
+    }
+    
+    const user = await db.characters.get(parseInt(currentMyCharId));
+    const balance = user?.identity?.balance || 0;
+    document.getElementById('repay-current-balance').textContent = `¥${parseFloat(balance).toFixed(2)}`;
+}
+
+// 更新还款页面信息
+function updateRepayPageInfo() {
+    if (!currentRepayLoan) return;
+    
+    const date = new Date(currentRepayLoan.date);
+    const dateStr = date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+    
+    const remainingAmount = currentRepayLoan.remainingAmount !== undefined ? currentRepayLoan.remainingAmount : currentRepayLoan.totalAmount;
+    const paidAmount = currentRepayLoan.paidAmount || 0;
+    const monthlyPayment = currentRepayLoan.monthlyPayment || 0;
+    
+    document.getElementById('repay-loan-amount').textContent = `¥${currentRepayLoan.amount.toLocaleString()}`;
+    document.getElementById('repay-loan-date').textContent = dateStr;
+    document.getElementById('repay-loan-term').textContent = `${currentRepayLoan.term}个月`;
+    document.getElementById('repay-total-amount').textContent = `¥${currentRepayLoan.totalAmount.toFixed(2)}`;
+    document.getElementById('repay-paid-amount').textContent = `¥${paidAmount.toFixed(2)}`;
+    document.getElementById('repay-remaining-amount').textContent = `¥${remainingAmount.toFixed(2)}`;
+    
+    // 更新还款选项
+    document.getElementById('repay-monthly-value').textContent = `¥${monthlyPayment.toFixed(2)}`;
+    document.getElementById('repay-half-value').textContent = `¥${(remainingAmount / 2).toFixed(2)}`;
+    document.getElementById('repay-all-value').textContent = `¥${remainingAmount.toFixed(2)}`;
+}
+
+// 选择还款金额
+function selectRepayAmount(type) {
+    if (!currentRepayLoan) return;
+    
+    const remainingAmount = currentRepayLoan.remainingAmount !== undefined ? currentRepayLoan.remainingAmount : currentRepayLoan.totalAmount;
+    const monthlyPayment = currentRepayLoan.monthlyPayment || 0;
+    
+    // 清除自定义输入
+    document.getElementById('repay-custom-input').value = '';
+    
+    // 清除其他按钮选中状态
+    document.querySelectorAll('#repay-page .loan-amount-btn').forEach(btn => {
+        btn.classList.remove('selected');
+    });
+    
+    // 设置选中金额
+    if (type === 'monthly') {
+        selectedRepayAmount = Math.min(monthlyPayment, remainingAmount);
+        event.target.closest('.loan-amount-btn').classList.add('selected');
+    } else if (type === 'half') {
+        selectedRepayAmount = remainingAmount / 2;
+        event.target.closest('.loan-amount-btn').classList.add('selected');
+    } else if (type === 'all') {
+        selectedRepayAmount = remainingAmount;
+        event.target.closest('.loan-amount-btn').classList.add('selected');
+    }
+    
+    updateRepayButtons();
+}
+
+// 处理自定义还款金额
+function handleCustomRepayAmount(value) {
+    const amount = parseFloat(value) || 0;
+    const remainingAmount = currentRepayLoan.remainingAmount !== undefined ? currentRepayLoan.remainingAmount : currentRepayLoan.totalAmount;
+    
+    if (amount > 0 && amount <= remainingAmount) {
+        selectedRepayAmount = amount;
+        // 清除预设按钮选择
+        document.querySelectorAll('#repay-page .loan-amount-btn').forEach(btn => {
+            btn.classList.remove('selected');
+        });
+    } else {
+        selectedRepayAmount = 0;
+    }
+    updateRepayButtons();
+}
+
+// 更新还款按钮状态
+function updateRepayButtons() {
+    const submitBtn = document.getElementById('repay-submit-btn');
+    if (selectedRepayAmount > 0 && currentRepayLoan) {
+        const remainingAmount = currentRepayLoan.remainingAmount !== undefined ? currentRepayLoan.remainingAmount : currentRepayLoan.totalAmount;
+        if (selectedRepayAmount <= remainingAmount) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = `确认还款 ¥${selectedRepayAmount.toFixed(2)}`;
+        } else {
+            submitBtn.disabled = true;
+            submitBtn.textContent = '还款金额不能超过剩余应还';
+        }
+    } else {
+        submitBtn.disabled = true;
+        submitBtn.textContent = '请选择还款金额';
+    }
+}
+
+// 提交还款
+async function submitRepay() {
+    if (!currentMyCharId || !currentRepayLoan || selectedRepayAmount <= 0) {
+        return;
+    }
+    
+    const user = await db.characters.get(parseInt(currentMyCharId));
+    if (!user) {
+        alert('未找到用户信息');
+        return;
+    }
+    
+    const remainingAmount = currentRepayLoan.remainingAmount !== undefined ? currentRepayLoan.remainingAmount : currentRepayLoan.totalAmount;
+    
+    if (selectedRepayAmount > remainingAmount) {
+        alert('还款金额不能超过剩余应还金额');
+        return;
+    }
+    
+    let userBalance = parseFloat(user.identity?.balance || 0);
+    
+    // 检查余额
+    if (userBalance < selectedRepayAmount) {
+        alert(`余额不足\n当前余额：¥${userBalance.toFixed(2)}\n需要：¥${selectedRepayAmount.toFixed(2)}`);
+        return;
+    }
+    
+    // 确认对话框
+    const confirmMsg = `确认还款信息：\n\n还款金额：¥${selectedRepayAmount.toFixed(2)}\n剩余应还：¥${remainingAmount.toFixed(2)}\n\n确认还款？`;
+    
+    if (confirm(confirmMsg)) {
+        // 扣款
+        userBalance = userBalance - selectedRepayAmount;
+        if (!user.identity) user.identity = {};
+        user.identity.balance = userBalance.toFixed(2);
+        await db.characters.put(user);
+        
+        // 更新余额显示
+        await updateRepayBalance();
+        await updateBalancePageDisplay();
+        await updateWalletBalanceDisplay();
+        
+        // 更新借款记录
+        const loanHistory = JSON.parse(localStorage.getItem('loanHistory') || '[]');
+        const loanIndex = loanHistory.findIndex(loan => loan.id === currentRepayLoanId);
+        
+        if (loanIndex !== -1) {
+            const loan = loanHistory[loanIndex];
+            const newPaidAmount = (loan.paidAmount || 0) + selectedRepayAmount;
+            const newRemainingAmount = remainingAmount - selectedRepayAmount;
+            
+            loan.paidAmount = newPaidAmount;
+            loan.remainingAmount = newRemainingAmount;
+            
+            // 如果全部还清，更新状态
+            if (newRemainingAmount <= 0.01) {
+                loan.status = 'repaid';
+                loan.remainingAmount = 0;
+            }
+            
+            loanHistory[loanIndex] = loan;
+            localStorage.setItem('loanHistory', JSON.stringify(loanHistory));
+            
+            // 更新当前显示的借款信息
+            currentRepayLoan = loan;
+        }
+        
+        // 显示成功提示
+        if (currentRepayLoan.remainingAmount <= 0.01) {
+            alert(`还款成功\n\n已还清全部借款`);
+            hideRepayPage();
+        } else {
+            alert(`还款成功\n\n还款金额：¥${selectedRepayAmount.toFixed(2)}\n剩余应还：¥${currentRepayLoan.remainingAmount.toFixed(2)}`);
+        }
+        
+        // 更新页面
+        updateRepayPageInfo();
+        selectedRepayAmount = 0;
+        document.getElementById('repay-custom-input').value = '';
+        document.querySelectorAll('#repay-page .loan-amount-btn').forEach(btn => {
+            btn.classList.remove('selected');
+        });
+        updateRepayButtons();
+        
+        // 刷新借款记录列表（如果还在借钱页面）
+        if (typeof loadLoanHistory === 'function') {
+            loadLoanHistory();
+        }
+    }
+}
+
+// 导出函数
+window.showRepayPage = showRepayPage;
+window.hideRepayPage = hideRepayPage;
+window.selectRepayAmount = selectRepayAmount;
+window.handleCustomRepayAmount = handleCustomRepayAmount;
+window.submitRepay = submitRepay;
+
+// =================
+// 借款逾期提醒系统
+// =================
+
+// 检查逾期借款并发送提醒
+async function checkOverdueLoans() {
+    const loanHistory = JSON.parse(localStorage.getItem('loanHistory') || '[]');
+    const now = Date.now();
+    
+    let hasChanges = false;
+    
+    for (let loan of loanHistory) {
+        // 只检查待还款状态的借款
+        if (loan.status !== 'pending' || !loan.dueTime) continue;
+        
+        const overdueTime = now - loan.dueTime;
+        
+        // 第一次提醒：刚逾期（0-5分钟内，避免重复检查）
+        if (overdueTime >= 0 && overdueTime < 5 * 60 * 1000 && !loan.firstReminderSent) {
+            await sendFirstReminder(loan);
+            loan.firstReminderSent = true;
+            loan.status = 'overdue';
+            hasChanges = true;
+            console.log(`[借款提醒] 第一次提醒已发送 - 借款ID: ${loan.id}`);
+        }
+        
+        // 第二次提醒：逾期12小时后
+        const secondReminderTime = 12 * 60 * 60 * 1000; // 12小时
+        if (overdueTime >= secondReminderTime && !loan.secondReminderSent) {
+            await sendSecondReminder(loan);
+            loan.secondReminderSent = true;
+            hasChanges = true;
+            console.log(`[借款提醒] 第二次提醒已发送 - 借款ID: ${loan.id}`);
+        }
+    }
+    
+    // 如果有变化，保存更新
+    if (hasChanges) {
+        localStorage.setItem('loanHistory', JSON.stringify(loanHistory));
+        // 刷新借款记录显示
+        if (typeof loadLoanHistory === 'function') {
+            loadLoanHistory();
+        }
+    }
+}
+
+// 第一次提醒：发短信给借款人本人
+async function sendFirstReminder(loan) {
+    if (!loan.userId) return;
+    
+    const user = await db.characters.get(parseInt(loan.userId));
+    if (!user) return;
+    
+    const borrowDate = new Date(loan.date).toLocaleDateString('zh-CN', { 
+        year: 'numeric', 
+        month: '2-digit', 
+        day: '2-digit' 
+    });
+    
+    const message = `【借款提醒】
+尊敬的用户，您于${borrowDate}借款¥${loan.amount.toLocaleString()}已到期，剩余应还金额¥${loan.remainingAmount.toFixed(2)}。
+
+请尽快还款，避免逾期影响信用。
+点击查看详情并还款。
+
+- 微信支付`;
+    
+    // 发送到信息App（短信形式）
+    await sendSystemSMS(loan.userId, message, '微信支付');
+    
+    console.log(`[第一次提醒] 已发送短信给用户 ${user.name}`);
+}
+
+// 第二次提醒：发短信给所有好友
+async function sendSecondReminder(loan) {
+    if (!loan.userId) return;
+    
+    const user = await db.characters.get(parseInt(loan.userId));
+    if (!user) return;
+    
+    const overdueHours = Math.floor((Date.now() - loan.dueTime) / (60 * 60 * 1000));
+    
+    const message = `【逾期提醒】${user.name}在微信借款¥${loan.amount.toLocaleString()}已逾期${overdueHours}小时未还，剩余¥${loan.remainingAmount.toFixed(2)}，请提醒TA尽快还款。`;
+    
+    // 获取所有好友列表
+    const friends = await getAllFriends(loan.userId);
+    
+    // 发送给每个好友（短信形式）
+    for (let friend of friends) {
+        if (friend.type === 'local') {
+            // 本地角色：发送短信到信息App
+            const char = await db.characters.get(friend.id);
+            if (char && char.linked_user_id) {
+                // 如果角色关联了User，发送短信给该User
+                await sendSystemSMS(char.linked_user_id, message, '微信支付');
+                console.log(`[第二次提醒] 已发送短信给角色 ${friend.name} 关联的User`);
+            }
+            // 同时添加到AI上下文提示
+            await addLoanReminderToCharContext(friend.id, message, user.name);
+        } else if (friend.type === 'online') {
+            // 联机好友：发送到短信系统
+            await sendSMSToOnlineFriend(friend.id, message);
+        }
+    }
+    
+    console.log(`[第二次提醒] 已发送短信给 ${friends.length} 位好友`);
+}
+
+// 获取所有好友（包括本地角色和联机好友）
+async function getAllFriends(userId) {
+    const friends = [];
+    
+    // 1. 获取本地角色好友
+    const allChars = await db.characters.toArray();
+    for (let char of allChars) {
+        // 排除User类型和自己
+        if (char.type === 'User' || char.id === parseInt(userId)) continue;
+        friends.push({
+            id: char.id,
+            name: char.name,
+            type: 'local'
+        });
+    }
+    
+    // 2. 获取联机好友（如果有联机功能）
+    try {
+        // 从localStorage获取联机好友列表
+        const onlineFriends = JSON.parse(localStorage.getItem('onlineFriends') || '[]');
+        for (let friend of onlineFriends) {
+            if (friend.id && friend.id !== userId) {
+                friends.push({
+                    id: friend.id,
+                    name: friend.name || '联机好友',
+                    type: 'online'
+                });
+            }
+        }
+    } catch (e) {
+        console.warn('[获取联机好友失败]', e);
+    }
+    
+    return friends;
+}
+
+// 添加借款提醒到角色AI上下文
+async function addLoanReminderToCharContext(charId, message, borrowerName) {
+    const char = await db.characters.get(charId);
+    if (!char) return;
+    
+    // 初始化 loanReminders 字段
+    if (!char.loanReminders) {
+        char.loanReminders = [];
+    }
+    
+    // 添加提醒记录
+    char.loanReminders.push({
+        message: message,
+        borrowerName: borrowerName,
+        timestamp: Date.now(),
+        read: false
+    });
+    
+    // 保存到数据库
+    await db.characters.put(char);
+    
+    console.log(`[借款提醒] 已添加到角色 ${char.name} 的上下文`);
+}
+
+// 发送短信给联机好友
+async function sendSMSToOnlineFriend(friendId, message) {
+    console.log(`[发送短信给联机好友] ${friendId}`);
+    
+    // 如果是本地用户（有accountId），也发送短信
+    if (friendId) {
+        await sendSystemSMS(friendId, message, '微信支付');
+    }
+    
+    // 同时保存到联机待发送队列（如果有联机系统）
+    const smsQueue = JSON.parse(localStorage.getItem('onlineSMSQueue') || '[]');
+    smsQueue.push({
+        to: friendId,
+        message: message,
+        timestamp: Date.now(),
+        type: 'loan_reminder'
+    });
+    localStorage.setItem('onlineSMSQueue', JSON.stringify(smsQueue));
+    
+    console.log(`[借款提醒] 已发送短信给好友 ${friendId}`);
+}
+
+// 发送系统短信（到信息App）
+async function sendSystemSMS(userId, message, senderName = '系统通知') {
+    console.log(`[发送短信] 给用户 ${userId}，发送者：${senderName}`);
+    
+    const accountId = String(userId);
+    
+    // 添加到 Dexie 数据库
+    await db.sms_messages.add({
+        accountId: accountId,
+        charId: null, // 系统消息没有角色ID
+        type: 'received',  // 接收的消息
+        sender: senderName,
+        number: senderName,
+        content: message,
+        time: Date.now(),
+        read: false
+    });
+    
+    console.log(`[发送短信] ✅ 短信已添加到数据库`);
+    
+    // 刷新主页面的消息列表
+    if (typeof renderMessageList === 'function') {
+        await renderMessageList();
+        console.log(`[发送短信] ✅ 消息列表已刷新`);
+    }
+}
+
+// 启动定时检查（每分钟检查一次）
+let loanCheckInterval = null;
+
+function startLoanReminderSystem() {
+    // 清除旧的定时器
+    if (loanCheckInterval) {
+        clearInterval(loanCheckInterval);
+    }
+    
+    // 立即执行一次检查
+    checkOverdueLoans();
+    
+    // 每分钟检查一次
+    loanCheckInterval = setInterval(() => {
+        checkOverdueLoans();
+    }, 60 * 1000); // 60秒
+    
+    console.log('[借款提醒系统] 已启动，每分钟检查一次');
+}
+
+// 页面加载时启动
+if (typeof window !== 'undefined') {
+    // 等待DOM加载完成后启动
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', startLoanReminderSystem);
+    } else {
+        startLoanReminderSystem();
+    }
+}
+
+// =================
+// 测试功能
+// =================
+
+let testReminderClickCount = 0;
+let testLoanRecord = null;
+
+async function testLoanReminder() {
+    const statusDiv = document.getElementById('test-reminder-status');
+    
+    testReminderClickCount++;
+    
+    if (testReminderClickCount === 1) {
+        // 第一次点击：创建测试借款并发送第一次提醒
+        if (!currentMyCharId) {
+            alert('请先选择一个 User 身份');
+            testReminderClickCount = 0;
+            return;
+        }
+        
+        const user = await db.characters.get(parseInt(currentMyCharId));
+        if (!user) {
+            alert('未找到用户信息');
+            testReminderClickCount = 0;
+            return;
+        }
+        
+        // 创建一个测试借款记录
+        const now = Date.now();
+        testLoanRecord = {
+            id: now,
+            amount: 5000,
+            term: 3,
+            totalAmount: 5225,
+            monthlyPayment: 1741.67,
+            date: new Date(now - 1000).toISOString(), // 1秒前
+            dueTime: now - 1000, // 已经逾期
+            status: 'pending',
+            paidAmount: 0,
+            remainingAmount: 5225,
+            firstReminderSent: false,
+            secondReminderSent: false,
+            userId: currentMyCharId,
+            isTest: true // 标记为测试记录
+        };
+        
+        // 发送第一次提醒
+        await sendFirstReminder(testLoanRecord);
+        testLoanRecord.firstReminderSent = true;
+        
+        if (statusDiv) {
+            statusDiv.textContent = '✅ 第一次提醒已发送（短信给本人）\n再点击一次发送第二次提醒';
+            statusDiv.style.color = '#07c160';
+        }
+        
+        alert('测试：第一次提醒已发送\n\n已发送短信给借款人本人\n请查看微信消息');
+        
+    } else if (testReminderClickCount === 2) {
+        // 第二次点击：发送第二次提醒
+        if (!testLoanRecord) {
+            alert('请先点击第一次发送第一次提醒');
+            testReminderClickCount = 0;
+            return;
+        }
+        
+        // 发送第二次提醒
+        await sendSecondReminder(testLoanRecord);
+        testLoanRecord.secondReminderSent = true;
+        
+        // 获取好友数量
+        const friends = await getAllFriends(testLoanRecord.userId);
+        
+        if (statusDiv) {
+            statusDiv.textContent = `✅ 第二次提醒已发送\n已通知 ${friends.length} 位好友（本地角色 + 联机好友）`;
+            statusDiv.style.color = '#07c160';
+        }
+        
+        alert(`测试：第二次提醒已发送\n\n已发送给 ${friends.length} 位好友\n\n- 本地角色：会在聊天时收到上下文提示\n- 联机好友：会收到短信\n\n再次点击可重置测试`);
+        
+    } else {
+        // 第三次点击：重置
+        testReminderClickCount = 0;
+        testLoanRecord = null;
+        
+        if (statusDiv) {
+            statusDiv.textContent = '已重置，点击开始新的测试';
+            statusDiv.style.color = '#999';
+        }
+        
+        alert('测试已重置\n\n点击按钮开始新的测试');
+    }
+}
+
+window.testLoanReminder = testLoanReminder;
+
+// =================
+// 刮刮乐功能
+// =================
+
+const SCRATCH_CARD_PRICE = 10; // 每张刮刮乐价格
+let currentScratchCard = null; // 当前刮刮乐数据
+let isScratching = false; // 是否正在刮奖
+let scratchProgress = 0; // 刮开进度 (0-100)
+
+// 显示刮刮乐页面
+async function showScratchCardPage() {
+    const page = document.getElementById('scratch-card-page');
+    page.style.display = 'flex';
+    page.offsetHeight;
+    page.classList.add('slide-in');
+    
+    // 更新余额显示
+    await updateScratchBalance();
+    
+    // 重置刮刮乐状态
+    resetScratchCard();
+    
+    // 加载历史记录
+    loadScratchHistory();
+}
+
+// 隐藏刮刮乐页面
+function hideScratchCardPage() {
+    const page = document.getElementById('scratch-card-page');
+    page.classList.remove('slide-in');
+    setTimeout(() => {
+        page.style.display = 'none';
+    }, 300);
+}
+
+// 更新余额显示
+async function updateScratchBalance() {
+    if (!currentMyCharId) {
+        document.getElementById('scratch-current-balance').textContent = '¥0.00';
+        return;
+    }
+    
+    const user = await db.characters.get(parseInt(currentMyCharId));
+    const balance = user?.identity?.balance || 0;
+    document.getElementById('scratch-current-balance').textContent = `¥${parseFloat(balance).toFixed(2)}`;
+    
+    // 更新购买按钮状态
+    const buyBtn = document.getElementById('scratch-buy-btn');
+    if (parseFloat(balance) < SCRATCH_CARD_PRICE) {
+        buyBtn.disabled = true;
+        buyBtn.querySelector('#scratch-buy-text').textContent = `余额不足 (需要 ¥${SCRATCH_CARD_PRICE})`;
+    } else {
+        buyBtn.disabled = false;
+        buyBtn.querySelector('#scratch-buy-text').textContent = `购买刮刮乐 (¥${SCRATCH_CARD_PRICE})`;
+    }
+}
+
+// 重置刮刮乐
+function resetScratchCard() {
+    currentScratchCard = null;
+    isScratching = false;
+    scratchProgress = 0;
+    
+    const cover = document.getElementById('scratch-cover');
+    const content = document.getElementById('scratch-content');
+    const resultIcon = document.getElementById('scratch-result-icon');
+    const canvas = cover.querySelector('canvas');
+    
+    // 清除canvas
+    if (canvas) {
+        canvas.remove();
+    }
+    
+    cover.classList.remove('scratched');
+    cover.style.opacity = '1';
+    cover.style.pointerEvents = 'auto';
+    
+    // 重置图标显示
+    if (resultIcon) {
+        resultIcon.style.display = 'none';
+        resultIcon.textContent = '';
+    }
+    
+    // 隐藏内容
+    if (content) {
+        content.style.display = 'none';
+    }
+}
+
+// 购买刮刮乐
+async function buyScratchCard() {
+    if (!currentMyCharId) {
+        alert('请先选择一个 User 身份');
+        return;
+    }
+    
+    const user = await db.characters.get(parseInt(currentMyCharId));
+    if (!user) {
+        alert('未找到用户信息');
+        return;
+    }
+    
+    let userBalance = parseFloat(user.identity?.balance || 0);
+    
+    // 检查余额
+    if (userBalance < SCRATCH_CARD_PRICE) {
+        alert(`余额不足！\n当前余额：¥${userBalance.toFixed(2)}\n需要：¥${SCRATCH_CARD_PRICE}`);
+        return;
+    }
+    
+    // 扣款
+    userBalance = userBalance - SCRATCH_CARD_PRICE;
+    if (!user.identity) user.identity = {};
+    user.identity.balance = userBalance.toFixed(2);
+    await db.characters.put(user);
+    
+    // 更新余额显示
+    await updateScratchBalance();
+    await updateBalancePageDisplay();
+    await updateWalletBalanceDisplay();
+    
+    // 生成刮刮乐结果
+    const prize = generateScratchPrize();
+    currentScratchCard = {
+        prize: prize,
+        cost: SCRATCH_CARD_PRICE,
+        time: Date.now()
+    };
+    
+    // 显示刮刮乐
+    showScratchCard(prize);
+    
+    // 初始化刮奖交互
+    initScratchInteraction();
+}
+
+// 生成中奖金额（概率分布）
+function generateScratchPrize() {
+    const rand = Math.random();
+    
+    // 概率分布：
+    // 80% - 中奖 (¥5-¥10)
+    // 20% - 未中奖 (¥0)
+    
+    if (rand < 0.8) {
+        // 80%概率中奖，金额在5~10元之间
+        return Math.floor(Math.random() * 6) + 5; // ¥5-¥10
+    } else {
+        return 0; // 20%概率未中奖
+    }
+}
+
+// 显示刮刮乐
+function showScratchCard(prize) {
+    const cover = document.getElementById('scratch-cover');
+    const content = document.getElementById('scratch-content');
+    const resultIcon = document.getElementById('scratch-result-icon');
+    const resultText = document.getElementById('scratch-result-text');
+    const resultAmount = document.getElementById('scratch-result-amount');
+    
+    // 显示内容层
+    content.style.display = 'flex';
+    
+    // 设置结果
+    if (prize === 0) {
+        resultIcon.textContent = '';
+        resultIcon.style.display = 'none';
+        resultText.textContent = '很遗憾，未中奖';
+        resultAmount.textContent = '¥0';
+        resultAmount.style.color = '#999';
+    } else {
+        resultIcon.textContent = '';
+        resultIcon.style.display = 'none';
+        resultText.textContent = '恭喜中奖';
+        resultAmount.textContent = `¥${prize}`;
+        resultAmount.style.color = '#ffb6c1';
+    }
+    
+    // 重置覆盖层
+    cover.style.opacity = '1';
+    cover.style.pointerEvents = 'auto';
+    cover.classList.remove('scratched');
+    scratchProgress = 0;
+}
+
+// 初始化刮奖交互
+function initScratchInteraction() {
+    const cover = document.getElementById('scratch-cover');
+    const card = document.getElementById('scratch-card');
+    
+    // 清除旧的canvas
+    const oldCanvas = cover.querySelector('canvas');
+    if (oldCanvas) {
+        oldCanvas.remove();
+    }
+    
+    // 创建canvas用于刮奖效果
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const rect = card.getBoundingClientRect();
+    
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+    canvas.style.position = 'absolute';
+    canvas.style.top = '0';
+    canvas.style.left = '0';
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    canvas.style.zIndex = '3';
+    canvas.style.mixBlendMode = 'destination-out';
+    
+    // 初始化canvas为不透明
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    cover.appendChild(canvas);
+    
+    let isDrawing = false;
+    let lastX = 0;
+    let lastY = 0;
+    
+    // 获取坐标
+    function getCoordinates(e) {
+        const rect = card.getBoundingClientRect();
+        if (e.touches) {
+            return {
+                x: e.touches[0].clientX - rect.left,
+                y: e.touches[0].clientY - rect.top
+            };
+        } else {
+            return {
+                x: e.offsetX,
+                y: e.offsetY
+            };
+        }
+    }
+    
+    // 绘制刮痕
+    function drawScratch(x, y) {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.beginPath();
+        ctx.arc(x, y, 25, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 如果起点和终点都有，画一条线
+        if (lastX > 0 && lastY > 0) {
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+            ctx.lineTo(x, y);
+            ctx.lineWidth = 50;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = 'rgba(0,0,0,1)';
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.stroke();
+        }
+        
+        lastX = x;
+        lastY = y;
+        
+        // 计算刮开进度（使用采样方式提高性能）
+        if (Math.random() < 0.1) { // 只采样10%的检查，减少性能消耗
+            const sampleSize = 100;
+            const stepX = Math.floor(canvas.width / sampleSize);
+            const stepY = Math.floor(canvas.height / sampleSize);
+            let transparentCount = 0;
+            
+            for (let sy = 0; sy < canvas.height; sy += stepY) {
+                for (let sx = 0; sx < canvas.width; sx += stepX) {
+                    const imageData = ctx.getImageData(sx, sy, 1, 1);
+                    if (imageData.data[3] === 0) { // alpha为0表示透明
+                        transparentCount++;
+                    }
+                }
+            }
+            
+            scratchProgress = (transparentCount / (sampleSize * sampleSize)) * 100;
+            
+            // 如果刮开超过30%，自动完成
+            if (scratchProgress >= 30) {
+                finishScratching();
+            }
+        } else {
+            // 简单估算：每次绘制增加一点进度
+            scratchProgress = Math.min(scratchProgress + 0.5, 100);
+            if (scratchProgress >= 30) {
+                finishScratching();
+            }
+        }
+    }
+    
+    // 鼠标事件
+    card.onmousedown = (e) => {
+        if (currentScratchCard && !isScratching) {
+            isDrawing = true;
+            const coords = getCoordinates(e);
+            lastX = coords.x;
+            lastY = coords.y;
+            drawScratch(coords.x, coords.y);
+        }
+    };
+    
+    card.onmousemove = (e) => {
+        if (isDrawing && currentScratchCard && !isScratching) {
+            const coords = getCoordinates(e);
+            drawScratch(coords.x, coords.y);
+        }
+    };
+    
+    card.onmouseup = () => {
+        isDrawing = false;
+        lastX = 0;
+        lastY = 0;
+    };
+    
+    card.onmouseleave = () => {
+        isDrawing = false;
+        lastX = 0;
+        lastY = 0;
+    };
+    
+    // 触摸事件
+    card.ontouchstart = (e) => {
+        if (currentScratchCard && !isScratching) {
+            e.preventDefault();
+            isDrawing = true;
+            const coords = getCoordinates(e);
+            lastX = coords.x;
+            lastY = coords.y;
+            drawScratch(coords.x, coords.y);
+        }
+    };
+    
+    card.ontouchmove = (e) => {
+        if (isDrawing && currentScratchCard && !isScratching) {
+            e.preventDefault();
+            const coords = getCoordinates(e);
+            drawScratch(coords.x, coords.y);
+        }
+    };
+    
+    card.ontouchend = () => {
+        isDrawing = false;
+        lastX = 0;
+        lastY = 0;
+    };
+}
+
+// 刮奖操作（已废弃，使用canvas实现）
+function scratchAt(x, y) {
+    // 此函数已被canvas实现替代
+}
+
+// 完成刮奖
+async function finishScratching() {
+    if (isScratching || !currentScratchCard) return;
+    isScratching = true;
+    
+    const cover = document.getElementById('scratch-cover');
+    const canvas = cover.querySelector('canvas');
+    const content = document.getElementById('scratch-content');
+    
+    // 完全清除覆盖层
+    if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    
+    // 确保内容层显示
+    if (content) {
+        content.style.display = 'flex';
+    }
+    
+    // 延迟显示完成效果
+    setTimeout(() => {
+        cover.classList.add('scratched');
+        cover.style.opacity = '0';
+        cover.style.pointerEvents = 'none';
+        
+        // 确保金额显示正确
+        const resultAmount = document.getElementById('scratch-result-amount');
+        const resultText = document.getElementById('scratch-result-text');
+        const resultIcon = document.getElementById('scratch-result-icon');
+        
+        if (currentScratchCard) {
+            if (currentScratchCard.prize === 0) {
+                if (resultIcon) {
+                    resultIcon.textContent = '';
+                    resultIcon.style.display = 'none';
+                }
+                if (resultText) resultText.textContent = '很遗憾，未中奖';
+                if (resultAmount) {
+                    resultAmount.textContent = '¥0';
+                    resultAmount.style.color = '#999';
+                }
+            } else {
+                if (resultIcon) {
+                    resultIcon.textContent = '';
+                    resultIcon.style.display = 'none';
+                }
+                if (resultText) resultText.textContent = '恭喜中奖';
+                if (resultAmount) {
+                    resultAmount.textContent = `¥${currentScratchCard.prize}`;
+                    resultAmount.style.color = '#ffb6c1';
+                }
+            }
+        }
+        
+        // 如果有中奖，添加到余额
+        if (currentScratchCard && currentScratchCard.prize > 0) {
+            addScratchPrize(currentScratchCard.prize);
+        }
+        
+        // 保存记录
+        saveScratchRecord(currentScratchCard);
+        
+        // 重新加载历史
+        loadScratchHistory();
+        
+        // 重置状态，准备下一张
+        setTimeout(() => {
+            isScratching = false;
+            currentScratchCard = null;
+            scratchProgress = 0;
+        }, 2000);
+    }, 300);
+}
+
+// 添加中奖金额到余额
+async function addScratchPrize(amount) {
+    if (!currentMyCharId) return;
+    
+    const user = await db.characters.get(parseInt(currentMyCharId));
+    if (!user) return;
+    
+    let userBalance = parseFloat(user.identity?.balance || 0);
+    userBalance = userBalance + amount;
+    
+    if (!user.identity) user.identity = {};
+    user.identity.balance = userBalance.toFixed(2);
+    await db.characters.put(user);
+    
+    // 更新显示
+    await updateScratchBalance();
+    await updateBalancePageDisplay();
+    await updateWalletBalanceDisplay();
+    
+    // 显示中奖提示
+    setTimeout(() => {
+        alert(`恭喜中奖\n\n奖金：¥${amount}\n已添加到钱包余额`);
+    }, 500);
+}
+
+// 保存刮刮乐记录
+function saveScratchRecord(record) {
+    let history = JSON.parse(localStorage.getItem('scratchHistory') || '[]');
+    history.unshift({
+        prize: record.prize,
+        cost: record.cost,
+        time: record.time,
+        net: record.prize - record.cost // 净收益
+    });
+    // 只保留最近50条记录
+    if (history.length > 50) {
+        history = history.slice(0, 50);
+    }
+    localStorage.setItem('scratchHistory', JSON.stringify(history));
+}
+
+// 加载历史记录
+function loadScratchHistory() {
+    const historyList = document.getElementById('scratch-history-list');
+    const history = JSON.parse(localStorage.getItem('scratchHistory') || '[]');
+    
+    if (history.length === 0) {
+        historyList.innerHTML = '<div class="loan-empty-state">暂无中奖记录</div>';
+        return;
+    }
+    
+    historyList.innerHTML = history.map(record => {
+        const date = new Date(record.time);
+        const dateStr = date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+        const timeStr = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+        const netClass = record.net >= 0 ? 'profit' : 'loss';
+        const netText = record.net >= 0 ? `+¥${record.net}` : `¥${record.net}`;
+        
+        return `
+            <div class="loan-history-item">
+                <div class="loan-history-info">
+                    <div class="loan-history-amount">${record.prize > 0 ? `中奖 ¥${record.prize}` : '未中奖'}</div>
+                    <div class="loan-history-date">${dateStr} ${timeStr} · 花费 ¥${record.cost}</div>
+                </div>
+                <div class="loan-history-status ${netClass}">${netText}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+// 导出函数
+window.showScratchCardPage = showScratchCardPage;
+window.hideScratchCardPage = hideScratchCardPage;
+window.buyScratchCard = buyScratchCard;
 window.selectRechargeAmount = selectRechargeAmount;
 window.submitRecharge = submitRecharge;
 
