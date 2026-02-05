@@ -5239,6 +5239,14 @@ ${loreContext}
 回复简短自然，像真实短信一样。
 请注意：不要重复输出名字前缀，直接输出回复内容。
 
+【特别提示】
+由于对方可能暂时没有回复你之前的消息，你需要主动发送新的短信内容。这可能是：
+- 补充说明之前的话题
+- 主动分享新的信息或想法
+- 询问对方的情况或状态
+- 根据你的性格和当前情境，自然地推进对话
+请确保每次生成的内容都是**全新的**，不要重复你之前已经发送过的消息。
+
 【重要回复规则 - 必须严格遵守】
 1. **必须**模拟短信连发消息的习惯：请生成 ${targetChar.reply_min_count || 1} 到 ${targetChar.reply_max_count || 3} 条短消息${(targetChar.reply_min_count || 1) === 1 ? '' : '，不能只发一条'}！
 2. **必须**使用分隔符 "|||" 来隔开每一条消息。
@@ -5246,6 +5254,7 @@ ${loreContext}
 4. 每条消息要简短，5-15个字最佳，像真实短信聊天一样分多条发送。
 5. 严禁只发送标点符号。每一条消息都必须有实际文字内容。
 6. 语气要自然、口语化，符合人设。
+7. ⚠️ **严禁重复之前已经发送过的内容**！这是一个新的回复请求，你需要根据当前的对话情境，生成**全新的、不同的**回复内容。请查看对话历史，确保你的回复是对话的自然延续，而不是重复之前说过的话。
 
 请以JSON格式返回：
 {
@@ -15451,7 +15460,7 @@ ${groupContextStr}
             await checkBlockedCharactersContact(ms, unitText);
             
             // 3. 触发 AI 回复，带上时间流逝的系统提示
-            await triggerAiReply(`时间过去了 ${unitText}`);
+            await triggerAiReply(`时间过去了 ${unitText}。这段时间里可能发生了一些变化。请根据你的人设和当前对话情境，考虑这段时间的流逝，主动推进对话、分享新的内容、提出新的话题，或者回应之前未完成的对话。不要简单重复之前说过的话，而是让对话自然地继续发展下去。`);
         }
 
         // 检查被拉黑的角色是否会联系用户（使用新版本逻辑）
@@ -16290,7 +16299,7 @@ ${virtualTimeStr}${loanReminderText}`;
 
                 // 如果有额外系统信息（如时间流逝），插入到 Prompt
                 if (additionalSystemInfo) {
-                    systemPrompt += `\n\n【系统提示】\n${additionalSystemInfo}\n请根据这个情况（例如时间流逝后的变化、刚刚发生的事件）进行回复。`;
+                    systemPrompt += `\n\n【系统提示】\n${additionalSystemInfo}\n请根据这个情况（例如时间流逝后的变化、刚刚发生的事件）进行回复。这是一个新的回复请求，你需要生成**全新的内容**，考虑时间的流逝，推进对话的发展，不要重复之前已经说过的话。`;
                 }
 
                 systemPrompt += `
@@ -16456,6 +16465,7 @@ ${loreContext}
 - **情绪外显**：开心就"哈哈哈"，惊讶就"天哪！"，不要只是平静叙述
 - **灵活自然**：不要每次都是相似的结构和套路，人是多变的
 - **避免逗号**：想停顿就发下一条，别用逗号连接。真人在微信上很少用逗号，都是分条发
+- **⚠️ 避免重复**：不要重复你之前已经说过的话。每次回复都要是对话的自然延续和发展，带来新的内容和话题推进
   
 ### 让对话延续的小技巧
 
@@ -33795,36 +33805,36 @@ let emeiData = {
     selectedPaymentMethod: null // 选中的支付方式
 };
 
-// 默认店铺数据
+// 默认店铺数据（真实美团风格）
 const defaultStores = [
     {
         id: 1,
-        name: '花间小筑',
-        description: '精致简餐 | 浪漫下午茶',
-        avatar: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ffe4e9" width="100" height="100"/><text x="50" y="55" font-size="36" text-anchor="middle" fill="%23ff6b9d">🌸</text></svg>',
-        sales: 999,
+        name: '肯德基',
+        description: '炸鸡汉堡 | 配送到家',
+        avatar: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect fill=%22%23E4002B%22 width=%22100%22 height=%22100%22/%3E%3Ctext x=%2250%22 y=%2265%22 font-size=%2240%22 text-anchor=%22middle%22 fill=%22%23fff%22%3EKFC%3C/text%3E%3C/svg%3E',
+        sales: 5234,
         menu: [
-            { id: 101, name: '樱花拿铁', price: 28, image: '☕' },
-            { id: 102, name: '抹茶千层', price: 32, image: '🍰' },
-            { id: 103, name: '草莓奶昔', price: 25, image: '🥤' },
-            { id: 104, name: '芝士蛋糕', price: 35, image: '🧀' },
-            { id: 105, name: '水果沙拉', price: 22, image: '🥗' },
-            { id: 106, name: '法式可颂', price: 18, image: '🥐' }
+            { id: 101, name: '香辣鸡腿堡', price: 18, image: '🍔' },
+            { id: 102, name: '原味鸡块', price: 12, image: '🍗' },
+            { id: 103, name: '薯条（大）', price: 13, image: '🍟' },
+            { id: 104, name: '蛋挞（2个）', price: 10, image: '🥧' },
+            { id: 105, name: '可乐（大）', price: 9, image: '🥤' },
+            { id: 106, name: '鸡米花', price: 11, image: '🍿' }
         ]
     },
     {
         id: 2,
-        name: '星光私厨',
-        description: '精品料理 | 品质生活',
-        avatar: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23f5f0ff" width="100" height="100"/><text x="50" y="55" font-size="36" text-anchor="middle" fill="%239370db">⭐</text></svg>',
-        sales: 888,
+        name: '麦当劳',
+        description: '汉堡薯条 | 24小时营业',
+        avatar: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect fill=%22%23FFC72C%22 width=%22100%22 height=%22100%22/%3E%3Ctext x=%2250%22 y=%2265%22 font-size=%2235%22 text-anchor=%22middle%22 fill=%22%23DA020E%22%3EM%3C/text%3E%3C/svg%3E',
+        sales: 4892,
         menu: [
-            { id: 201, name: '牛排套餐', price: 88, image: '🥩' },
-            { id: 202, name: '鲜虾意面', price: 58, image: '🍝' },
-            { id: 203, name: '烤三文鱼', price: 68, image: '🐟' },
-            { id: 204, name: '法式蜗牛', price: 48, image: '🐌' },
-            { id: 205, name: '海鲜拼盘', price: 98, image: '🦞' },
-            { id: 206, name: '红酒炖牛肉', price: 78, image: '🍷' }
+            { id: 201, name: '巨无霸', price: 25, image: '🍔' },
+            { id: 202, name: '麦辣鸡腿堡', price: 19, image: '🍔' },
+            { id: 203, name: '麦乐鸡块（10块）', price: 20, image: '🍗' },
+            { id: 204, name: '薯条（大）', price: 13, image: '🍟' },
+            { id: 205, name: '麦旋风', price: 15, image: '🍦' },
+            { id: 206, name: '板烧鸡腿堡', price: 22, image: '🍔' }
         ]
     }
 ];
@@ -33832,11 +33842,11 @@ const defaultStores = [
 // 显示饿美了页面
 async function showEmeiPage() {
     const page = document.getElementById('emei-page');
-    const serviceSubPage = document.getElementById('service-sub-page');
     
     if (page) {
-        page.style.display = 'block';
-        if (serviceSubPage) serviceSubPage.style.display = 'none';
+        page.style.display = 'flex';
+        page.offsetHeight;
+        page.classList.add('active');
         
         // 检查是否需要重置每日领取次数
         resetDailyCouponCount();
@@ -33849,15 +33859,22 @@ async function showEmeiPage() {
 // 隐藏饿美了页面
 function hideEmeiPage() {
     const page = document.getElementById('emei-page');
-    const serviceSubPage = document.getElementById('service-sub-page');
     
-    if (page) page.style.display = 'none';
-    if (serviceSubPage) serviceSubPage.style.display = 'block';
+    if (page) {
+        page.classList.remove('active');
+        setTimeout(() => {
+            page.style.display = 'none';
+        }, 350);
+    }
     
     // 返回主视图
-    document.getElementById('emei-main-view').style.display = 'block';
-    document.getElementById('emei-store-detail-view').style.display = 'none';
-    document.getElementById('emei-checkout-view').style.display = 'none';
+    const mainView = document.getElementById('emei-main-view');
+    const storeView = document.getElementById('emei-store-detail-view');
+    const checkoutView = document.getElementById('emei-checkout-view');
+    
+    if (mainView) mainView.style.display = 'block';
+    if (storeView) storeView.style.display = 'none';
+    if (checkoutView) checkoutView.style.display = 'none';
 }
 
 // 重置每日优惠券领取次数
@@ -33957,7 +33974,7 @@ function renderStoreList() {
     container.innerHTML = defaultStores.map(store => `
         <div onclick="openEmeiStore(${store.id})" style="background: #fff; border-radius: 16px; padding: 16px; margin-bottom: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.04); cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 16px rgba(0,0,0,0.08)'" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 12px rgba(0,0,0,0.04)'">
             <div style="display: flex; gap: 12px;">
-                <div style="width: 80px; height: 80px; border-radius: 12px; background-image: url('${store.avatar}'); background-size: cover; background-color: #f5f5f5; flex-shrink: 0;"></div>
+                <div style="width: 80px; height: 80px; border-radius: 12px; background-image: url(${store.avatar}); background-size: cover; background-color: #f5f5f5; flex-shrink: 0;"></div>
                 <div style="flex: 1;">
                     <div style="font-size: 16px; font-weight: 600; color: #333; margin-bottom: 4px;">${store.name}</div>
                     <div style="font-size: 12px; color: #999; margin-bottom: 8px;">${store.description}</div>
@@ -33982,14 +33999,14 @@ async function openEmeiStore(storeId) {
     
     // 切换视图
     document.getElementById('emei-main-view').style.display = 'none';
-    document.getElementById('emei-store-detail-view').style.display = 'block';
+    document.getElementById('emei-store-detail-view').style.display = 'flex';
     
     // 渲染店铺信息
     document.getElementById('emei-store-name').innerText = store.name;
     document.getElementById('emei-store-title').innerText = store.name;
     document.getElementById('emei-store-desc').innerText = store.description;
     document.getElementById('emei-store-sales').innerText = store.sales + '+';
-    document.getElementById('emei-store-avatar').style.backgroundImage = `url('${store.avatar}')`;
+    document.getElementById('emei-store-avatar').style.backgroundImage = `url(${store.avatar})`;
     
     // 渲染菜单
     renderEmeiMenu();
@@ -34003,8 +34020,11 @@ async function openEmeiStore(storeId) {
 
 // 返回主页
 function backToEmeiMain() {
-    document.getElementById('emei-main-view').style.display = 'block';
-    document.getElementById('emei-store-detail-view').style.display = 'none';
+    const mainView = document.getElementById('emei-main-view');
+    const storeView = document.getElementById('emei-store-detail-view');
+    
+    if (mainView) mainView.style.display = 'flex';
+    if (storeView) storeView.style.display = 'none';
     emeiData.cart = [];
 }
 
@@ -34034,19 +34054,41 @@ function renderEmeiMenu() {
 // 渲染收货人选项
 async function renderRecipientOptions() {
     const select = document.getElementById('emei-recipient-select');
-    if (!select) return;
+    if (!select) {
+        console.warn('emei-recipient-select 元素不存在');
+        return;
+    }
     
-    // 获取所有角色
-    const characters = await db.characters.toArray();
-    const friends = characters.filter(c => ['friend', 'lover', 'family'].includes(c.type));
-    
-    let html = '<option value="self">我自己</option>';
-    friends.forEach(char => {
-        html += `<option value="${char.id}">${char.name}</option>`;
-    });
-    
-    select.innerHTML = html;
-    select.value = emeiData.selectedRecipient;
+    try {
+        // 获取所有角色
+        const characters = await db.characters.toArray();
+        console.log('数据库中所有角色:', characters.length);
+        
+        // 过滤掉系统角色和在线好友，只显示可以配送的角色
+        const availableChars = characters.filter(c => {
+            // 排除系统角色、在线好友等
+            if (c.type === 'system' || c.type === 'online_friend') return false;
+            // 只显示有名字的角色
+            if (!c.name || c.name.trim() === '') return false;
+            return true;
+        });
+        
+        console.log('可用角色:', availableChars.length, availableChars.map(c => c.name));
+        
+        let html = '<option value="self">我自己</option>';
+        availableChars.forEach(char => {
+            const safeName = (char.name || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            html += `<option value="${char.id}">${safeName}</option>`;
+        });
+        
+        select.innerHTML = html;
+        select.value = emeiData.selectedRecipient;
+        
+        console.log('已加载', availableChars.length, '个角色到配送列表');
+    } catch (err) {
+        console.error('加载角色列表失败:', err);
+        select.innerHTML = '<option value="self">我自己</option>';
+    }
 }
 
 // 增加商品数量
@@ -34098,6 +34140,11 @@ function updateEmeiCart() {
     if (totalEl) totalEl.innerText = total.toFixed(2);
 }
 
+// 更新收货人
+function updateEmeiRecipient(value) {
+    emeiData.selectedRecipient = value;
+}
+
 
 // 显示结算页面
 async function showEmeiCheckout() {
@@ -34111,7 +34158,7 @@ async function showEmeiCheckout() {
     
     // 切换视图
     document.getElementById('emei-store-detail-view').style.display = 'none';
-    document.getElementById('emei-checkout-view').style.display = 'block';
+    document.getElementById('emei-checkout-view').style.display = 'flex';
     
     // 渲染收货人信息
     await renderCheckoutRecipient();
@@ -34128,8 +34175,11 @@ async function showEmeiCheckout() {
 
 // 返回店铺页面
 function backToEmeiStore() {
-    document.getElementById('emei-store-detail-view').style.display = 'block';
-    document.getElementById('emei-checkout-view').style.display = 'none';
+    const storeView = document.getElementById('emei-store-detail-view');
+    const checkoutView = document.getElementById('emei-checkout-view');
+    
+    if (storeView) storeView.style.display = 'flex';
+    if (checkoutView) checkoutView.style.display = 'none';
 }
 
 // 渲染收货人信息
@@ -34398,37 +34448,88 @@ async function payWithFamilyCard(amount) {
 
 // 申请代付
 async function requestPayment(amount) {
-    if (emeiData.selectedRecipient === 'self') {
-        alert('给自己点单无法申请代付哦');
+    // 获取代付对象（可以选择任意角色）
+    const allCharacters = await db.characters.toArray();
+    const availableChars = allCharacters.filter(c => {
+        if (c.type === 'system' || c.type === 'online_friend') return false;
+        if (!c.name || c.name.trim() === '') return false;
+        return true;
+    });
+    
+    if (availableChars.length === 0) {
+        alert('没有可选择的代付对象');
         return;
     }
     
-    // 获取收货人信息
-    const recipient = await db.characters.get(parseInt(emeiData.selectedRecipient));
+    // 弹出选择代付对象的弹窗
+    const modal = document.createElement('div');
+    modal.id = 'emei-payment-request-modal';
+    modal.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;';
+    
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:16px; padding:20px; width:80%; max-width:350px; max-height:60vh; display:flex; flex-direction:column;">
+            <h3 style="margin:0 0 16px 0; text-align:center; font-size:16px; font-weight:600;">选择代付对象</h3>
+            <div style="flex:1; overflow-y:auto; margin-bottom:16px;">
+                ${availableChars.map(char => `
+                    <div onclick="selectPaymentRequestTarget(${char.id}, '${char.name.replace(/'/g, "\\'")}')" style="display:flex; align-items:center; padding:12px; border-bottom:1px solid #f5f5f5; cursor:pointer; transition:background 0.2s;" onmouseover="this.style.background='#f8f8f8'" onmouseout="this.style.background='#fff'">
+                        <div style="width:40px; height:40px; border-radius:50%; background-image:url(${char.avatar || ''}); background-size:cover; background-color:#e0e0e0; margin-right:12px; flex-shrink:0;"></div>
+                        <span style="font-size:14px; color:#333;">${char.name}</span>
+                    </div>
+                `).join('')}
+            </div>
+            <button onclick="this.closest('#emei-payment-request-modal').remove()" style="padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:14px; cursor:pointer;">取消</button>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 选择代付对象
+async function selectPaymentRequestTarget(charId, charName) {
+    const modal = document.getElementById('emei-payment-request-modal');
+    if (modal) modal.remove();
+    
+    const recipient = await db.characters.get(charId);
     if (!recipient) {
-        alert('收货人信息不存在');
+        alert('角色信息不存在');
         return;
     }
+    
+    const subtotal = emeiData.cart.reduce((sum, item) => sum + item.price * item.count, 0);
+    const delivery = 3;
+    const discount = emeiData.selectedCoupon ? emeiData.selectedCoupon.amount : 0;
+    const total = subtotal + delivery - discount;
     
     // 发送代付请求卡片到聊天
-    await sendPaymentRequestCard(recipient, amount);
+    await sendPaymentRequestCard(recipient, total);
     
-    alert(`已向 ${recipient.name} 发送代付请求`);
+    // 获取收货人信息用于显示
+    let recipientName = '我自己';
+    if (emeiData.selectedRecipient !== 'self') {
+        const recipientChar = await db.characters.get(parseInt(emeiData.selectedRecipient));
+        if (recipientChar) recipientName = recipientChar.name;
+    }
+    
+    alert(`已向 ${charName} 发送代付请求\n订单详情：${emeiData.currentStore.name}，收货人：${recipientName}`);
     hideEmeiPage();
 }
 
 // 发送订单卡片到聊天
 async function sendEmeiOrderCard() {
-    if (!currentChatCharId && emeiData.selectedRecipient === 'self') {
-        return; // 给自己点单且没有打开聊天，不发送卡片
+    // 如果是给自己点单，且没有打开聊天，不发送卡片
+    if (emeiData.selectedRecipient === 'self' && !currentChatCharId) {
+        return;
     }
     
     const accountId = getCurrentAccountId();
-    let chatCharId = currentChatCharId;
+    let chatCharId;
     
     // 如果是给角色点单，发送到该角色的聊天
     if (emeiData.selectedRecipient !== 'self') {
         chatCharId = parseInt(emeiData.selectedRecipient);
+    } else {
+        // 给自己点单，发送到当前打开的聊天
+        chatCharId = currentChatCharId;
     }
     
     if (!chatCharId) return;
@@ -34474,12 +34575,22 @@ async function sendEmeiOrderCard() {
     // 如果当前在该聊天窗口，刷新显示
     if (currentChatCharId === chatCharId) {
         renderChatMessages();
+    } else if (emeiData.selectedRecipient !== 'self') {
+        // 给角色点单，即使没打开聊天窗口也提示用户
+        alert(`订单已发送给 ${char.name}！可以在聊天中查看订单详情。`);
     }
 }
 
 // 发送代付请求卡片
 async function sendPaymentRequestCard(recipient, amount) {
     if (!recipient) return;
+    
+    // 获取收货人信息
+    let recipientName = '我自己';
+    if (emeiData.selectedRecipient !== 'self') {
+        const recipientChar = await db.characters.get(parseInt(emeiData.selectedRecipient));
+        if (recipientChar) recipientName = recipientChar.name;
+    }
     
     const cardHtml = `
         <div style="max-width: 280px; background: linear-gradient(135deg, #fff9e6 0%, #fff5e6 100%); border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
@@ -34488,10 +34599,11 @@ async function sendPaymentRequestCard(recipient, amount) {
                 <div style="font-size: 14px; font-weight: 600; color: #333;">代付请求</div>
             </div>
             <div style="font-size: 13px; color: #666; line-height: 1.6;">
-                <div style="margin-bottom: 8px;">我在饿美了给你点了外卖，请帮忙支付~</div>
+                <div style="margin-bottom: 8px;">我在饿美了点了一份外卖，请帮忙支付~</div>
                 <div style="padding: 12px; background: rgba(255,255,255,0.8); border-radius: 8px;">
                     <div style="margin-bottom: 4px;"><span style="color: #999;">店铺：</span>${emeiData.currentStore.name}</div>
-                    <div style="margin-bottom: 8px;"><span style="color: #999;">商品：</span>${emeiData.cart.map(i => i.name).join('、')}</div>
+                    <div style="margin-bottom: 4px;"><span style="color: #999;">收货人：</span>${recipientName}</div>
+                    <div style="margin-bottom: 8px;"><span style="color: #999;">商品：</span>${emeiData.cart.map(i => `${i.name} x${i.count}`).join('、')}</div>
                     <div style="font-size: 16px; font-weight: 600; color: #ff9500;">¥${amount.toFixed(2)}</div>
                 </div>
             </div>
@@ -34530,6 +34642,7 @@ window.openEmeiStore = openEmeiStore;
 window.backToEmeiMain = backToEmeiMain;
 window.increaseEmeiItem = increaseEmeiItem;
 window.decreaseEmeiItem = decreaseEmeiItem;
+window.updateEmeiRecipient = updateEmeiRecipient;
 window.showEmeiCheckout = showEmeiCheckout;
 window.backToEmeiStore = backToEmeiStore;
 window.selectEmeiCoupon = selectEmeiCoupon;
@@ -34540,3 +34653,4 @@ window.closeEmeiPaymentModal = closeEmeiPaymentModal;
 window.selectEmeiPaymentMethod = selectEmeiPaymentMethod;
 window.confirmEmeiPayment = confirmEmeiPayment;
 window.handlePaymentRequest = handlePaymentRequest;
+window.selectPaymentRequestTarget = selectPaymentRequestTarget;
