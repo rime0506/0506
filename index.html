@@ -1042,10 +1042,13 @@
             <!-- 总结内容 -->
             <div style="margin-bottom:20px;">
                 <div style="font-size:15px; font-weight:600; color:#333; margin-bottom:12px;">📝 聊天总结</div>
+                <div id="summary-edit-hint" style="display:none; font-size:12px; color:#666; margin-bottom:8px; padding:8px 12px; background:#fff5f7; border-radius:6px; border-left:3px solid var(--ins-pink);">
+                    ✏️ 编辑模式 - 修改完成后点击右上角「保存」按钮
+                </div>
                 <div id="summary-detail-content" style="padding:16px; background:#f9f9f9; border-radius:12px; font-size:15px; color:#333; line-height:1.8; white-space:pre-wrap;">
                     加载中...
                 </div>
-                <textarea id="summary-detail-content-edit" style="display:none; width:100%; padding:16px; background:#f9f9f9; border:2px solid var(--ins-pink); border-radius:12px; font-size:15px; color:#333; line-height:1.8; min-height:200px; font-family:inherit; resize:vertical;" placeholder="编辑总结内容..."></textarea>
+                <textarea id="summary-detail-content-edit" style="display:none; width:100%; padding:16px; background:#fff; border:2px solid var(--ins-pink); border-radius:12px; font-size:15px; color:#333; line-height:1.8; min-height:200px; font-family:inherit; resize:vertical; box-sizing:border-box; outline:none; box-shadow:0 2px 8px rgba(255,182,193,0.2);" placeholder="在这里编辑总结内容..."></textarea>
             </div>
             
             <!-- 关键词/标签 -->

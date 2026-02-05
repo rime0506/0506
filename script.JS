@@ -26788,10 +26788,17 @@ let originalSummaryContent = '';
 function toggleEditSummary() {
     const contentDiv = document.getElementById('summary-detail-content');
     const contentTextarea = document.getElementById('summary-detail-content-edit');
+    const editHint = document.getElementById('summary-edit-hint');
     const editBtn = document.getElementById('summary-edit-btn');
     const saveBtn = document.getElementById('summary-save-btn');
     const cancelBtn = document.getElementById('summary-cancel-btn');
     const deleteBtn = document.getElementById('summary-delete-btn');
+    
+    if (!contentDiv || !contentTextarea) {
+        console.error('找不到总结内容元素');
+        alert('编辑功能初始化失败，请刷新页面重试');
+        return;
+    }
     
     // 保存原始内容
     originalSummaryContent = contentDiv.textContent;
@@ -26800,32 +26807,41 @@ function toggleEditSummary() {
     contentDiv.style.display = 'none';
     contentTextarea.style.display = 'block';
     contentTextarea.value = originalSummaryContent;
+    if (editHint) editHint.style.display = 'block';
     
     // 切换按钮显示
-    editBtn.style.display = 'none';
-    saveBtn.style.display = 'block';
-    cancelBtn.style.display = 'block';
-    deleteBtn.style.display = 'none';
+    if (editBtn) editBtn.style.display = 'none';
+    if (saveBtn) saveBtn.style.display = 'block';
+    if (cancelBtn) cancelBtn.style.display = 'block';
+    if (deleteBtn) deleteBtn.style.display = 'none';
+    
+    // 自动聚焦到输入框并选中全部文本（方便用户编辑）
+    setTimeout(() => {
+        contentTextarea.focus();
+        contentTextarea.select();
+    }, 100);
 }
 
 // 取消编辑总结
 function cancelEditSummary() {
     const contentDiv = document.getElementById('summary-detail-content');
     const contentTextarea = document.getElementById('summary-detail-content-edit');
+    const editHint = document.getElementById('summary-edit-hint');
     const editBtn = document.getElementById('summary-edit-btn');
     const saveBtn = document.getElementById('summary-save-btn');
     const cancelBtn = document.getElementById('summary-cancel-btn');
     const deleteBtn = document.getElementById('summary-delete-btn');
     
     // 恢复显示模式
-    contentDiv.style.display = 'block';
-    contentTextarea.style.display = 'none';
+    if (contentDiv) contentDiv.style.display = 'block';
+    if (contentTextarea) contentTextarea.style.display = 'none';
+    if (editHint) editHint.style.display = 'none';
     
     // 切换按钮显示
-    editBtn.style.display = 'block';
-    saveBtn.style.display = 'none';
-    cancelBtn.style.display = 'none';
-    deleteBtn.style.display = 'block';
+    if (editBtn) editBtn.style.display = 'block';
+    if (saveBtn) saveBtn.style.display = 'none';
+    if (cancelBtn) cancelBtn.style.display = 'none';
+    if (deleteBtn) deleteBtn.style.display = 'block';
 }
 
 // 保存总结编辑
@@ -26857,7 +26873,7 @@ async function saveSummaryEdit() {
         
         // 更新显示
         const contentDiv = document.getElementById('summary-detail-content');
-        contentDiv.textContent = newContent;
+        if (contentDiv) contentDiv.textContent = newContent;
         
         // 退出编辑模式
         cancelEditSummary();
