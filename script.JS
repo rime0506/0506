@@ -27617,6 +27617,7 @@ let onlineUserData = null;
 let onlineToken = null;
 let onlineCharacters = []; // 已上线的角色列表
 let onlineGroups = []; // 联机群聊列表
+let hasShownAuthFailedAlert = false; // 标志位：是否已经提示过认证失败（避免重连时反复弹窗）
 let currentOnlineGroupId = null; // 当前打开的联机群聊ID
 let currentOnlineGroupMessages = []; // 当前群聊消息
 let currentOnlineGroupMembers = []; // 当前群聊成员
@@ -27844,6 +27845,8 @@ async function handleOnlineMessage(data) {
             onlineUserData = data.user;
             localStorage.setItem('online_user_data', JSON.stringify(data.user));
             updateOnlineStatus();
+            // ✅ 认证成功后，重置提示标志位
+            hasShownAuthFailedAlert = false;
             console.log('[Online] 认证成功，自动注册所有角色到服务器...');
             // 先注册所有角色到服务器（不上线，仅用于搜索）
             await autoRegisterAllUserCharacters();
@@ -27859,14 +27862,24 @@ async function handleOnlineMessage(data) {
             localStorage.removeItem('online_token');
             localStorage.removeItem('online_user_data');
             updateOnlineStatus();
-            // ✅ 如果 token 过期，提示用户重新登录而不是注册
+            
+            // ✅ 避免重连时反复弹窗：只在首次失败时弹出 alert，后续只记录日志和使用 toast
             const errorMsg = data.message || '认证失败';
-            if (errorMsg.includes('过期') || errorMsg.includes('无效') || errorMsg.includes('expired') || errorMsg.includes('invalid')) {
-                alert('登录已过期，请重新登录（不要注册新账号，使用之前的用户名和密码登录）');
-                // 显示登录弹窗
-                showOnlineLoginModal();
+            if (!hasShownAuthFailedAlert) {
+                // 首次提示：使用 alert
+                hasShownAuthFailedAlert = true;
+                if (errorMsg.includes('过期') || errorMsg.includes('无效') || errorMsg.includes('expired') || errorMsg.includes('invalid')) {
+                    alert('登录已过期，请重新登录（不要注册新账号，使用之前的用户名和密码登录）');
+                    // 显示登录弹窗
+                    showOnlineLoginModal();
+                } else {
+                    alert('登录失败: ' + errorMsg);
+                }
             } else {
-                alert('登录失败: ' + errorMsg);
+                // 后续重连时：只使用静默的 toast 提示或控制台日志
+                console.log('[Online] 认证失败（已提示过）:', errorMsg);
+                // 使用非侵入式的 toast 替代 alert
+                showToast('登录已过期，请点击联机按钮重新登录');
             }
             break;
             
@@ -27876,6 +27889,8 @@ async function handleOnlineMessage(data) {
             localStorage.setItem('online_token', data.token);
             localStorage.setItem('online_user_data', JSON.stringify(data.user));
             updateOnlineStatus();
+            // ✅ 登录成功后，重置提示标志位
+            hasShownAuthFailedAlert = false;
             closeModal('online-login-modal');
             showToast('登录成功');
             console.log('[Online] 登录成功，自动注册所有角色到服务器...');
