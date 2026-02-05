@@ -1181,6 +1181,14 @@ async function handleCreateOnlineGroup(ws, data) {
     
     const { name, my_wx_account, invite_wx_accounts, my_character } = data;
     
+    console.log('[创建群聊] 收到请求:', {
+        name,
+        my_wx_account,
+        invite_count: invite_wx_accounts?.length || 0,
+        has_character: !!my_character,
+        character_keys: my_character ? Object.keys(my_character) : []
+    });
+    
     if (!name || !my_wx_account) {
         sendError(ws, '群名称和创建者微信号不能为空');
         return;
@@ -1201,16 +1209,29 @@ async function handleCreateOnlineGroup(ws, data) {
     // 添加创建者为成员
     const memberId = uuidv4();
     try {
+        // ✅ 安全提取角色信息，确保所有参数都有效
+        const characterName = my_character && my_character.name ? my_character.name : null;
+        let characterAvatar = my_character && my_character.avatar ? my_character.avatar : null;
+        const characterDesc = my_character && my_character.desc ? my_character.desc : null;
+        
         // ✅ 截断过长的 avatar（防止超出TEXT限制）
-        let characterAvatar = my_character?.avatar || null;
         if (characterAvatar && characterAvatar.length > 65000) {
             console.log(`[创建群聊] 角色头像过长(${characterAvatar.length}字符)，将被截断`);
             characterAvatar = characterAvatar.substring(0, 65000);
         }
         
+        console.log('[创建群聊] 准备插入成员:', {
+            memberId,
+            groupId,
+            my_wx_account,
+            characterName,
+            avatarLength: characterAvatar ? characterAvatar.length : 0,
+            descLength: characterDesc ? characterDesc.length : 0
+        });
+        
         await db.execute(
             'INSERT INTO online_group_members (id, group_id, user_wx, character_name, character_avatar, character_desc, joined_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [memberId, groupId, my_wx_account, my_character?.name || null, characterAvatar, my_character?.desc || null, Date.now()]
+            [memberId, groupId, my_wx_account, characterName, characterAvatar, characterDesc, Date.now()]
         );
     } catch (insertError) {
         console.error('[创建群聊] 插入成员失败:', insertError.message);
@@ -1270,10 +1291,10 @@ async function handleCreateOnlineGroup(ws, data) {
             `);
             
             console.log('✅ 表结构已修复，重新插入');
-            // 重新插入
+            // 重新插入（使用已处理过的变量）
             await db.execute(
                 'INSERT INTO online_group_members (id, group_id, user_wx, character_name, character_avatar, character_desc, joined_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                [memberId, groupId, my_wx_account, my_character?.name || null, my_character?.avatar || null, my_character?.desc || null, Date.now()]
+                [memberId, groupId, my_wx_account, characterName, characterAvatar, characterDesc, Date.now()]
             );
         } else {
             throw insertError;
