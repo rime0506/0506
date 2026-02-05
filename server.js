@@ -13,13 +13,13 @@ const { v4: uuidv4 } = require('uuid');
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
-// MySQL 连接池配置
+// MySQL 连接池配置（不允许 fallback，强制使用环境变量）
 const dbConfig = {
-    host: process.env.MYSQL_HOST || 'localhost',
-    port: parseInt(process.env.MYSQL_PORT || '3306'),
-    user: process.env.MYSQL_USER || 'root',
-    password: process.env.MYSQL_PASSWORD || '',
-    database: process.env.MYSQL_DATABASE || 'wechat_online',
+    host: process.env.MYSQL_HOST,
+    port: Number(process.env.MYSQL_PORT),
+    user: process.env.MYSQL_USER,
+    password: process.env.MYSQL_PASSWORD,
+    database: process.env.MYSQL_DATABASE,
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0
@@ -30,8 +30,24 @@ let db;
 
 // 初始化数据库
 async function initDB() {
+    // ❗ 启动时强制校验环境变量（不允许连接到错误的数据库）
+    if (!dbConfig.host || !dbConfig.user || !dbConfig.database) {
+        console.error('❌ MySQL 环境变量未注入，拒绝启动');
+        console.error('当前环境变量:');
+        console.error({
+            MYSQL_HOST: process.env.MYSQL_HOST || '❌ 未设置',
+            MYSQL_PORT: process.env.MYSQL_PORT || '❌ 未设置',
+            MYSQL_USER: process.env.MYSQL_USER || '❌ 未设置',
+            MYSQL_DATABASE: process.env.MYSQL_DATABASE || '❌ 未设置',
+            MYSQL_PASSWORD: process.env.MYSQL_PASSWORD ? '✅ 已设置' : '❌ 未设置'
+        });
+        console.error('\n⚠️  请确保 Backend 和 MySQL 在同一个 Zeabur Project 中');
+        process.exit(1);
+    }
+    
     console.log('🔗 正在连接 MySQL 数据库...');
     console.log(`   Host: ${dbConfig.host}:${dbConfig.port}`);
+    console.log(`   User: ${dbConfig.user}`);
     console.log(`   Database: ${dbConfig.database}`);
     
     try {
@@ -41,6 +57,21 @@ async function initDB() {
         const connection = await db.getConnection();
         console.log('✅ MySQL 连接成功');
         connection.release();
+        
+        // 打印数据库指纹（用于确认数据持久化）
+        const [dbInfo] = await db.execute('SELECT DATABASE() as db_name, VERSION() as version');
+        const [userCount] = await db.execute('SELECT COUNT(*) as count FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?', [dbConfig.database, 'users']);
+        
+        console.log('📊 数据库指纹:');
+        console.log(`   数据库名: ${dbInfo[0].db_name}`);
+        console.log(`   MySQL 版本: ${dbInfo[0].version}`);
+        console.log(`   users 表存在: ${userCount[0].count > 0 ? '✅ 是' : '❌ 否（首次部署）'}`);
+        
+        // 如果表已存在，打印数据统计
+        if (userCount[0].count > 0) {
+            const [stats] = await db.execute('SELECT COUNT(*) as count FROM users');
+            console.log(`   已注册用户数: ${stats[0].count}`);
+        }
         
         // 创建表
         console.log('📋 正在创建数据表...');
