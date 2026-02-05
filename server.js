@@ -358,7 +358,8 @@ async function handleMessage(ws, data) {
         }
     } catch (error) {
         console.error('[处理消息错误]', error);
-        sendError(ws, '服务器内部错误');
+        console.error('错误类型:', data.type, '数据:', JSON.stringify(data).substring(0, 200));
+        sendError(ws, '服务器内部错误: ' + (error.message || '未知错误'));
     }
 }
 
@@ -499,21 +500,25 @@ async function handleAuth(ws, data) {
 
 // 恢复用户角色
 async function restoreUserCharacters(ws, userId) {
-    const [chars] = await db.execute('SELECT * FROM online_characters WHERE user_id = ?', [userId]);
-    const clientData = clients.get(ws);
-    
-    // 将之前在线的角色重新设置为在线
-    chars.filter(c => c.is_online).forEach(char => {
-        clientData.wxAccounts.add(char.wx_account);
-        wxAccountToSocket.set(char.wx_account, ws);
-    });
-    
-    // 发送在线角色列表
-    await handleGetOnlineCharacters(ws);
-    
-    // 投递离线消息
-    for (const char of chars) {
-        await deliverOfflineMessages(ws, char.wx_account);
+    try {
+        const [chars] = await db.execute('SELECT * FROM online_characters WHERE user_id = ?', [userId]);
+        const clientData = clients.get(ws);
+        
+        // 将之前在线的角色重新设置为在线
+        chars.filter(c => c.is_online).forEach(char => {
+            clientData.wxAccounts.add(char.wx_account);
+            wxAccountToSocket.set(char.wx_account, ws);
+        });
+        
+        // 发送在线角色列表
+        await handleGetOnlineCharacters(ws);
+        
+        // 投递离线消息
+        for (const char of chars) {
+            await deliverOfflineMessages(ws, char.wx_account);
+        }
+    } catch (error) {
+        console.error('[恢复用户角色错误]', error);
     }
 }
 
@@ -543,56 +548,62 @@ async function handleLogout(ws) {
 
 // 角色上线
 async function handleGoOnline(ws, data) {
-    const clientData = clients.get(ws);
-    if (!clientData.userId) {
-        sendError(ws, '请先登录');
-        return;
+    try {
+        const clientData = clients.get(ws);
+        if (!clientData.userId) {
+            sendError(ws, '请先登录');
+            return;
+        }
+        
+        const { wx_account, nickname, avatar, bio } = data;
+        
+        if (!wx_account || !nickname) {
+            sendError(ws, '微信号和昵称不能为空');
+            console.log('[上线失败] 缺少必填字段:', { wx_account, nickname });
+            return;
+        }
+        
+        // 检查微信号是否被其他用户占用
+        const [existing] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [wx_account]);
+        if (existing.length > 0 && existing[0].user_id !== clientData.userId) {
+            sendError(ws, '该微信号已被其他用户使用');
+            return;
+        }
+        
+        // 创建或更新角色
+        const charId = existing.length > 0 ? existing[0].id : uuidv4();
+        await db.execute(`
+            INSERT INTO online_characters (id, user_id, wx_account, nickname, avatar, bio, is_online, last_seen, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                nickname = VALUES(nickname),
+                avatar = VALUES(avatar),
+                bio = VALUES(bio),
+                is_online = 1,
+                last_seen = VALUES(last_seen)
+        `, [charId, clientData.userId, wx_account, nickname, avatar || '', bio || '', Date.now(), Date.now()]);
+        
+        // 更新映射
+        clientData.wxAccounts.add(wx_account);
+        wxAccountToSocket.set(wx_account, ws);
+        
+        send(ws, {
+            type: 'character_online',
+            wx_account,
+            nickname
+        });
+        
+        // 投递离线消息
+        await deliverOfflineMessages(ws, wx_account);
+        
+        // 投递待处理的好友申请
+        await deliverPendingFriendRequests(ws, wx_account);
+        
+        console.log(`[上线] ${nickname} (${wx_account})`);
+    } catch (error) {
+        console.error('[上线错误]', error);
+        sendError(ws, '上线失败: ' + error.message);
     }
-    
-    const { wx_account, nickname, avatar, bio } = data;
-    
-    if (!wx_account || !nickname) {
-        sendError(ws, '微信号和昵称不能为空');
-        return;
-    }
-    
-    // 检查微信号是否被其他用户占用
-    const [existing] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [wx_account]);
-    if (existing.length > 0 && existing[0].user_id !== clientData.userId) {
-        sendError(ws, '该微信号已被其他用户使用');
-        return;
-    }
-    
-    // 创建或更新角色
-    const charId = existing.length > 0 ? existing[0].id : uuidv4();
-    await db.execute(`
-        INSERT INTO online_characters (id, user_id, wx_account, nickname, avatar, bio, is_online, last_seen, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
-        ON DUPLICATE KEY UPDATE
-            nickname = VALUES(nickname),
-            avatar = VALUES(avatar),
-            bio = VALUES(bio),
-            is_online = 1,
-            last_seen = VALUES(last_seen)
-    `, [charId, clientData.userId, wx_account, nickname, avatar || '', bio || '', Date.now(), Date.now()]);
-    
-    // 更新映射
-    clientData.wxAccounts.add(wx_account);
-    wxAccountToSocket.set(wx_account, ws);
-    
-    send(ws, {
-        type: 'character_online',
-        wx_account,
-        nickname
-    });
-    
-    // 投递离线消息
-    await deliverOfflineMessages(ws, wx_account);
-    
-    // 投递待处理的好友申请
-    await deliverPendingFriendRequests(ws, wx_account);
-    
-    console.log(`[上线] ${nickname} (${wx_account})`);
 }
 
 // 角色下线
@@ -624,55 +635,63 @@ async function handleGetOnlineCharacters(ws) {
         return;
     }
     
-    const [chars] = await db.execute('SELECT * FROM online_characters WHERE user_id = ?', [clientData.userId]);
-    const onlineChars = chars.filter(c => clientData.wxAccounts.has(c.wx_account));
+    // 直接查询数据库中标记为在线的角色
+    const [chars] = await db.execute('SELECT * FROM online_characters WHERE user_id = ? AND is_online = 1', [clientData.userId]);
     
     send(ws, {
         type: 'online_characters',
-        characters: onlineChars.map(c => ({
+        characters: chars.map(c => ({
             wx_account: c.wx_account,
             nickname: c.nickname,
             avatar: c.avatar,
             bio: c.bio
         }))
     });
+    
+    console.log(`[查询在线角色] 用户 ${clientData.userId} 有 ${chars.length} 个角色在线`);
 }
 
 // 注册角色（不上线，仅用于搜索）
 async function handleRegisterCharacter(ws, data) {
-    const clientData = clients.get(ws);
-    if (!clientData.userId) {
-        sendError(ws, '请先登录');
-        return;
+    try {
+        const clientData = clients.get(ws);
+        if (!clientData.userId) {
+            sendError(ws, '请先登录');
+            return;
+        }
+        
+        const { wx_account, nickname, avatar, bio } = data;
+        
+        if (!wx_account || !nickname) {
+            sendError(ws, '微信号和昵称不能为空');
+            console.log('[注册角色失败] 缺少必填字段:', { wx_account, nickname });
+            return;
+        }
+        
+        // 检查微信号是否被其他用户占用
+        const [existing] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [wx_account]);
+        if (existing.length > 0 && existing[0].user_id !== clientData.userId) {
+            sendError(ws, '该微信号已被其他用户使用');
+            return;
+        }
+        
+        // 注册角色（不上线，is_online = 0）
+        const charId = existing.length > 0 ? existing[0].id : uuidv4();
+        await db.execute(`
+            INSERT INTO online_characters (id, user_id, wx_account, nickname, avatar, bio, is_online, last_seen, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                nickname = VALUES(nickname),
+                avatar = VALUES(avatar),
+                bio = VALUES(bio),
+                last_seen = VALUES(last_seen)
+        `, [charId, clientData.userId, wx_account, nickname, avatar || '', bio || '', Date.now(), Date.now()]);
+        
+        console.log(`[注册角色] ${nickname} (${wx_account}) - 未上线，仅用于搜索`);
+    } catch (error) {
+        console.error('[注册角色错误]', error);
+        sendError(ws, '注册角色失败: ' + error.message);
     }
-    
-    const { wx_account, nickname, avatar, bio } = data;
-    
-    if (!wx_account || !nickname) {
-        sendError(ws, '微信号和昵称不能为空');
-        return;
-    }
-    
-    // 检查微信号是否被其他用户占用
-    const [existing] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [wx_account]);
-    if (existing.length > 0 && existing[0].user_id !== clientData.userId) {
-        sendError(ws, '该微信号已被其他用户使用');
-        return;
-    }
-    
-    // 注册角色（不上线，is_online = 0）
-    const charId = existing.length > 0 ? existing[0].id : uuidv4();
-    await db.execute(`
-        INSERT INTO online_characters (id, user_id, wx_account, nickname, avatar, bio, is_online, last_seen, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
-        ON DUPLICATE KEY UPDATE
-            nickname = VALUES(nickname),
-            avatar = VALUES(avatar),
-            bio = VALUES(bio),
-            last_seen = VALUES(last_seen)
-    `, [charId, clientData.userId, wx_account, nickname, avatar || '', bio || '', Date.now(), Date.now()]);
-    
-    console.log(`[注册角色] ${nickname} (${wx_account}) - 未上线，仅用于搜索`);
 }
 
 // 搜索用户
@@ -935,49 +954,59 @@ async function handleGetPendingRequests(ws, data) {
 
 // 投递离线消息
 async function deliverOfflineMessages(ws, wxAccount) {
-    const [messages] = await db.execute(
-        'SELECT * FROM offline_messages WHERE to_wx_account = ? AND delivered = 0 ORDER BY created_at',
-        [wxAccount]
-    );
-    
-    for (const msg of messages) {
-        const [fromChar] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [msg.from_wx_account]);
-        send(ws, {
-            type: 'message',
-            from_wx_account: msg.from_wx_account,
-            from_nickname: fromChar[0]?.nickname || msg.from_wx_account,
-            from_avatar: fromChar[0]?.avatar || '',
-            content: msg.content,
-            timestamp: msg.created_at
-        });
-    }
-    
-    if (messages.length > 0) {
-        await db.execute('UPDATE offline_messages SET delivered = 1 WHERE to_wx_account = ?', [wxAccount]);
-        console.log(`[离线消息] 投递 ${messages.length} 条消息给 ${wxAccount}`);
+    try {
+        const [messages] = await db.execute(
+            'SELECT * FROM offline_messages WHERE to_wx_account = ? AND delivered = 0 ORDER BY created_at',
+            [wxAccount]
+        );
+        
+        for (const msg of messages) {
+            const [fromChar] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [msg.from_wx_account]);
+            send(ws, {
+                type: 'message',
+                from_wx_account: msg.from_wx_account,
+                from_nickname: fromChar[0]?.nickname || msg.from_wx_account,
+                from_avatar: fromChar[0]?.avatar || '',
+                content: msg.content,
+                timestamp: msg.created_at
+            });
+        }
+        
+        if (messages.length > 0) {
+            await db.execute('UPDATE offline_messages SET delivered = 1 WHERE to_wx_account = ?', [wxAccount]);
+            console.log(`[离线消息] 投递 ${messages.length} 条消息给 ${wxAccount}`);
+        }
+    } catch (error) {
+        console.error('[投递离线消息错误]', error);
+        // 不影响上线流程，只记录错误
     }
 }
 
 // 投递待处理的好友申请
 async function deliverPendingFriendRequests(ws, wxAccount) {
-    const [requests] = await db.execute(
-        'SELECT * FROM friend_requests WHERE to_wx_account = ? AND status = ?',
-        [wxAccount, 'pending']
-    );
-    
-    for (const r of requests) {
-        const [fromChar] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [r.from_wx_account]);
-        send(ws, {
-            type: 'friend_request',
-            request: {
-                id: r.id,
-                from_wx_account: r.from_wx_account,
-                from_nickname: fromChar[0]?.nickname || r.from_wx_account,
-                from_avatar: fromChar[0]?.avatar || '',
-                message: r.message,
-                time: r.created_at
-            }
-        });
+    try {
+        const [requests] = await db.execute(
+            'SELECT * FROM friend_requests WHERE to_wx_account = ? AND status = ?',
+            [wxAccount, 'pending']
+        );
+        
+        for (const r of requests) {
+            const [fromChar] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [r.from_wx_account]);
+            send(ws, {
+                type: 'friend_request',
+                request: {
+                    id: r.id,
+                    from_wx_account: r.from_wx_account,
+                    from_nickname: fromChar[0]?.nickname || r.from_wx_account,
+                    from_avatar: fromChar[0]?.avatar || '',
+                    message: r.message,
+                    time: r.created_at
+                }
+            });
+        }
+    } catch (error) {
+        console.error('[投递好友申请错误]', error);
+        // 不影响上线流程，只记录错误
     }
 }
 
