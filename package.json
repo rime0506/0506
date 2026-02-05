@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "ws": "^8.16.0",
-    "better-sqlite3": "^9.4.3",
+    "mysql2": "^3.6.5",
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",
     "uuid": "^9.0.1"

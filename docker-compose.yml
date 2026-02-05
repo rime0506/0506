@@ -9,7 +9,7 @@ services:
       - "3000:3000"
     environment:
       - PORT=3000
-      - JWT_SECRET=${JWT_SECRET:-please-change-this-secret-in-production}
+      - JWT_SECRET=${JWT_SECRET:-your-secret-key-change-in-production}
       - DB_PATH=/app/data/database.sqlite
     volumes:
       - ./data:/app/data

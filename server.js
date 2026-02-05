@@ -4,200 +4,169 @@
  */
 
 const WebSocket = require('ws');
-const Database = require('better-sqlite3');
+const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
-const path = require('path');
-const fs = require('fs');
 
 // 配置
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'database.sqlite');
 
-// 确保数据目录存在
-const dataDir = path.dirname(DB_PATH);
-if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-}
+// MySQL 连接池配置
+const dbConfig = {
+    host: process.env.MYSQL_HOST || 'localhost',
+    port: parseInt(process.env.MYSQL_PORT || '3306'),
+    user: process.env.MYSQL_USER || 'root',
+    password: process.env.MYSQL_PASSWORD || '',
+    database: process.env.MYSQL_DATABASE || 'wechat_online',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
+};
+
+// 创建连接池
+let db;
 
 // 初始化数据库
-const db = new Database(DB_PATH);
-
-// 创建表
-db.exec(`
-    -- 用户表（主账号）
-    CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        username TEXT UNIQUE NOT NULL,
-        email TEXT,
-        password_hash TEXT NOT NULL,
-        created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
-        last_login INTEGER
-    );
-
-    -- 在线角色表
-    CREATE TABLE IF NOT EXISTS online_characters (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        wx_account TEXT UNIQUE NOT NULL,
-        nickname TEXT NOT NULL,
-        avatar TEXT,
-        bio TEXT,
-        is_online INTEGER DEFAULT 0,
-        last_seen INTEGER,
-        created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
-        FOREIGN KEY (user_id) REFERENCES users(id)
-    );
-
-    -- 好友关系表
-    CREATE TABLE IF NOT EXISTS friendships (
-        id TEXT PRIMARY KEY,
-        char_a_wx TEXT NOT NULL,
-        char_b_wx TEXT NOT NULL,
-        created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
-        UNIQUE(char_a_wx, char_b_wx)
-    );
-
-    -- 好友申请表
-    CREATE TABLE IF NOT EXISTS friend_requests (
-        id TEXT PRIMARY KEY,
-        from_wx_account TEXT NOT NULL,
-        to_wx_account TEXT NOT NULL,
-        message TEXT,
-        status TEXT DEFAULT 'pending',
-        created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
-        updated_at INTEGER
-    );
-
-    -- 离线消息表
-    CREATE TABLE IF NOT EXISTS offline_messages (
-        id TEXT PRIMARY KEY,
-        from_wx_account TEXT NOT NULL,
-        to_wx_account TEXT NOT NULL,
-        content TEXT NOT NULL,
-        created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
-        delivered INTEGER DEFAULT 0
-    );
-
-    -- 联机群聊表
-    CREATE TABLE IF NOT EXISTS online_groups (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        avatar TEXT,
-        creator_wx TEXT NOT NULL,
-        created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
-    );
-
-    -- 联机群聊成员表
-    CREATE TABLE IF NOT EXISTS online_group_members (
-        id TEXT PRIMARY KEY,
-        group_id TEXT NOT NULL,
-        user_wx TEXT NOT NULL,
-        character_name TEXT,
-        character_avatar TEXT,
-        character_desc TEXT,
-        joined_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
-        FOREIGN KEY (group_id) REFERENCES online_groups(id),
-        UNIQUE(group_id, user_wx)
-    );
-
-    -- 联机群聊消息表
-    CREATE TABLE IF NOT EXISTS online_group_messages (
-        id TEXT PRIMARY KEY,
-        group_id TEXT NOT NULL,
-        sender_type TEXT NOT NULL,
-        sender_wx TEXT NOT NULL,
-        sender_name TEXT NOT NULL,
-        character_name TEXT,
-        content TEXT NOT NULL,
-        msg_type TEXT DEFAULT 'text',
-        created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000),
-        FOREIGN KEY (group_id) REFERENCES online_groups(id)
-    );
-
-    -- 创建索引
-    CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
-    CREATE INDEX IF NOT EXISTS idx_online_chars_wx ON online_characters(wx_account);
-    CREATE INDEX IF NOT EXISTS idx_online_chars_user ON online_characters(user_id);
-    CREATE INDEX IF NOT EXISTS idx_friendships_char_a ON friendships(char_a_wx);
-    CREATE INDEX IF NOT EXISTS idx_friendships_char_b ON friendships(char_b_wx);
-    CREATE INDEX IF NOT EXISTS idx_friend_requests_to ON friend_requests(to_wx_account);
-    CREATE INDEX IF NOT EXISTS idx_offline_messages_to ON offline_messages(to_wx_account);
-    CREATE INDEX IF NOT EXISTS idx_online_group_members_group ON online_group_members(group_id);
-    CREATE INDEX IF NOT EXISTS idx_online_group_messages_group ON online_group_messages(group_id);
-`);
-
-// 准备语句
-const stmts = {
-    // 用户
-    createUser: db.prepare('INSERT INTO users (id, username, email, password_hash) VALUES (?, ?, ?, ?)'),
-    getUserByUsername: db.prepare('SELECT * FROM users WHERE username = ?'),
-    getUserById: db.prepare('SELECT * FROM users WHERE id = ?'),
-    updateLastLogin: db.prepare('UPDATE users SET last_login = ? WHERE id = ?'),
+async function initDB() {
+    console.log('🔗 正在连接 MySQL 数据库...');
+    console.log(`   Host: ${dbConfig.host}:${dbConfig.port}`);
+    console.log(`   Database: ${dbConfig.database}`);
     
-    // 角色
-    createOrUpdateChar: db.prepare(`
-        INSERT INTO online_characters (id, user_id, wx_account, nickname, avatar, bio, is_online, last_seen)
-        VALUES (?, ?, ?, ?, ?, ?, 1, ?)
-        ON CONFLICT(wx_account) DO UPDATE SET
-            nickname = excluded.nickname,
-            avatar = excluded.avatar,
-            bio = excluded.bio,
-            is_online = 1,
-            last_seen = excluded.last_seen
-    `),
-    getCharByWxAccount: db.prepare('SELECT * FROM online_characters WHERE wx_account = ?'),
-    getCharsByUserId: db.prepare('SELECT * FROM online_characters WHERE user_id = ?'),
-    setCharOffline: db.prepare('UPDATE online_characters SET is_online = 0, last_seen = ? WHERE wx_account = ?'),
-    setAllCharsOfflineByUserId: db.prepare('UPDATE online_characters SET is_online = 0, last_seen = ? WHERE user_id = ?'),
-    
-    // 好友申请
-    createFriendRequest: db.prepare('INSERT INTO friend_requests (id, from_wx_account, to_wx_account, message) VALUES (?, ?, ?, ?)'),
-    getPendingRequestsForWx: db.prepare('SELECT * FROM friend_requests WHERE to_wx_account = ? AND status = ?'),
-    updateFriendRequestStatus: db.prepare('UPDATE friend_requests SET status = ?, updated_at = ? WHERE id = ?'),
-    getFriendRequestById: db.prepare('SELECT * FROM friend_requests WHERE id = ?'),
-    
-    // 好友关系
-    createFriendship: db.prepare('INSERT OR IGNORE INTO friendships (id, char_a_wx, char_b_wx) VALUES (?, ?, ?)'),
-    getFriends: db.prepare(`
-        SELECT oc.* FROM online_characters oc
-        INNER JOIN friendships f ON (f.char_a_wx = oc.wx_account OR f.char_b_wx = oc.wx_account)
-        WHERE (f.char_a_wx = ? OR f.char_b_wx = ?) AND oc.wx_account != ?
-    `),
-    areFriends: db.prepare(`
-        SELECT 1 FROM friendships 
-        WHERE (char_a_wx = ? AND char_b_wx = ?) OR (char_a_wx = ? AND char_b_wx = ?)
-    `),
-    
-    // 离线消息
-    saveOfflineMessage: db.prepare('INSERT INTO offline_messages (id, from_wx_account, to_wx_account, content) VALUES (?, ?, ?, ?)'),
-    getOfflineMessages: db.prepare('SELECT * FROM offline_messages WHERE to_wx_account = ? AND delivered = 0 ORDER BY created_at'),
-    markMessagesDelivered: db.prepare('UPDATE offline_messages SET delivered = 1 WHERE to_wx_account = ?'),
-    
-    // 联机群聊
-    createGroup: db.prepare('INSERT INTO online_groups (id, name, avatar, creator_wx) VALUES (?, ?, ?, ?)'),
-    getGroupById: db.prepare('SELECT * FROM online_groups WHERE id = ?'),
-    getGroupsByMember: db.prepare(`
-        SELECT g.* FROM online_groups g
-        INNER JOIN online_group_members m ON g.id = m.group_id
-        WHERE m.user_wx = ?
-    `),
-    
-    // 群成员
-    addGroupMember: db.prepare('INSERT OR REPLACE INTO online_group_members (id, group_id, user_wx, character_name, character_avatar, character_desc) VALUES (?, ?, ?, ?, ?, ?)'),
-    getGroupMembers: db.prepare('SELECT * FROM online_group_members WHERE group_id = ?'),
-    getGroupMember: db.prepare('SELECT * FROM online_group_members WHERE group_id = ? AND user_wx = ?'),
-    updateGroupMemberCharacter: db.prepare('UPDATE online_group_members SET character_name = ?, character_avatar = ?, character_desc = ? WHERE group_id = ? AND user_wx = ?'),
-    removeGroupMember: db.prepare('DELETE FROM online_group_members WHERE group_id = ? AND user_wx = ?'),
-    
-    // 群消息
-    saveGroupMessage: db.prepare('INSERT INTO online_group_messages (id, group_id, sender_type, sender_wx, sender_name, character_name, content, msg_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
-    getGroupMessages: db.prepare('SELECT * FROM online_group_messages WHERE group_id = ? ORDER BY created_at ASC'),
-    getGroupMessagesLimit: db.prepare('SELECT * FROM online_group_messages WHERE group_id = ? ORDER BY created_at DESC LIMIT ?'),
-    getGroupMessagesSince: db.prepare('SELECT * FROM online_group_messages WHERE group_id = ? AND created_at > ? ORDER BY created_at ASC')
-};
+    try {
+        db = mysql.createPool(dbConfig);
+        
+        // 测试连接
+        const connection = await db.getConnection();
+        console.log('✅ MySQL 连接成功');
+        connection.release();
+        
+        // 创建表
+        console.log('📋 正在创建数据表...');
+        
+        // 用户表（主账号）
+        await db.execute(`
+            CREATE TABLE IF NOT EXISTS users (
+                id VARCHAR(36) PRIMARY KEY,
+                username VARCHAR(50) UNIQUE NOT NULL,
+                email VARCHAR(100),
+                password_hash VARCHAR(255) NOT NULL,
+                created_at BIGINT DEFAULT 0,
+                last_login BIGINT,
+                INDEX idx_users_username (username)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+        
+        // 在线角色表
+        await db.execute(`
+            CREATE TABLE IF NOT EXISTS online_characters (
+                id VARCHAR(36) PRIMARY KEY,
+                user_id VARCHAR(36) NOT NULL,
+                wx_account VARCHAR(100) UNIQUE NOT NULL,
+                nickname VARCHAR(100) NOT NULL,
+                avatar TEXT,
+                bio TEXT,
+                is_online TINYINT DEFAULT 0,
+                last_seen BIGINT,
+                created_at BIGINT DEFAULT 0,
+                INDEX idx_online_chars_wx (wx_account),
+                INDEX idx_online_chars_user (user_id),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+        
+        // 好友关系表
+        await db.execute(`
+            CREATE TABLE IF NOT EXISTS friendships (
+                id VARCHAR(36) PRIMARY KEY,
+                char_a_wx VARCHAR(100) NOT NULL,
+                char_b_wx VARCHAR(100) NOT NULL,
+                created_at BIGINT DEFAULT 0,
+                UNIQUE KEY unique_friendship (char_a_wx, char_b_wx),
+                INDEX idx_friendships_char_a (char_a_wx),
+                INDEX idx_friendships_char_b (char_b_wx)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+        
+        // 好友申请表
+        await db.execute(`
+            CREATE TABLE IF NOT EXISTS friend_requests (
+                id VARCHAR(36) PRIMARY KEY,
+                from_wx_account VARCHAR(100) NOT NULL,
+                to_wx_account VARCHAR(100) NOT NULL,
+                message TEXT,
+                status VARCHAR(20) DEFAULT 'pending',
+                created_at BIGINT DEFAULT 0,
+                updated_at BIGINT,
+                INDEX idx_friend_requests_to (to_wx_account)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+        
+        // 离线消息表
+        await db.execute(`
+            CREATE TABLE IF NOT EXISTS offline_messages (
+                id VARCHAR(36) PRIMARY KEY,
+                from_wx_account VARCHAR(100) NOT NULL,
+                to_wx_account VARCHAR(100) NOT NULL,
+                content TEXT NOT NULL,
+                created_at BIGINT DEFAULT 0,
+                delivered TINYINT DEFAULT 0,
+                INDEX idx_offline_messages_to (to_wx_account)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+        
+        // 联机群聊表
+        await db.execute(`
+            CREATE TABLE IF NOT EXISTS online_groups (
+                id VARCHAR(36) PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                avatar TEXT,
+                creator_wx VARCHAR(100) NOT NULL,
+                created_at BIGINT DEFAULT 0
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+        
+        // 联机群聊成员表
+        await db.execute(`
+            CREATE TABLE IF NOT EXISTS online_group_members (
+                id VARCHAR(36) PRIMARY KEY,
+                group_id VARCHAR(36) NOT NULL,
+                user_wx VARCHAR(100) NOT NULL,
+                character_name VARCHAR(100),
+                character_avatar TEXT,
+                character_desc TEXT,
+                joined_at BIGINT DEFAULT 0,
+                UNIQUE KEY unique_group_member (group_id, user_wx),
+                INDEX idx_online_group_members_group (group_id),
+                FOREIGN KEY (group_id) REFERENCES online_groups(id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+        
+        // 联机群聊消息表
+        await db.execute(`
+            CREATE TABLE IF NOT EXISTS online_group_messages (
+                id VARCHAR(36) PRIMARY KEY,
+                group_id VARCHAR(36) NOT NULL,
+                sender_type VARCHAR(20) NOT NULL,
+                sender_wx VARCHAR(100) NOT NULL,
+                sender_name VARCHAR(100) NOT NULL,
+                character_name VARCHAR(100),
+                content TEXT NOT NULL,
+                msg_type VARCHAR(20) DEFAULT 'text',
+                created_at BIGINT DEFAULT 0,
+                INDEX idx_online_group_messages_group (group_id),
+                FOREIGN KEY (group_id) REFERENCES online_groups(id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+        
+        console.log('✅ 数据表创建完成');
+        
+    } catch (error) {
+        console.error('❌ 数据库初始化失败:', error);
+        throw error;
+    }
+}
 
 // 在线连接管理
 const clients = new Map(); // socket -> { userId, wxAccounts: Set }
@@ -219,13 +188,17 @@ const server = http.createServer((req, res) => {
 // 创建 WebSocket 服务器（不指定 path，处理所有 WebSocket 升级请求）
 const wss = new WebSocket.Server({ server });
 
-// 启动服务器
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 联机服务器已启动，端口: ${PORT}`);
-    console.log(`📂 数据库路径: ${DB_PATH}`);
-    console.log(`🔗 WebSocket 地址: ws://localhost:${PORT}`);
-    console.log(`🔗 健康检查: http://localhost:${PORT}`);
-});
+// 心跳检测：每30秒检查一次所有连接
+const heartbeatInterval = setInterval(() => {
+    wss.clients.forEach((ws) => {
+        if (ws.isAlive === false) {
+            console.log('[WS] 心跳超时，关闭连接');
+            return ws.terminate();
+        }
+        ws.isAlive = false;
+        ws.ping(); // 发送 ping，等待 pong 响应
+    });
+}, 30000);
 
 // 处理 WebSocket 连接
 wss.on('connection', (ws, req) => {
@@ -265,102 +238,101 @@ wss.on('connection', (ws, req) => {
     });
 });
 
-// 心跳检测：每30秒检查一次所有连接
-const heartbeatInterval = setInterval(() => {
-    wss.clients.forEach((ws) => {
-        if (ws.isAlive === false) {
-            console.log('[WS] 心跳超时，关闭连接');
-            return ws.terminate();
-        }
-        ws.isAlive = false;
-        ws.ping(); // 发送 ping，等待 pong 响应
-    });
-}, 30000);
-
 // 处理消息
-function handleMessage(ws, data) {
+async function handleMessage(ws, data) {
     console.log('[WS] 收到消息:', data.type);
     
-    switch (data.type) {
-        case 'register':
-            handleRegister(ws, data);
-            break;
-        case 'login':
-            handleLogin(ws, data);
-            break;
-        case 'auth':
-            handleAuth(ws, data);
-            break;
-        case 'logout':
-            handleLogout(ws);
-            break;
-        case 'go_online':
-            handleGoOnline(ws, data);
-            break;
-        case 'go_offline':
-            handleGoOffline(ws, data);
-            break;
-        case 'get_online_characters':
-            handleGetOnlineCharacters(ws);
-            break;
-        case 'search_user':
-            handleSearchUser(ws, data);
-            break;
-        case 'friend_request':
-            handleFriendRequest(ws, data);
-            break;
-        case 'accept_friend_request':
-            handleAcceptFriendRequest(ws, data);
-            break;
-        case 'reject_friend_request':
-            handleRejectFriendRequest(ws, data);
-            break;
-        case 'message':
-            handleSendMessage(ws, data);
-            break;
-        case 'get_pending_requests':
-            handleGetPendingRequests(ws, data);
-            break;
-        
-        // 联机群聊
-        case 'create_online_group':
-            handleCreateOnlineGroup(ws, data);
-            break;
-        case 'invite_to_group':
-            handleInviteToGroup(ws, data);
-            break;
-        case 'join_online_group':
-            handleJoinOnlineGroup(ws, data);
-            break;
-        case 'get_online_groups':
-            handleGetOnlineGroups(ws, data);
-            break;
-        case 'get_group_messages':
-            handleGetGroupMessages(ws, data);
-            break;
-        case 'send_group_message':
-            handleSendGroupMessage(ws, data);
-            break;
-        case 'get_group_members':
-            handleGetGroupMembers(ws, data);
-            break;
-        case 'update_group_character':
-            handleUpdateGroupCharacter(ws, data);
-            break;
-        case 'group_typing_start':
-            handleGroupTypingStart(ws, data);
-            break;
-        case 'group_typing_stop':
-            handleGroupTypingStop(ws, data);
-            break;
+    try {
+        switch (data.type) {
+            case 'register':
+                await handleRegister(ws, data);
+                break;
+            case 'login':
+                await handleLogin(ws, data);
+                break;
+            case 'auth':
+                await handleAuth(ws, data);
+                break;
+            case 'logout':
+                await handleLogout(ws);
+                break;
+            case 'go_online':
+                await handleGoOnline(ws, data);
+                break;
+            case 'go_offline':
+                await handleGoOffline(ws, data);
+                break;
+            case 'get_online_characters':
+                await handleGetOnlineCharacters(ws);
+                break;
+            case 'search_user':
+                await handleSearchUser(ws, data);
+                break;
+            case 'register_character':
+                await handleRegisterCharacter(ws, data);
+                break;
+            case 'friend_request':
+                await handleFriendRequest(ws, data);
+                break;
+            case 'accept_friend_request':
+                await handleAcceptFriendRequest(ws, data);
+                break;
+            case 'reject_friend_request':
+                await handleRejectFriendRequest(ws, data);
+                break;
+            case 'message':
+                await handleSendMessage(ws, data);
+                break;
+            case 'get_pending_requests':
+                await handleGetPendingRequests(ws, data);
+                break;
             
-        default:
-            sendError(ws, '未知的消息类型');
+            // 联机群聊
+            case 'create_online_group':
+                await handleCreateOnlineGroup(ws, data);
+                break;
+            case 'invite_to_group':
+                await handleInviteToGroup(ws, data);
+                break;
+            case 'join_online_group':
+                await handleJoinOnlineGroup(ws, data);
+                break;
+            case 'get_online_groups':
+                await handleGetOnlineGroups(ws, data);
+                break;
+            case 'get_group_messages':
+                await handleGetGroupMessages(ws, data);
+                break;
+            case 'send_group_message':
+                await handleSendGroupMessage(ws, data);
+                break;
+            case 'get_group_members':
+                await handleGetGroupMembers(ws, data);
+                break;
+            case 'update_group_character':
+                await handleUpdateGroupCharacter(ws, data);
+                break;
+            case 'group_typing_start':
+                await handleGroupTypingStart(ws, data);
+                break;
+            case 'group_typing_stop':
+                await handleGroupTypingStop(ws, data);
+                break;
+            case 'claim_group_redpacket':
+                await handleClaimGroupRedPacket(ws, data);
+                break;
+                
+            default:
+                sendError(ws, '未知的消息类型');
+        }
+    } catch (error) {
+        console.error('[处理消息错误]', error);
+        sendError(ws, '服务器内部错误');
     }
 }
 
 // 注册
-function handleRegister(ws, data) {
+async function handleRegister(ws, data) {
     const { username, email, password } = data;
     
     if (!username || !password) {
@@ -379,8 +351,8 @@ function handleRegister(ws, data) {
     }
     
     // 检查用户名是否已存在
-    const existing = stmts.getUserByUsername.get(username);
-    if (existing) {
+    const [rows] = await db.execute('SELECT * FROM users WHERE username = ?', [username]);
+    if (rows.length > 0) {
         sendError(ws, '用户名已被注册');
         return;
     }
@@ -390,7 +362,10 @@ function handleRegister(ws, data) {
     const passwordHash = bcrypt.hashSync(password, 10);
     
     try {
-        stmts.createUser.run(userId, username, email || null, passwordHash);
+        await db.execute(
+            'INSERT INTO users (id, username, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)',
+            [userId, username, email || null, passwordHash, Date.now()]
+        );
         
         // 生成token
         const token = jwt.sign({ userId, username }, JWT_SECRET, { expiresIn: '30d' });
@@ -413,7 +388,7 @@ function handleRegister(ws, data) {
 }
 
 // 登录
-function handleLogin(ws, data) {
+async function handleLogin(ws, data) {
     const { username, password } = data;
     
     if (!username || !password) {
@@ -421,19 +396,20 @@ function handleLogin(ws, data) {
         return;
     }
     
-    const user = stmts.getUserByUsername.get(username);
-    if (!user) {
+    const [rows] = await db.execute('SELECT * FROM users WHERE username = ?', [username]);
+    if (rows.length === 0) {
         sendError(ws, '用户名或密码错误');
         return;
     }
     
+    const user = rows[0];
     if (!bcrypt.compareSync(password, user.password_hash)) {
         sendError(ws, '用户名或密码错误');
         return;
     }
     
     // 更新最后登录时间
-    stmts.updateLastLogin.run(Date.now(), user.id);
+    await db.execute('UPDATE users SET last_login = ? WHERE id = ?', [Date.now(), user.id]);
     
     // 生成token
     const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '30d' });
@@ -452,7 +428,7 @@ function handleLogin(ws, data) {
 }
 
 // Token认证
-function handleAuth(ws, data) {
+async function handleAuth(ws, data) {
     const { token } = data;
     
     if (!token) {
@@ -462,12 +438,14 @@ function handleAuth(ws, data) {
     
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
-        const user = stmts.getUserById.get(decoded.userId);
+        const [rows] = await db.execute('SELECT * FROM users WHERE id = ?', [decoded.userId]);
         
-        if (!user) {
+        if (rows.length === 0) {
             send(ws, { type: 'auth_failed', message: '用户不存在' });
             return;
         }
+        
+        const user = rows[0];
         
         // 设置客户端状态
         const clientData = clients.get(ws);
@@ -481,7 +459,7 @@ function handleAuth(ws, data) {
         console.log(`[认证] 用户: ${user.username}`);
         
         // 恢复之前上线的角色
-        restoreUserCharacters(ws, user.id);
+        await restoreUserCharacters(ws, user.id);
         
     } catch (e) {
         send(ws, { type: 'auth_failed', message: 'token无效或已过期' });
@@ -489,8 +467,8 @@ function handleAuth(ws, data) {
 }
 
 // 恢复用户角色
-function restoreUserCharacters(ws, userId) {
-    const chars = stmts.getCharsByUserId.all(userId);
+async function restoreUserCharacters(ws, userId) {
+    const [chars] = await db.execute('SELECT * FROM online_characters WHERE user_id = ?', [userId]);
     const clientData = clients.get(ws);
     
     // 将之前在线的角色重新设置为在线
@@ -500,22 +478,25 @@ function restoreUserCharacters(ws, userId) {
     });
     
     // 发送在线角色列表
-    handleGetOnlineCharacters(ws);
+    await handleGetOnlineCharacters(ws);
     
     // 投递离线消息
-    chars.forEach(char => {
-        deliverOfflineMessages(ws, char.wx_account);
-    });
+    for (const char of chars) {
+        await deliverOfflineMessages(ws, char.wx_account);
+    }
 }
 
 // 登出
-function handleLogout(ws) {
+async function handleLogout(ws) {
     const clientData = clients.get(ws);
     if (!clientData) return;
     
     // 将所有角色设为离线
     if (clientData.userId) {
-        stmts.setAllCharsOfflineByUserId.run(Date.now(), clientData.userId);
+        await db.execute(
+            'UPDATE online_characters SET is_online = 0, last_seen = ? WHERE user_id = ?',
+            [Date.now(), clientData.userId]
+        );
     }
     
     // 清理映射
@@ -530,7 +511,7 @@ function handleLogout(ws) {
 }
 
 // 角色上线
-function handleGoOnline(ws, data) {
+async function handleGoOnline(ws, data) {
     const clientData = clients.get(ws);
     if (!clientData.userId) {
         sendError(ws, '请先登录');
@@ -545,15 +526,24 @@ function handleGoOnline(ws, data) {
     }
     
     // 检查微信号是否被其他用户占用
-    const existingChar = stmts.getCharByWxAccount.get(wx_account);
-    if (existingChar && existingChar.user_id !== clientData.userId) {
+    const [existing] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [wx_account]);
+    if (existing.length > 0 && existing[0].user_id !== clientData.userId) {
         sendError(ws, '该微信号已被其他用户使用');
         return;
     }
     
     // 创建或更新角色
-    const charId = existingChar?.id || uuidv4();
-    stmts.createOrUpdateChar.run(charId, clientData.userId, wx_account, nickname, avatar || '', bio || '', Date.now());
+    const charId = existing.length > 0 ? existing[0].id : uuidv4();
+    await db.execute(`
+        INSERT INTO online_characters (id, user_id, wx_account, nickname, avatar, bio, is_online, last_seen, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            nickname = VALUES(nickname),
+            avatar = VALUES(avatar),
+            bio = VALUES(bio),
+            is_online = 1,
+            last_seen = VALUES(last_seen)
+    `, [charId, clientData.userId, wx_account, nickname, avatar || '', bio || '', Date.now(), Date.now()]);
     
     // 更新映射
     clientData.wxAccounts.add(wx_account);
@@ -566,16 +556,16 @@ function handleGoOnline(ws, data) {
     });
     
     // 投递离线消息
-    deliverOfflineMessages(ws, wx_account);
+    await deliverOfflineMessages(ws, wx_account);
     
     // 投递待处理的好友申请
-    deliverPendingFriendRequests(ws, wx_account);
+    await deliverPendingFriendRequests(ws, wx_account);
     
     console.log(`[上线] ${nickname} (${wx_account})`);
 }
 
 // 角色下线
-function handleGoOffline(ws, data) {
+async function handleGoOffline(ws, data) {
     const clientData = clients.get(ws);
     const { wx_account } = data;
     
@@ -583,7 +573,10 @@ function handleGoOffline(ws, data) {
         return;
     }
     
-    stmts.setCharOffline.run(Date.now(), wx_account);
+    await db.execute(
+        'UPDATE online_characters SET is_online = 0, last_seen = ? WHERE wx_account = ?',
+        [Date.now(), wx_account]
+    );
     clientData.wxAccounts.delete(wx_account);
     wxAccountToSocket.delete(wx_account);
     
@@ -593,14 +586,14 @@ function handleGoOffline(ws, data) {
 }
 
 // 获取已上线角色
-function handleGetOnlineCharacters(ws) {
+async function handleGetOnlineCharacters(ws) {
     const clientData = clients.get(ws);
     if (!clientData.userId) {
         send(ws, { type: 'online_characters', characters: [] });
         return;
     }
     
-    const chars = stmts.getCharsByUserId.all(clientData.userId);
+    const [chars] = await db.execute('SELECT * FROM online_characters WHERE user_id = ?', [clientData.userId]);
     const onlineChars = chars.filter(c => clientData.wxAccounts.has(c.wx_account));
     
     send(ws, {
@@ -614,21 +607,66 @@ function handleGetOnlineCharacters(ws) {
     });
 }
 
+// 注册角色（不上线，仅用于搜索）
+async function handleRegisterCharacter(ws, data) {
+    const clientData = clients.get(ws);
+    if (!clientData.userId) {
+        sendError(ws, '请先登录');
+        return;
+    }
+    
+    const { wx_account, nickname, avatar, bio } = data;
+    
+    if (!wx_account || !nickname) {
+        sendError(ws, '微信号和昵称不能为空');
+        return;
+    }
+    
+    // 检查微信号是否被其他用户占用
+    const [existing] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [wx_account]);
+    if (existing.length > 0 && existing[0].user_id !== clientData.userId) {
+        sendError(ws, '该微信号已被其他用户使用');
+        return;
+    }
+    
+    // 注册角色（不上线，is_online = 0）
+    const charId = existing.length > 0 ? existing[0].id : uuidv4();
+    await db.execute(`
+        INSERT INTO online_characters (id, user_id, wx_account, nickname, avatar, bio, is_online, last_seen, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            nickname = VALUES(nickname),
+            avatar = VALUES(avatar),
+            bio = VALUES(bio),
+            last_seen = VALUES(last_seen)
+    `, [charId, clientData.userId, wx_account, nickname, avatar || '', bio || '', Date.now(), Date.now()]);
+    
+    console.log(`[注册角色] ${nickname} (${wx_account}) - 未上线，仅用于搜索`);
+}
+
 // 搜索用户
-function handleSearchUser(ws, data) {
+async function handleSearchUser(ws, data) {
     const { wx_account } = data;
     
+    console.log('[搜索] 收到搜索请求:', wx_account);
+    
     if (!wx_account) {
+        console.log('[搜索] 微信号为空');
         send(ws, { type: 'search_result', result: null });
         return;
     }
     
-    const char = stmts.getCharByWxAccount.get(wx_account);
+    // 尝试精确匹配（不区分大小写）
+    const [rows] = await db.execute('SELECT * FROM online_characters WHERE LOWER(wx_account) = LOWER(?)', [wx_account]);
     
-    if (!char) {
+    if (rows.length === 0) {
+        console.log('[搜索] 未找到微信号:', wx_account);
         send(ws, { type: 'search_result', result: null });
         return;
     }
+    
+    const char = rows[0];
+    console.log('[搜索] 找到用户:', char.nickname, '微信号:', char.wx_account, '在线状态:', char.is_online);
     
     send(ws, {
         type: 'search_result',
@@ -643,7 +681,7 @@ function handleSearchUser(ws, data) {
 }
 
 // 发送好友申请
-function handleFriendRequest(ws, data) {
+async function handleFriendRequest(ws, data) {
     const clientData = clients.get(ws);
     const { from_wx_account, to_wx_account, message } = data;
     
@@ -653,25 +691,31 @@ function handleFriendRequest(ws, data) {
     }
     
     // 检查目标是否存在
-    const toChar = stmts.getCharByWxAccount.get(to_wx_account);
-    if (!toChar) {
+    const [toChar] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [to_wx_account]);
+    if (toChar.length === 0) {
         sendError(ws, '目标用户不存在');
         return;
     }
     
     // 检查是否已经是好友
-    const alreadyFriends = stmts.areFriends.get(from_wx_account, to_wx_account, to_wx_account, from_wx_account);
-    if (alreadyFriends) {
+    const [alreadyFriends] = await db.execute(
+        'SELECT 1 FROM friendships WHERE (char_a_wx = ? AND char_b_wx = ?) OR (char_a_wx = ? AND char_b_wx = ?)',
+        [from_wx_account, to_wx_account, to_wx_account, from_wx_account]
+    );
+    if (alreadyFriends.length > 0) {
         sendError(ws, '你们已经是好友了');
         return;
     }
     
     // 创建好友申请
     const requestId = uuidv4();
-    stmts.createFriendRequest.run(requestId, from_wx_account, to_wx_account, message || '');
+    await db.execute(
+        'INSERT INTO friend_requests (id, from_wx_account, to_wx_account, message, created_at) VALUES (?, ?, ?, ?, ?)',
+        [requestId, from_wx_account, to_wx_account, message || '', Date.now()]
+    );
     
     // 获取发送者信息
-    const fromChar = stmts.getCharByWxAccount.get(from_wx_account);
+    const [fromChar] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [from_wx_account]);
     
     // 如果目标在线，立即推送
     const toSocket = wxAccountToSocket.get(to_wx_account);
@@ -681,8 +725,8 @@ function handleFriendRequest(ws, data) {
             request: {
                 id: requestId,
                 from_wx_account,
-                from_nickname: fromChar?.nickname || from_wx_account,
-                from_avatar: fromChar?.avatar || '',
+                from_nickname: fromChar[0]?.nickname || from_wx_account,
+                from_avatar: fromChar[0]?.avatar || '',
                 message: message || '',
                 time: Date.now()
             }
@@ -693,7 +737,7 @@ function handleFriendRequest(ws, data) {
 }
 
 // 接受好友申请
-function handleAcceptFriendRequest(ws, data) {
+async function handleAcceptFriendRequest(ws, data) {
     const clientData = clients.get(ws);
     const { request_id, my_wx_account } = data;
     
@@ -702,27 +746,34 @@ function handleAcceptFriendRequest(ws, data) {
         return;
     }
     
-    const request = stmts.getFriendRequestById.get(request_id);
-    if (!request || request.to_wx_account !== my_wx_account) {
+    const [requests] = await db.execute('SELECT * FROM friend_requests WHERE id = ?', [request_id]);
+    if (requests.length === 0 || requests[0].to_wx_account !== my_wx_account) {
         sendError(ws, '好友申请不存在');
         return;
     }
     
+    const request = requests[0];
     if (request.status !== 'pending') {
         sendError(ws, '该申请已处理');
         return;
     }
     
     // 更新申请状态
-    stmts.updateFriendRequestStatus.run('accepted', Date.now(), request_id);
+    await db.execute(
+        'UPDATE friend_requests SET status = ?, updated_at = ? WHERE id = ?',
+        ['accepted', Date.now(), request_id]
+    );
     
     // 创建好友关系
     const friendshipId = uuidv4();
-    stmts.createFriendship.run(friendshipId, request.from_wx_account, my_wx_account);
+    await db.execute(
+        'INSERT IGNORE INTO friendships (id, char_a_wx, char_b_wx, created_at) VALUES (?, ?, ?, ?)',
+        [friendshipId, request.from_wx_account, my_wx_account, Date.now()]
+    );
     
     // 获取双方信息
-    const myChar = stmts.getCharByWxAccount.get(my_wx_account);
-    const theirChar = stmts.getCharByWxAccount.get(request.from_wx_account);
+    const [myChar] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [my_wx_account]);
+    const [theirChar] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [request.from_wx_account]);
     
     // 通知申请者
     const theirSocket = wxAccountToSocket.get(request.from_wx_account);
@@ -730,9 +781,9 @@ function handleAcceptFriendRequest(ws, data) {
         send(theirSocket, {
             type: 'friend_request_accepted',
             friend_wx_account: my_wx_account,
-            friend_nickname: myChar?.nickname || my_wx_account,
-            friend_avatar: myChar?.avatar || '',
-            friend_bio: myChar?.bio || ''
+            friend_nickname: myChar[0]?.nickname || my_wx_account,
+            friend_avatar: myChar[0]?.avatar || '',
+            friend_bio: myChar[0]?.bio || ''
         });
     }
     
@@ -740,16 +791,16 @@ function handleAcceptFriendRequest(ws, data) {
     send(ws, {
         type: 'friend_request_accepted',
         friend_wx_account: request.from_wx_account,
-        friend_nickname: theirChar?.nickname || request.from_wx_account,
-        friend_avatar: theirChar?.avatar || '',
-        friend_bio: theirChar?.bio || ''
+        friend_nickname: theirChar[0]?.nickname || request.from_wx_account,
+        friend_avatar: theirChar[0]?.avatar || '',
+        friend_bio: theirChar[0]?.bio || ''
     });
     
     console.log(`[好友申请接受] ${request.from_wx_account} <-> ${my_wx_account}`);
 }
 
 // 拒绝好友申请
-function handleRejectFriendRequest(ws, data) {
+async function handleRejectFriendRequest(ws, data) {
     const { request_id, my_wx_account } = data;
     const clientData = clients.get(ws);
     
@@ -758,19 +809,22 @@ function handleRejectFriendRequest(ws, data) {
         return;
     }
     
-    const request = stmts.getFriendRequestById.get(request_id);
-    if (!request || request.to_wx_account !== my_wx_account) {
+    const [requests] = await db.execute('SELECT * FROM friend_requests WHERE id = ?', [request_id]);
+    if (requests.length === 0 || requests[0].to_wx_account !== my_wx_account) {
         sendError(ws, '好友申请不存在');
         return;
     }
     
-    stmts.updateFriendRequestStatus.run('rejected', Date.now(), request_id);
+    await db.execute(
+        'UPDATE friend_requests SET status = ?, updated_at = ? WHERE id = ?',
+        ['rejected', Date.now(), request_id]
+    );
     
-    console.log(`[好友申请拒绝] ${request.from_wx_account} -> ${my_wx_account}`);
+    console.log(`[好友申请拒绝] ${requests[0].from_wx_account} -> ${my_wx_account}`);
 }
 
 // 发送消息
-function handleSendMessage(ws, data) {
+async function handleSendMessage(ws, data) {
     const clientData = clients.get(ws);
     const { from_wx_account, to_wx_account, content } = data;
     
@@ -780,14 +834,17 @@ function handleSendMessage(ws, data) {
     }
     
     // 检查是否是好友
-    const areFriends = stmts.areFriends.get(from_wx_account, to_wx_account, to_wx_account, from_wx_account);
-    if (!areFriends) {
+    const [areFriends] = await db.execute(
+        'SELECT 1 FROM friendships WHERE (char_a_wx = ? AND char_b_wx = ?) OR (char_a_wx = ? AND char_b_wx = ?)',
+        [from_wx_account, to_wx_account, to_wx_account, from_wx_account]
+    );
+    if (areFriends.length === 0) {
         sendError(ws, '你们还不是好友');
         return;
     }
     
     // 获取发送者信息
-    const fromChar = stmts.getCharByWxAccount.get(from_wx_account);
+    const [fromChar] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [from_wx_account]);
     
     // 检查目标是否在线
     const toSocket = wxAccountToSocket.get(to_wx_account);
@@ -795,22 +852,25 @@ function handleSendMessage(ws, data) {
         send(toSocket, {
             type: 'message',
             from_wx_account,
-            from_nickname: fromChar?.nickname || from_wx_account,
-            from_avatar: fromChar?.avatar || '',
+            from_nickname: fromChar[0]?.nickname || from_wx_account,
+            from_avatar: fromChar[0]?.avatar || '',
             content,
             timestamp: Date.now()
         });
     } else {
         // 保存离线消息
         const msgId = uuidv4();
-        stmts.saveOfflineMessage.run(msgId, from_wx_account, to_wx_account, content);
+        await db.execute(
+            'INSERT INTO offline_messages (id, from_wx_account, to_wx_account, content, created_at) VALUES (?, ?, ?, ?, ?)',
+            [msgId, from_wx_account, to_wx_account, content, Date.now()]
+        );
     }
     
     console.log(`[消息] ${from_wx_account} -> ${to_wx_account}`);
 }
 
 // 获取待处理的好友申请
-function handleGetPendingRequests(ws, data) {
+async function handleGetPendingRequests(ws, data) {
     const clientData = clients.get(ws);
     const { wx_account } = data;
     
@@ -818,19 +878,23 @@ function handleGetPendingRequests(ws, data) {
         return;
     }
     
-    const requests = stmts.getPendingRequestsForWx.all(wx_account, 'pending');
+    const [requests] = await db.execute(
+        'SELECT * FROM friend_requests WHERE to_wx_account = ? AND status = ?',
+        [wx_account, 'pending']
+    );
     
-    const result = requests.map(r => {
-        const fromChar = stmts.getCharByWxAccount.get(r.from_wx_account);
-        return {
+    const result = [];
+    for (const r of requests) {
+        const [fromChar] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [r.from_wx_account]);
+        result.push({
             id: r.id,
             from_wx_account: r.from_wx_account,
-            from_nickname: fromChar?.nickname || r.from_wx_account,
-            from_avatar: fromChar?.avatar || '',
+            from_nickname: fromChar[0]?.nickname || r.from_wx_account,
+            from_avatar: fromChar[0]?.avatar || '',
             message: r.message,
             time: r.created_at
-        };
-    });
+        });
+    }
     
     send(ws, {
         type: 'pending_friend_requests',
@@ -839,57 +903,66 @@ function handleGetPendingRequests(ws, data) {
 }
 
 // 投递离线消息
-function deliverOfflineMessages(ws, wxAccount) {
-    const messages = stmts.getOfflineMessages.all(wxAccount);
+async function deliverOfflineMessages(ws, wxAccount) {
+    const [messages] = await db.execute(
+        'SELECT * FROM offline_messages WHERE to_wx_account = ? AND delivered = 0 ORDER BY created_at',
+        [wxAccount]
+    );
     
-    messages.forEach(msg => {
-        const fromChar = stmts.getCharByWxAccount.get(msg.from_wx_account);
+    for (const msg of messages) {
+        const [fromChar] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [msg.from_wx_account]);
         send(ws, {
             type: 'message',
             from_wx_account: msg.from_wx_account,
-            from_nickname: fromChar?.nickname || msg.from_wx_account,
-            from_avatar: fromChar?.avatar || '',
+            from_nickname: fromChar[0]?.nickname || msg.from_wx_account,
+            from_avatar: fromChar[0]?.avatar || '',
             content: msg.content,
             timestamp: msg.created_at
         });
-    });
+    }
     
     if (messages.length > 0) {
-        stmts.markMessagesDelivered.run(wxAccount);
+        await db.execute('UPDATE offline_messages SET delivered = 1 WHERE to_wx_account = ?', [wxAccount]);
         console.log(`[离线消息] 投递 ${messages.length} 条消息给 ${wxAccount}`);
     }
 }
 
 // 投递待处理的好友申请
-function deliverPendingFriendRequests(ws, wxAccount) {
-    const requests = stmts.getPendingRequestsForWx.all(wxAccount, 'pending');
+async function deliverPendingFriendRequests(ws, wxAccount) {
+    const [requests] = await db.execute(
+        'SELECT * FROM friend_requests WHERE to_wx_account = ? AND status = ?',
+        [wxAccount, 'pending']
+    );
     
-    requests.forEach(r => {
-        const fromChar = stmts.getCharByWxAccount.get(r.from_wx_account);
+    for (const r of requests) {
+        const [fromChar] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [r.from_wx_account]);
         send(ws, {
             type: 'friend_request',
             request: {
                 id: r.id,
                 from_wx_account: r.from_wx_account,
-                from_nickname: fromChar?.nickname || r.from_wx_account,
-                from_avatar: fromChar?.avatar || '',
+                from_nickname: fromChar[0]?.nickname || r.from_wx_account,
+                from_avatar: fromChar[0]?.avatar || '',
                 message: r.message,
                 time: r.created_at
             }
         });
-    });
+    }
 }
 
 // 处理断开连接
-function handleDisconnect(ws) {
+async function handleDisconnect(ws) {
     const clientData = clients.get(ws);
     if (!clientData) return;
     
     // 将所有角色设为离线
-    clientData.wxAccounts.forEach(wx => {
-        stmts.setCharOffline.run(Date.now(), wx);
+    for (const wx of clientData.wxAccounts) {
+        await db.execute(
+            'UPDATE online_characters SET is_online = 0, last_seen = ? WHERE wx_account = ?',
+            [Date.now(), wx]
+        );
         wxAccountToSocket.delete(wx);
-    });
+    }
     
     clients.delete(ws);
 }
@@ -909,7 +982,7 @@ function sendError(ws, message) {
 // ==================== 联机群聊功能 ====================
 
 // 创建联机群聊
-function handleCreateOnlineGroup(ws, data) {
+async function handleCreateOnlineGroup(ws, data) {
     const clientData = clients.get(ws);
     if (!clientData.userId) {
         sendError(ws, '请先登录');
@@ -930,19 +1003,20 @@ function handleCreateOnlineGroup(ws, data) {
     
     // 创建群聊
     const groupId = uuidv4();
-    stmts.createGroup.run(groupId, name, '', my_wx_account);
+    await db.execute(
+        'INSERT INTO online_groups (id, name, avatar, creator_wx, created_at) VALUES (?, ?, ?, ?, ?)',
+        [groupId, name, '', my_wx_account, Date.now()]
+    );
     
     // 添加创建者为成员
     const memberId = uuidv4();
-    stmts.addGroupMember.run(
-        memberId, groupId, my_wx_account,
-        my_character?.name || null,
-        my_character?.avatar || null,
-        my_character?.desc || null
+    await db.execute(
+        'INSERT INTO online_group_members (id, group_id, user_wx, character_name, character_avatar, character_desc, joined_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [memberId, groupId, my_wx_account, my_character?.name || null, my_character?.avatar || null, my_character?.desc || null, Date.now()]
     );
     
     // 获取创建者信息
-    const creatorChar = stmts.getCharByWxAccount.get(my_wx_account);
+    const [creatorChar] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [my_wx_account]);
     
     // 给创建者发送成功消息
     send(ws, {
@@ -965,7 +1039,7 @@ function handleCreateOnlineGroup(ws, data) {
                     group_id: groupId,
                     group_name: name,
                     inviter_wx: my_wx_account,
-                    inviter_name: creatorChar?.nickname || my_wx_account
+                    inviter_name: creatorChar[0]?.nickname || my_wx_account
                 });
             }
         });
@@ -975,7 +1049,7 @@ function handleCreateOnlineGroup(ws, data) {
 }
 
 // 邀请好友加入群聊
-function handleInviteToGroup(ws, data) {
+async function handleInviteToGroup(ws, data) {
     const clientData = clients.get(ws);
     const { group_id, my_wx_account, invite_wx_account } = data;
     
@@ -985,21 +1059,21 @@ function handleInviteToGroup(ws, data) {
     }
     
     // 检查群是否存在
-    const group = stmts.getGroupById.get(group_id);
-    if (!group) {
+    const [group] = await db.execute('SELECT * FROM online_groups WHERE id = ?', [group_id]);
+    if (group.length === 0) {
         sendError(ws, '群聊不存在');
         return;
     }
     
     // 检查邀请者是否是群成员
-    const member = stmts.getGroupMember.get(group_id, my_wx_account);
-    if (!member) {
+    const [member] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ? AND user_wx = ?', [group_id, my_wx_account]);
+    if (member.length === 0) {
         sendError(ws, '你不是该群的成员');
         return;
     }
     
     // 获取邀请者信息
-    const inviterChar = stmts.getCharByWxAccount.get(my_wx_account);
+    const [inviterChar] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [my_wx_account]);
     
     // 发送邀请
     const inviteSocket = wxAccountToSocket.get(invite_wx_account);
@@ -1007,17 +1081,17 @@ function handleInviteToGroup(ws, data) {
         send(inviteSocket, {
             type: 'group_invite',
             group_id: group_id,
-            group_name: group.name,
+            group_name: group[0].name,
             inviter_wx: my_wx_account,
-            inviter_name: inviterChar?.nickname || my_wx_account
+            inviter_name: inviterChar[0]?.nickname || my_wx_account
         });
     }
     
-    console.log(`[群聊] 邀请 ${invite_wx_account} 加入群 ${group.name}`);
+    console.log(`[群聊] 邀请 ${invite_wx_account} 加入群 ${group[0].name}`);
 }
 
 // 加入群聊
-function handleJoinOnlineGroup(ws, data) {
+async function handleJoinOnlineGroup(ws, data) {
     const clientData = clients.get(ws);
     const { group_id, my_wx_account, my_character } = data;
     
@@ -1027,38 +1101,36 @@ function handleJoinOnlineGroup(ws, data) {
     }
     
     // 检查群是否存在
-    const group = stmts.getGroupById.get(group_id);
-    if (!group) {
+    const [group] = await db.execute('SELECT * FROM online_groups WHERE id = ?', [group_id]);
+    if (group.length === 0) {
         sendError(ws, '群聊不存在');
         return;
     }
     
     // 检查是否已是成员
-    const existingMember = stmts.getGroupMember.get(group_id, my_wx_account);
-    if (existingMember) {
+    const [existingMember] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ? AND user_wx = ?', [group_id, my_wx_account]);
+    if (existingMember.length > 0) {
         // 已经是成员，更新角色信息
         if (my_character) {
-            stmts.updateGroupMemberCharacter.run(
-                my_character.name, my_character.avatar, my_character.desc,
-                group_id, my_wx_account
+            await db.execute(
+                'UPDATE online_group_members SET character_name = ?, character_avatar = ?, character_desc = ? WHERE group_id = ? AND user_wx = ?',
+                [my_character.name, my_character.avatar, my_character.desc, group_id, my_wx_account]
             );
         }
     } else {
         // 添加为新成员
         const memberId = uuidv4();
-        stmts.addGroupMember.run(
-            memberId, group_id, my_wx_account,
-            my_character?.name || null,
-            my_character?.avatar || null,
-            my_character?.desc || null
+        await db.execute(
+            'INSERT INTO online_group_members (id, group_id, user_wx, character_name, character_avatar, character_desc, joined_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [memberId, group_id, my_wx_account, my_character?.name || null, my_character?.avatar || null, my_character?.desc || null, Date.now()]
         );
     }
     
     // 获取加入者信息
-    const joinerChar = stmts.getCharByWxAccount.get(my_wx_account);
+    const [joinerChar] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [my_wx_account]);
     
     // 通知所有群成员
-    const members = stmts.getGroupMembers.all(group_id);
+    const [members] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ?', [group_id]);
     members.forEach(m => {
         const memberSocket = wxAccountToSocket.get(m.user_wx);
         if (memberSocket) {
@@ -1067,8 +1139,8 @@ function handleJoinOnlineGroup(ws, data) {
                 group_id: group_id,
                 member: {
                     user_wx: my_wx_account,
-                    user_name: joinerChar?.nickname || my_wx_account,
-                    user_avatar: joinerChar?.avatar || '',
+                    user_name: joinerChar[0]?.nickname || my_wx_account,
+                    user_avatar: joinerChar[0]?.avatar || '',
                     character_name: my_character?.name || null,
                     character_avatar: my_character?.avatar || null
                 }
@@ -1081,17 +1153,17 @@ function handleJoinOnlineGroup(ws, data) {
         type: 'online_group_joined',
         group: {
             id: group_id,
-            name: group.name,
-            creator_wx: group.creator_wx,
-            created_at: group.created_at
+            name: group[0].name,
+            creator_wx: group[0].creator_wx,
+            created_at: group[0].created_at
         }
     });
     
-    console.log(`[群聊] ${my_wx_account} 加入群 ${group.name}`);
+    console.log(`[群聊] ${my_wx_account} 加入群 ${group[0].name}`);
 }
 
 // 获取我的联机群聊列表
-function handleGetOnlineGroups(ws, data) {
+async function handleGetOnlineGroups(ws, data) {
     const clientData = clients.get(ws);
     const { my_wx_account } = data;
     
@@ -1100,7 +1172,11 @@ function handleGetOnlineGroups(ws, data) {
         return;
     }
     
-    const groups = stmts.getGroupsByMember.all(my_wx_account);
+    const [groups] = await db.execute(`
+        SELECT g.* FROM online_groups g
+        INNER JOIN online_group_members m ON g.id = m.group_id
+        WHERE m.user_wx = ?
+    `, [my_wx_account]);
     
     send(ws, {
         type: 'online_groups_list',
@@ -1114,7 +1190,7 @@ function handleGetOnlineGroups(ws, data) {
 }
 
 // 获取群聊消息记录
-function handleGetGroupMessages(ws, data) {
+async function handleGetGroupMessages(ws, data) {
     const clientData = clients.get(ws);
     const { group_id, my_wx_account, limit, since } = data;
     
@@ -1124,30 +1200,56 @@ function handleGetGroupMessages(ws, data) {
     }
     
     // 检查是否是群成员
-    const member = stmts.getGroupMember.get(group_id, my_wx_account);
-    if (!member) {
+    const [member] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ? AND user_wx = ?', [group_id, my_wx_account]);
+    if (member.length === 0) {
         sendError(ws, '你不是该群的成员');
         return;
     }
     
     let messages;
     if (since) {
-        messages = stmts.getGroupMessagesSince.all(group_id, since);
+        [messages] = await db.execute('SELECT * FROM online_group_messages WHERE group_id = ? AND created_at > ? ORDER BY created_at ASC', [group_id, since]);
     } else if (limit) {
-        messages = stmts.getGroupMessagesLimit.all(group_id, limit).reverse();
+        [messages] = await db.execute('SELECT * FROM online_group_messages WHERE group_id = ? ORDER BY created_at DESC LIMIT ?', [group_id, limit]);
+        messages.reverse();
     } else {
-        messages = stmts.getGroupMessages.all(group_id);
+        [messages] = await db.execute('SELECT * FROM online_group_messages WHERE group_id = ? ORDER BY created_at ASC', [group_id]);
+    }
+    
+    // 为每条消息补充头像信息
+    const [members] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ?', [group_id]);
+    const memberMap = {};
+    members.forEach(m => {
+        memberMap[m.user_wx] = m;
+    });
+    
+    const messagesWithAvatar = [];
+    for (const msg of messages) {
+        if (msg.sender_type === 'system') {
+            messagesWithAvatar.push(msg);
+            continue;
+        }
+        
+        // 获取发送者信息
+        const [senderChar] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [msg.sender_wx]);
+        const memberInfo = memberMap[msg.sender_wx];
+        
+        messagesWithAvatar.push({
+            ...msg,
+            sender_avatar: senderChar[0]?.avatar || '',
+            character_avatar: msg.sender_type === 'character' ? (memberInfo?.character_avatar || '') : null
+        });
     }
     
     send(ws, {
         type: 'group_messages',
         group_id: group_id,
-        messages: messages
+        messages: messagesWithAvatar
     });
 }
 
 // 发送群聊消息
-function handleSendGroupMessage(ws, data) {
+async function handleSendGroupMessage(ws, data) {
     const clientData = clients.get(ws);
     const { group_id, my_wx_account, sender_type, sender_name, character_name, content, msg_type } = data;
     
@@ -1157,30 +1259,30 @@ function handleSendGroupMessage(ws, data) {
     }
     
     // 检查是否是群成员
-    const member = stmts.getGroupMember.get(group_id, my_wx_account);
-    if (!member) {
+    const [member] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ? AND user_wx = ?', [group_id, my_wx_account]);
+    if (member.length === 0) {
         sendError(ws, '你不是该群的成员');
         return;
     }
     
     // 如果是角色发的消息，验证是否是该用户的角色
-    if (sender_type === 'character' && character_name !== member.character_name) {
+    if (sender_type === 'character' && character_name !== member[0].character_name) {
         sendError(ws, '你只能使用自己带入群的角色发言');
         return;
     }
     
     // 保存消息
     const msgId = uuidv4();
-    stmts.saveGroupMessage.run(
-        msgId, group_id, sender_type || 'user', my_wx_account,
-        sender_name, character_name || null, content, msg_type || 'text'
+    await db.execute(
+        'INSERT INTO online_group_messages (id, group_id, sender_type, sender_wx, sender_name, character_name, content, msg_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [msgId, group_id, sender_type || 'user', my_wx_account, sender_name, character_name || null, content, msg_type || 'text', Date.now()]
     );
     
     // 获取发送者头像
-    const senderChar = stmts.getCharByWxAccount.get(my_wx_account);
+    const [senderChar] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [my_wx_account]);
     
     // 广播给所有群成员
-    const members = stmts.getGroupMembers.all(group_id);
+    const [members] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ?', [group_id]);
     const msgData = {
         type: 'group_message',
         group_id: group_id,
@@ -1189,9 +1291,9 @@ function handleSendGroupMessage(ws, data) {
             sender_type: sender_type || 'user',
             sender_wx: my_wx_account,
             sender_name: sender_name,
-            sender_avatar: senderChar?.avatar || '',
+            sender_avatar: senderChar[0]?.avatar || '',
             character_name: character_name || null,
-            character_avatar: sender_type === 'character' ? member.character_avatar : null,
+            character_avatar: sender_type === 'character' ? member[0].character_avatar : null,
             content: content,
             msg_type: msg_type || 'text',
             created_at: Date.now()
@@ -1209,7 +1311,7 @@ function handleSendGroupMessage(ws, data) {
 }
 
 // 处理群聊"正在输入"状态开始
-function handleGroupTypingStart(ws, data) {
+async function handleGroupTypingStart(ws, data) {
     const clientData = clients.get(ws);
     const { group_id, my_wx_account, character_name } = data;
     
@@ -1218,13 +1320,13 @@ function handleGroupTypingStart(ws, data) {
     }
     
     // 检查是否是群成员
-    const member = stmts.getGroupMember.get(group_id, my_wx_account);
-    if (!member) {
+    const [member] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ? AND user_wx = ?', [group_id, my_wx_account]);
+    if (member.length === 0) {
         return;
     }
     
     // 广播给群里的其他成员（除了自己）
-    const members = stmts.getGroupMembers.all(group_id);
+    const [members] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ?', [group_id]);
     members.forEach(m => {
         if (m.user_wx !== my_wx_account) { // 不发给自己
             const memberSocket = wxAccountToSocket.get(m.user_wx);
@@ -1243,7 +1345,7 @@ function handleGroupTypingStart(ws, data) {
 }
 
 // 处理群聊"正在输入"状态结束
-function handleGroupTypingStop(ws, data) {
+async function handleGroupTypingStop(ws, data) {
     const clientData = clients.get(ws);
     const { group_id, my_wx_account } = data;
     
@@ -1252,13 +1354,13 @@ function handleGroupTypingStop(ws, data) {
     }
     
     // 检查是否是群成员
-    const member = stmts.getGroupMember.get(group_id, my_wx_account);
-    if (!member) {
+    const [member] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ? AND user_wx = ?', [group_id, my_wx_account]);
+    if (member.length === 0) {
         return;
     }
     
     // 广播给群里的其他成员（除了自己）
-    const members = stmts.getGroupMembers.all(group_id);
+    const [members] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ?', [group_id]);
     members.forEach(m => {
         if (m.user_wx !== my_wx_account) { // 不发给自己
             const memberSocket = wxAccountToSocket.get(m.user_wx);
@@ -1276,7 +1378,7 @@ function handleGroupTypingStop(ws, data) {
 }
 
 // 获取群成员列表
-function handleGetGroupMembers(ws, data) {
+async function handleGetGroupMembers(ws, data) {
     const clientData = clients.get(ws);
     const { group_id, my_wx_account } = data;
     
@@ -1286,27 +1388,28 @@ function handleGetGroupMembers(ws, data) {
     }
     
     // 检查是否是群成员
-    const member = stmts.getGroupMember.get(group_id, my_wx_account);
-    if (!member) {
+    const [member] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ? AND user_wx = ?', [group_id, my_wx_account]);
+    if (member.length === 0) {
         sendError(ws, '你不是该群的成员');
         return;
     }
     
-    const members = stmts.getGroupMembers.all(group_id);
+    const [members] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ?', [group_id]);
     
     // 获取每个成员的在线状态和昵称
-    const membersWithInfo = members.map(m => {
-        const charInfo = stmts.getCharByWxAccount.get(m.user_wx);
-        return {
+    const membersWithInfo = [];
+    for (const m of members) {
+        const [charInfo] = await db.execute('SELECT * FROM online_characters WHERE wx_account = ?', [m.user_wx]);
+        membersWithInfo.push({
             user_wx: m.user_wx,
-            user_name: charInfo?.nickname || m.user_wx,
-            user_avatar: charInfo?.avatar || '',
-            is_online: charInfo?.is_online === 1,
+            user_name: charInfo[0]?.nickname || m.user_wx,
+            user_avatar: charInfo[0]?.avatar || '',
+            is_online: charInfo[0]?.is_online === 1,
             character_name: m.character_name,
             character_avatar: m.character_avatar,
             character_desc: m.character_desc
-        };
-    });
+        });
+    }
     
     send(ws, {
         type: 'group_members',
@@ -1316,7 +1419,7 @@ function handleGetGroupMembers(ws, data) {
 }
 
 // 更新群内角色
-function handleUpdateGroupCharacter(ws, data) {
+async function handleUpdateGroupCharacter(ws, data) {
     const clientData = clients.get(ws);
     const { group_id, my_wx_account, character } = data;
     
@@ -1326,18 +1429,16 @@ function handleUpdateGroupCharacter(ws, data) {
     }
     
     // 检查是否是群成员
-    const member = stmts.getGroupMember.get(group_id, my_wx_account);
-    if (!member) {
+    const [member] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ? AND user_wx = ?', [group_id, my_wx_account]);
+    if (member.length === 0) {
         sendError(ws, '你不是该群的成员');
         return;
     }
     
     // 更新角色信息
-    stmts.updateGroupMemberCharacter.run(
-        character?.name || null,
-        character?.avatar || null,
-        character?.desc || null,
-        group_id, my_wx_account
+    await db.execute(
+        'UPDATE online_group_members SET character_name = ?, character_avatar = ?, character_desc = ? WHERE group_id = ? AND user_wx = ?',
+        [character?.name || null, character?.avatar || null, character?.desc || null, group_id, my_wx_account]
     );
     
     send(ws, {
@@ -1349,23 +1450,174 @@ function handleUpdateGroupCharacter(ws, data) {
     console.log(`[群聊] ${my_wx_account} 更新群 ${group_id} 的角色为 ${character?.name || '无'}`);
 }
 
+// 领取群聊红包
+async function handleClaimGroupRedPacket(ws, data) {
+    const clientData = clients.get(ws);
+    const { group_id, my_wx_account, message_id, claimer_name } = data;
+    
+    if (!clientData.wxAccounts.has(my_wx_account)) {
+        sendError(ws, '你没有使用该微信号上线');
+        return;
+    }
+    
+    // 检查是否是群成员
+    const [member] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ? AND user_wx = ?', [group_id, my_wx_account]);
+    if (member.length === 0) {
+        sendError(ws, '你不是该群的成员');
+        return;
+    }
+    
+    // 查询消息
+    const [messages] = await db.execute('SELECT * FROM online_group_messages WHERE group_id = ? AND id = ?', [group_id, message_id]);
+    if (messages.length === 0 || messages[0].msg_type !== 'redpacket') {
+        sendError(ws, '红包不存在');
+        return;
+    }
+    
+    const msg = messages[0];
+    let redpacketData;
+    try {
+        redpacketData = JSON.parse(msg.content);
+    } catch(e) {
+        sendError(ws, '红包数据错误');
+        return;
+    }
+    
+    // 初始化数据结构
+    if (!redpacketData.claimed) redpacketData.claimed = [];
+    if (!redpacketData.claimedAmounts) redpacketData.claimedAmounts = {};
+    
+    // 检查是否已领取过
+    if (redpacketData.claimed.includes(my_wx_account)) {
+        sendError(ws, '你已领取过该红包');
+        return;
+    }
+    
+    // 检查是否已领完
+    const claimedCount = redpacketData.claimed.length;
+    if (claimedCount >= redpacketData.count) {
+        sendError(ws, '红包已被领完');
+        return;
+    }
+    
+    // 计算领取金额
+    const totalAmount = parseFloat(redpacketData.totalAmount);
+    const remaining = redpacketData.count - claimedCount;
+    const alreadyClaimed = Object.values(redpacketData.claimedAmounts).reduce((a, b) => a + parseFloat(b), 0);
+    const remainingAmount = totalAmount - alreadyClaimed;
+    
+    let claimAmount = 0;
+    if (redpacketData.redpacketType === 'lucky') {
+        // 拼手气红包
+        if (remaining === 1) {
+            claimAmount = remainingAmount;
+        } else {
+            const maxAmount = remainingAmount - (remaining - 1) * 0.01;
+            claimAmount = Math.random() * maxAmount * 0.8 + 0.01;
+            claimAmount = Math.min(claimAmount, maxAmount);
+        }
+    } else {
+        // 普通红包：剩余金额平均分
+        claimAmount = remainingAmount / remaining;
+    }
+    
+    claimAmount = parseFloat(claimAmount.toFixed(2));
+    
+    // 验证金额不超过剩余金额
+    if (claimAmount > remainingAmount || claimAmount <= 0) {
+        sendError(ws, '红包金额异常');
+        console.error('[红包] 金额异常:', { claimAmount, remainingAmount, totalAmount, alreadyClaimed });
+        return;
+    }
+    
+    // 更新红包数据
+    redpacketData.claimed.push(my_wx_account);
+    redpacketData.claimedAmounts[my_wx_account] = claimAmount.toFixed(2);
+    
+    // 更新数据库中的消息
+    await db.execute('UPDATE online_group_messages SET content = ? WHERE id = ?', [JSON.stringify(redpacketData), message_id]);
+    
+    // 广播系统消息
+    const [members] = await db.execute('SELECT * FROM online_group_members WHERE group_id = ?', [group_id]);
+    const systemMsg = {
+        type: 'group_message',
+        group_id: group_id,
+        message: {
+            id: uuidv4(),
+            sender_type: 'system',
+            sender_wx: 'system',
+            sender_name: '系统',
+            content: `${claimer_name || my_wx_account} 领取了红包，获得 ¥${claimAmount.toFixed(2)}`,
+            msg_type: 'system',
+            created_at: Date.now()
+        }
+    };
+    
+    members.forEach(m => {
+        const memberSocket = wxAccountToSocket.get(m.user_wx);
+        if (memberSocket) {
+            send(memberSocket, systemMsg);
+        }
+    });
+    
+    // 广播红包状态更新
+    const updateMsg = {
+        type: 'redpacket_claimed',
+        group_id: group_id,
+        message_id: message_id,
+        claimer_wx: my_wx_account,
+        claim_amount: claimAmount.toFixed(2),
+        redpacket_data: redpacketData
+    };
+    
+    members.forEach(m => {
+        const memberSocket = wxAccountToSocket.get(m.user_wx);
+        if (memberSocket) {
+            send(memberSocket, updateMsg);
+        }
+    });
+    
+    console.log(`[红包] ${my_wx_account} 领取红包 ${message_id}，获得 ¥${claimAmount.toFixed(2)}`);
+}
+
 // ==================== 联机群聊功能结束 ====================
 
+// 启动服务器
+async function startServer() {
+    try {
+        // 先初始化数据库
+        await initDB();
+        
+        // 再启动 HTTP + WebSocket 服务
+        server.listen(PORT, '0.0.0.0', () => {
+            console.log(`🚀 联机服务器已启动，端口: ${PORT}`);
+            console.log(`🔗 WebSocket 地址: ws://localhost:${PORT}`);
+            console.log(`🔗 健康检查: http://localhost:${PORT}`);
+        });
+    } catch (error) {
+        console.error('❌ 服务器启动失败:', error);
+        process.exit(1);
+    }
+}
+
 // 优雅关闭
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
     console.log('\n正在关闭服务器...');
     
     // 将所有角色设为离线
-    db.exec('UPDATE online_characters SET is_online = 0');
+    await db.execute('UPDATE online_characters SET is_online = 0');
     
     // 关闭 WebSocket 服务器
     wss.close();
     
     // 关闭 HTTP 服务器
-    server.close(() => {
-        db.close();
+    server.close(async () => {
+        // 关闭数据库连接池
+        await db.end();
         console.log('服务器已关闭');
         process.exit(0);
     });
 });
 
+// 启动
+startServer();
