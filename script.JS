@@ -5236,7 +5236,7 @@ ${loreContext}
 请注意：不要重复输出名字前缀，直接输出回复内容。
 
 【重要回复规则 - 必须严格遵守】
-1. **必须**模拟短信连发消息的习惯：请生成 1 到 3 条短消息，不能只发一条！
+1. **必须**模拟短信连发消息的习惯：请生成 ${targetChar.reply_min_count || 1} 到 ${targetChar.reply_max_count || 3} 条短消息${(targetChar.reply_min_count || 1) === 1 ? '' : '，不能只发一条'}！
 2. **必须**使用分隔符 "|||" 来隔开每一条消息。
 3. **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
 4. 每条消息要简短，5-15个字最佳，像真实短信聊天一样分多条发送。
@@ -10491,6 +10491,10 @@ ${chatContext || '（没有聊天记录）'}
             
             // 5. 回显上下文条数设置（默认20条）
             document.getElementById('detail-context-count').value = char.context_message_count || 20;
+            
+            // 5.5. 回显回复消息条数设置（默认1~3条）
+            document.getElementById('detail-reply-min-count').value = char.reply_min_count || 1;
+            document.getElementById('detail-reply-max-count').value = char.reply_max_count || 3;
 
             // 6. 加载挂载的表情包库
             updateMountedStickerCount();
@@ -10583,6 +10587,10 @@ async function saveChatDetail() {
     // 上下文条数设置
     const contextCount = parseInt(document.getElementById('detail-context-count').value);
     
+    // 回复消息条数范围设置
+    const replyMinCount = parseInt(document.getElementById('detail-reply-min-count').value);
+    const replyMaxCount = parseInt(document.getElementById('detail-reply-max-count').value);
+    
     // AI查岗设置
     const allowCheckEnabled = document.getElementById('detail-allow-check-switch').checked;
     
@@ -10601,6 +10609,8 @@ async function saveChatDetail() {
     char.auto_reply_enabled = autoEnabled;
     char.auto_reply_interval = autoInterval > 0 ? autoInterval : null;
     char.context_message_count = contextCount > 0 ? contextCount : 20; // 默认20条
+    char.reply_min_count = (replyMinCount > 0 && replyMinCount <= 10) ? replyMinCount : 1; // 默认1条
+    char.reply_max_count = (replyMaxCount > 0 && replyMaxCount <= 10) ? replyMaxCount : 3; // 默认3条
     char.allow_ai_check_account = allowCheckEnabled; // 保存查岗开关状态
     char.auto_summary_enabled = autoSummaryEnabled; // 自动总结开关
     char.summary_interval = summaryInterval > 0 ? summaryInterval : 50; // 总结间隔，默认50条
@@ -11271,7 +11281,7 @@ ${loreContext}
 - **撤回消息**：使用 ((RECALL)) 可以撤回你刚才发送的最后一条消息（适用于发错消息、说错话、后悔等场景）
 
 【重要指令 - 必须严格遵守】
-1. **必须**模拟微信连发消息的习惯：请生成 2 到 4 条短消息，不能只发一条！
+1. **必须**模拟微信连发消息的习惯：请生成 ${char.reply_min_count || 1} 到 ${char.reply_max_count || 3} 条短消息${(char.reply_min_count || 1) === 1 ? '' : '，不能只发一条'}！
 2. **必须**使用分隔符 "|||" 来隔开每一条消息。
 3. **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
    - 错误示例：嘿在吗？刚刚看到个好玩的视频，发给你看看
@@ -16085,7 +16095,7 @@ ${loreContext}
   images: 2
 
 【重要回复规则 - 必须严格遵守】
-1. **必须**模拟微信连发消息的习惯：请生成 2 到 4 条短消息，不能只发一条！
+1. **必须**模拟微信连发消息的习惯：请生成 ${char.reply_min_count || 1} 到 ${char.reply_max_count || 3} 条短消息${(char.reply_min_count || 1) === 1 ? '' : '，不能只发一条'}！
 2. **必须**使用分隔符 "|||" 来隔开每一条消息。
 3. **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
    - 错误示例：嘿在吗？刚刚看到个好玩的视频，发给你看看
@@ -26893,14 +26903,38 @@ async function generateChatSummary(chatType, chatId, accountId, chatHistory) {
         throw new Error('聊天记录太少');
     }
     
+    // 获取真实姓名
+    let charName = '对方';
+    let userName = '我';
+    
+    if (chatType === 'private') {
+        // 私聊：获取角色名和用户名
+        const char = await db.characters.get(parseInt(chatId));
+        if (char) {
+            charName = char.remark || char.name;
+            if (char.linked_user_id) {
+                const user = await db.characters.get(char.linked_user_id);
+                if (user) {
+                    userName = user.name;
+                }
+            }
+        }
+    } else if (chatType === 'group') {
+        // 群聊：使用群名
+        const group = await db.group_chats.get(parseInt(chatId));
+        if (group) {
+            charName = group.name || '群聊';
+        }
+    }
+    
     // 计算时间范围
     const firstMsgTime = recentMessages[0].time || recentMessages[0].timestamp || Date.now();
     const lastMsgTime = recentMessages[recentMessages.length - 1].time || recentMessages[recentMessages.length - 1].timestamp || Date.now();
     const timeRange = formatTimeRange(firstMsgTime, lastMsgTime);
     
-    // 构建聊天内容文本
+    // 构建聊天内容文本（使用真实姓名）
     let chatContent = recentMessages.map(msg => {
-        const role = msg.role === 'user' ? '我' : (msg.name || 'AI');
+        const role = msg.role === 'user' ? userName : (msg.name || charName);
         const content = msg.content || msg.message || '';
         return `${role}: ${content}`;
     }).join('\n');
@@ -26909,13 +26943,16 @@ async function generateChatSummary(chatType, chatId, accountId, chatHistory) {
     const systemPrompt = `你是一个专业的聊天记录总结助手。请根据以下聊天记录，生成一份简洁但完整的总结。
 
 总结要求：
-1. 用第三人称描述对话双方的交流内容
-2. 提炼出主要话题和关键信息
-3. 如果有重要的情感变化或事件，要特别指出
-4. 总结长度控制在200-400字之间
-5. 使用自然流畅的中文表达
-6. 如果能提取3-5个关键词，请在最后用【关键词】标注
+1. **必须包含时间信息**：在总结开头注明时间段，例如"在X月X日至X月X日期间"
+2. **使用真实姓名**：总结中直接使用"${userName}"和"${charName}"，严禁使用"AI"、"助手"、"机器人"等词汇
+3. 用第三人称视角客观描述对话双方的交流内容
+4. 提炼出主要话题和关键信息
+5. 如果有重要的情感变化或事件，要特别指出
+6. 总结长度控制在200-400字之间
+7. 使用自然流畅的中文表达
+8. 如果能提取3-5个关键词，请在最后用【关键词】标注
 
+聊天时间：${timeRange}
 聊天记录如下：
 ${chatContent}`;
 
@@ -26959,19 +26996,34 @@ function formatTimeRange(startTime, endTime) {
     const start = new Date(startTime);
     const end = new Date(endTime);
     
+    const formatDateTime = (d) => {
+        const month = d.getMonth() + 1;
+        const day = d.getDate();
+        const hour = String(d.getHours()).padStart(2, '0');
+        const minute = String(d.getMinutes()).padStart(2, '0');
+        return `${month}月${day}日 ${hour}:${minute}`;
+    };
+    
     const formatDate = (d) => {
         const month = d.getMonth() + 1;
         const day = d.getDate();
         return `${month}月${day}日`;
     };
     
-    const startStr = formatDate(start);
-    const endStr = formatDate(end);
+    const startDate = formatDate(start);
+    const endDate = formatDate(end);
     
-    if (startStr === endStr) {
-        return startStr;
+    // 如果是同一天，显示具体时间段
+    if (startDate === endDate) {
+        const startHour = String(start.getHours()).padStart(2, '0');
+        const startMinute = String(start.getMinutes()).padStart(2, '0');
+        const endHour = String(end.getHours()).padStart(2, '0');
+        const endMinute = String(end.getMinutes()).padStart(2, '0');
+        return `${startDate} ${startHour}:${startMinute} - ${endHour}:${endMinute}`;
     }
-    return `${startStr} - ${endStr}`;
+    
+    // 跨天显示完整时间
+    return `${formatDateTime(start)} - ${formatDateTime(end)}`;
 }
 
 // 更新总结计数显示
@@ -30302,7 +30354,7 @@ ${pendingRedPackets.map(rp => `- 红包ID: ${rp.id}, 祝福语: "${rp.wish}", �
 ` : ''}
 
 【重要回复规则 - 必须严格遵守】
-1. **必须**模拟微信连发消息的习惯：请生成 2 到 4 条短消息，不能只发一条！
+1. **必须**模拟微信连发消息的习惯：请生成 ${myOnlineGroupCharacter.reply_min_count || 1} 到 ${myOnlineGroupCharacter.reply_max_count || 3} 条短消息${(myOnlineGroupCharacter.reply_min_count || 1) === 1 ? '' : '，不能只发一条'}！
 2. **必须**使用分隔符 "|||" 来隔开每一条消息。
 3. **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
    - 错误示例：嘿在吗？刚刚看到个好玩的视频，发给你看看
