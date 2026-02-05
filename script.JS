@@ -11618,49 +11618,59 @@ ${loreContext}
                         
                         // ✅ 检查是否是联机好友
                         if (freshChar.isOnlineFriend && freshChar.onlineData?.wx_account) {
-                            // 联机好友 - 使用和转账一样的方式发送（通过消息通道）
+                            console.log('[亲属卡] 检测到联机好友，准备发送亲属卡...');
+                            // 联机好友 - 通过普通消息通道发送（和转账一样）
                             const onlineUserChar = await getOrCreateOnlineUserChar();
+                            console.log('[亲属卡] 在线用户角色:', onlineUserChar?.name, '连接状态:', onlineConnected);
                             
                             if (onlineUserChar && onlineConnected) {
                                 const fromWxAccount = onlineUserChar.identity.account;
                                 const toWxAccount = freshChar.onlineData.wx_account;
                                 
-                                // 🎯 使用和转账一样的方式：通过 sendOnlineMessage 发送带特殊标记的消息
+                                console.log('[亲属卡] 准备发送: from=', fromWxAccount, 'to=', toWxAccount, '额度=', monthlyLimit);
+                                
+                                // 🎯 和转账一样：通过 sendOnlineMessage 发送带特殊标记的 JSON 消息
                                 const familyCardContent = JSON.stringify({
-                                    __type: 'familyCard',
+                                    __type: 'familyCard',  // 特殊标记，和转账的 __type: 'transfer' 一样
                                     monthlyLimit: monthlyLimit,
-                                    message: textBeforeFamilyCard || '',
                                     fromName: onlineUserChar.name
                                 });
                                 
-                                sendOnlineMessage(toWxAccount, familyCardContent, fromWxAccount);
+                                console.log('[亲属卡] 消息内容:', familyCardContent);
+                                const sent = sendOnlineMessage(toWxAccount, familyCardContent, fromWxAccount);
+                                console.log('[亲属卡] sendOnlineMessage 返回:', sent);
                                 
-                                // ✅ 在发送方这边也保存亲属卡消息到聊天记录
-                                const familyCardMsg = {
-                                    role: 'user',
-                                    type: 'familyCard',
-                                    content: JSON.stringify({
-                                        fromName: onlineUserChar.name,
-                                        monthlyLimit: monthlyLimit,
-                                        status: 'sent',
-                                        isOnline: true
-                                    }),
-                                    time: Date.now()
-                                };
-                                
-                                history = getChatHistory(freshChar, accountId);
-                                history.push(familyCardMsg);
-                                await setChatHistory(freshChar, accountId, history);
-                                
-                                // 刷新聊天界面
-                                if (currentChatCharId === freshChar.id) {
-                                    renderChatBody(freshChar);
+                                if (sent) {
+                                    // ✅ 在发送方保存亲属卡消息到聊天记录
+                                    const familyCardMsg = {
+                                        role: 'user',
+                                        type: 'familyCard',
+                                        content: JSON.stringify({
+                                            fromName: onlineUserChar.name,
+                                            monthlyLimit: monthlyLimit,
+                                            status: 'sent',
+                                            isOnline: true
+                                        }),
+                                        time: Date.now()
+                                    };
+                                    
+                                    history = getChatHistory(freshChar, accountId);
+                                    history.push(familyCardMsg);
+                                    await setChatHistory(freshChar, accountId, history);
+                                    
+                                    // 刷新聊天界面
+                                    if (currentChatCharId === freshChar.id) {
+                                        renderChatBody(freshChar);
+                                    }
+                                    
+                                    console.log('[亲属卡] ✅ 亲属卡已成功发送并保存到聊天记录');
+                                    showToast('亲属卡已赠送');
+                                } else {
+                                    console.error('[亲属卡] ❌ sendOnlineMessage 返回 false');
+                                    showToast('发送失败，请检查连接');
                                 }
-                                
-                                console.log('[Online] 亲属卡已通过消息通道发送（和转账一样）');
-                                showToast('亲属卡已赠送');
                             } else {
-                                console.warn('[Online] 无法发送联机亲属卡：未连接服务器');
+                                console.error('[亲属卡] ❌ 条件不满足: onlineUserChar=', !!onlineUserChar, 'onlineConnected=', onlineConnected);
                                 showToast('请确保已连接服务器');
                             }
                         } else {
