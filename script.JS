@@ -15760,30 +15760,33 @@ ${groupContextStr}
                 unitText = amount + '天';
             }
             
+            // 1. 更新虚拟时间偏移（如果有当前聊天）
+            let char = null;
             if (currentChatCharId) {
-                const char = await db.characters.get(currentChatCharId);
-                // 更新虚拟时间偏移
-                if (!char.timeOffset) char.timeOffset = 0;
-                char.timeOffset += ms;
-                await db.characters.put(char);
-                console.log(`[FastForward] Updated time offset by +${ms}ms (${unitText})`);
-                
-                // 时间戳会在下次渲染时自动更新，不需要立即重新渲染
+                char = await db.characters.get(currentChatCharId);
+                if (char) {
+                    // 更新虚拟时间偏移
+                    if (!char.timeOffset) char.timeOffset = 0;
+                    char.timeOffset += ms;
+                    await db.characters.put(char);
+                    console.log(`[FastForward] Updated time offset by +${ms}ms (${unitText})`);
+                }
             }
             
             // 2. 检查被拉黑的角色是否会联系
             await checkBlockedCharactersContact(ms, unitText);
             
-            // 3. 触发 AI 回复，带上时间流逝的系统提示
-            const accountId = getCurrentAccountId();
-            const history = getChatHistory(char, accountId);
-            const lastMessages = history.slice(-3).map(m => `${m.role}: ${m.content.substring(0, 50)}`).join(' | ');
-            
-            await triggerAiReply(`⏰ 【重要：时间快进】
+            // 3. 触发 AI 回复（只有在有当前聊天时才触发）
+            if (currentChatCharId && char) {
+                const accountId = getCurrentAccountId();
+                const history = getChatHistory(char, accountId);
+                const lastMessages = history.slice(-3).map(m => `${m.role}: ${m.content.substring(0, 50)}`).join(' | ');
+                
+                await triggerAiReply(`⏰ 【重要：时间快进】
 时间过去了 ${unitText}。
 
 📝 最近的对话内容：
-${lastMessages}
+${lastMessages || '暂无对话'}
 
 💡 请注意：
 1. ⚠️ **严禁重复**你刚才说过的话！这非常重要！
@@ -15796,6 +15799,9 @@ ${lastMessages}
 4. 让对话自然地向前发展，不要停滞在原地
 
 请开始你的回复（直接发送消息，不要重复之前的内容）：`);
+            } else {
+                console.warn('[FastForward] 没有当前聊天，跳过AI回复');
+            }
         }
 
         // 检查被拉黑的角色是否会联系用户（使用新版本逻辑）
