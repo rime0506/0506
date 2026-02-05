@@ -14318,6 +14318,26 @@ ${groupContextStr}
             appendMessageToUI('user', msgContent);
             closeChatPanel();
             
+            // ✅ 如果是联机好友，发送表情包到服务器
+            if (char.isOnlineFriend && char.onlineData?.wx_account) {
+                const onlineUserChar = await getOrCreateOnlineUserChar();
+                
+                if (onlineUserChar && onlineConnected) {
+                    const fromWxAccount = onlineUserChar.identity.account;
+                    const toWxAccount = char.onlineData.wx_account;
+                    const sent = sendOnlineMessage(toWxAccount, msgContent, fromWxAccount);
+                    if (sent) {
+                        console.log('[Online] 表情包已发送到服务器');
+                    } else {
+                        console.warn('[Online] 表情包发送失败');
+                        showToast('表情包发送失败，请检查服务器连接');
+                    }
+                } else {
+                    console.warn('[Online] 无法发送联机表情包：未连接服务器');
+                    showToast('请确保已连接服务器');
+                }
+            }
+            
             // 可以在这里触发 AI 对表情包的反应（如果需要）
             // triggerAiReply(); 
         }
@@ -14518,6 +14538,26 @@ ${groupContextStr}
                 
                 // ✅ 优化：只追加新消息，不重新渲染整个聊天
                 await appendMessageToUI('user', msgContent, char.avatar);
+                
+                // ✅ 如果是联机好友，发送图片到服务器
+                if (char.isOnlineFriend && char.onlineData?.wx_account) {
+                    const onlineUserChar = await getOrCreateOnlineUserChar();
+                    
+                    if (onlineUserChar && onlineConnected) {
+                        const fromWxAccount = onlineUserChar.identity.account;
+                        const toWxAccount = char.onlineData.wx_account;
+                        const sent = sendOnlineMessage(toWxAccount, msgContent, fromWxAccount);
+                        if (sent) {
+                            console.log('[Online] 图片已发送到服务器');
+                        } else {
+                            console.warn('[Online] 图片发送失败');
+                            showToast('图片发送失败，请检查服务器连接');
+                        }
+                    } else {
+                        console.warn('[Online] 无法发送联机图片：未连接服务器');
+                        showToast('请确保已连接服务器');
+                    }
+                }
             };
             
             reader.readAsDataURL(file);
@@ -28060,8 +28100,8 @@ async function handleOnlineIncomingMessage(data) {
     
     // 如果当前正在查看这个聊天，更新UI
     if (currentChatCharId === targetChar.id) {
-        // 特殊消息类型需要重新渲染整个聊天
-        if (msgObj.type === 'transfer' || msgObj.type === 'audio') {
+        // 特殊消息类型需要重新渲染整个聊天（包括图片、转账、语音）
+        if (msgObj.type === 'transfer' || msgObj.type === 'audio' || data.content.startsWith('[img:')) {
             renderChatBody(targetChar);
         } else {
             // ✅ 使用服务器发送的头像，如果没有则使用本地头像
@@ -28073,6 +28113,7 @@ async function handleOnlineIncomingMessage(data) {
         let notifyContent = data.content;
         if (msgObj.type === 'transfer') notifyContent = '[转账]';
         if (msgObj.type === 'audio') notifyContent = '[语音消息]';
+        if (data.content.startsWith('[img:')) notifyContent = '[图片]';
         sendSystemNotification(targetChar.name, notifyContent);
     }
 }
