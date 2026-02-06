@@ -7075,6 +7075,12 @@ ${loreContext}
                         const last = history[history.length - 1];
                         lastMsg = last.content;
                         if (lastMsg.startsWith('[img:')) lastMsg = '[图片]';
+                        if (lastMsg.startsWith('[voice:')) lastMsg = '[语音]';
+                        if (lastMsg.startsWith('[imgcard:')) lastMsg = '[卡片]';
+                        // 🔧 处理外卖卡片消息
+                        if (lastMsg.startsWith('[emei_order]')) lastMsg = '[外卖订单]';
+                        if (lastMsg.startsWith('[emei_share]')) lastMsg = '[外卖分享]';
+                        if (lastMsg.startsWith('[payment_request]')) lastMsg = '[代付请求]';
                         if (last.role === 'system') lastMsg = '[系统消息]';
                         // ✅ 处理特殊消息类型
                         if (last.type === 'transfer') lastMsg = '[转账]';
@@ -7169,6 +7175,10 @@ ${loreContext}
                     if (lastMsg.startsWith('[img:')) lastMsg = '[图片]';
                     if (lastMsg.startsWith('[voice:')) lastMsg = '[语音]';
                     if (lastMsg.startsWith('[imgcard:')) lastMsg = '[卡片]';
+                    // 🔧 处理外卖卡片消息
+                    if (lastMsg.startsWith('[emei_order]')) lastMsg = '[外卖订单]';
+                    if (lastMsg.startsWith('[emei_share]')) lastMsg = '[外卖分享]';
+                    if (lastMsg.startsWith('[payment_request]')) lastMsg = '[代付请求]';
                     // ✅ 处理转账和亲属卡消息
                     if (last.type === 'transfer') lastMsg = '[转账]';
                     if (last.type === 'familyCard') lastMsg = '[亲属卡]';
@@ -13151,6 +13161,11 @@ ${groupContextStr}
                 return cleaned;
             }
             
+            // 🔧 保护外卖卡片格式
+            if (/^\[(emei_order|emei_share|payment_request)\]/.test(cleaned)) {
+                return cleaned;
+            }
+            
             // 🔥 核心修复：先去掉 img: 前缀（防止 ERR_UNKNOWN_URL_SCHEME）
             cleaned = cleaned.replace(/^img:/, '');
             // 去掉方括号
@@ -13164,6 +13179,13 @@ ${groupContextStr}
         // ✅ 核心函数3：统一的消息内容渲染函数
         function renderMessageContent(text) {
             if (!text || typeof text !== 'string') return '';
+            
+            // 🔧 处理外卖卡片消息 - 直接返回 HTML 内容
+            if (text.startsWith('[emei_order]') || text.startsWith('[emei_share]') || text.startsWith('[payment_request]')) {
+                // 提取卡片 HTML
+                const cardHtml = text.replace(/^\[(emei_order|emei_share|payment_request)\]/, '');
+                return cardHtml;
+            }
             
             // 先清理消息（去掉img:前缀、方括号等）
             const clean = sanitizeMessage(text);
@@ -13673,14 +13695,22 @@ ${groupContextStr}
                     }
                 };
             }
+            // 🔧 处理外卖卡片消息
+            else if (msg.content.startsWith('[emei_order]') || msg.content.startsWith('[emei_share]') || msg.content.startsWith('[payment_request]')) {
+                const cardHtml = msg.content.replace(/^\[(emei_order|emei_share|payment_request)\]/, '');
+                content.innerHTML = cardHtml;
+                content.classList.add('card-message');
+                content.style.padding = '0';
+                content.style.background = 'transparent';
+                content.style.boxShadow = 'none';
+            }
             // 处理图片消息（纯图片，或以图片开头）
             else if (msg.content.startsWith('[img:')) {
                 // 直接提取URL，不要用 sanitizeMessage
                 const imgUrl = msg.content.substring(5, msg.content.length - 1).trim();
                 content.innerHTML = `<img src="${imgUrl}" class="chat-image" onerror="this.style.display='none';" />`;
-                content.style.padding = '4px';
-                content.style.background = 'transparent';
-                content.style.boxShadow = 'none';
+                // 🔧 添加 image-only 类，移除气泡样式
+                content.classList.add('image-only');
             } 
             // ✅ 普通文本 - 使用统一的渲染函数
             else {
@@ -14607,10 +14637,22 @@ ${groupContextStr}
             
             await setChatHistory(char, accountId, history);
             
+            // 🔧 只删除DOM元素，不重新渲染整个界面 - 使用data-index属性查找
             const chatBody = document.getElementById('chat-body');
-            const messageRows = chatBody.querySelectorAll('.message-row');
-            if (messageRows[activeMsgIndex]) {
-                messageRows[activeMsgIndex].remove();
+            if (chatBody) {
+                // 使用data-index属性精确查找消息元素
+                const msgEl = chatBody.querySelector(`[data-index="${activeMsgIndex}"]`);
+                if (msgEl) {
+                    // 检查前一个是否是时间戳，如果是且后面没有消息了，也删除时间戳
+                    const prevEl = msgEl.previousElementSibling;
+                    if (prevEl && prevEl.classList.contains('message-timestamp')) {
+                        const nextEl = msgEl.nextElementSibling;
+                        if (!nextEl || nextEl.classList.contains('message-timestamp')) {
+                            prevEl.remove();
+                        }
+                    }
+                    msgEl.remove();
+                }
             }
         }
 
@@ -14749,32 +14791,27 @@ ${groupContextStr}
             await setChatHistory(char, accountId, newHistory);
             await db.characters.put(char);
             
-            // 🚀 优化：只删除DOM元素，不完全重新渲染
+            // 🔧 只删除DOM元素，不重新渲染整个界面 - 使用data-index属性查找
             const chatBody = document.getElementById('chat-body');
-            const messageRows = chatBody.querySelectorAll('.message-row, .message-system, .message-timestamp');
-            
-            // 倒序删除，避免索引变化
-            const sortedIndices = Array.from(selectedIndices).sort((a, b) => b - a);
-            sortedIndices.forEach(idx => {
-                if (messageRows[idx]) {
-                    // 检查前后是否有时间戳需要移除
-                    const prevEl = messageRows[idx].previousElementSibling;
-                    const nextEl = messageRows[idx].nextElementSibling;
-                    
-                    // 如果前一个是时间戳，且后面没有消息了，删除时间戳
-                    if (prevEl && prevEl.classList.contains('message-timestamp')) {
-                        if (!nextEl || nextEl.classList.contains('message-timestamp') || sortedIndices.includes(idx + 1)) {
-                            prevEl.remove();
+            if (chatBody) {
+                // 倒序删除，避免索引变化
+                const sortedIndices = Array.from(selectedIndices).sort((a, b) => b - a);
+                sortedIndices.forEach(idx => {
+                    // 使用data-index属性精确查找消息元素
+                    const msgEl = chatBody.querySelector(`[data-index="${idx}"]`);
+                    if (msgEl) {
+                        // 检查前一个是否是时间戳，如果是且后面没有消息了，也删除时间戳
+                        const prevEl = msgEl.previousElementSibling;
+                        if (prevEl && prevEl.classList.contains('message-timestamp')) {
+                            const nextEl = msgEl.nextElementSibling;
+                            if (!nextEl || nextEl.classList.contains('message-timestamp') || sortedIndices.includes(idx + 1)) {
+                                prevEl.remove();
+                            }
                         }
+                        msgEl.remove();
                     }
-                    
-                    messageRows[idx].remove();
-                }
-            });
-            
-            // 更新缓存
-            lastRenderedHistoryLength = newHistory.length;
-            currentRenderedCount = Math.min(currentRenderedCount, newHistory.length);
+                });
+            }
             
             exitSelectionMode();
         }
@@ -34752,9 +34789,14 @@ async function loadFamilyCardInfo() {
     if (!info) return;
     
     try {
-        const cards = await db.family_cards.toArray();
+        // 🔧 使用当前账号角色收到的亲属卡
+        const myCharId = parseInt(currentMyCharId);
+        const myChar = myCharId ? await db.characters.get(myCharId) : null;
+        const cards = myChar?.identity?.familyCardsReceived || [];
+        
         if (cards.length > 0) {
-            info.innerText = `可用 ${cards.length} 张`;
+            const card = cards[0];
+            info.innerText = `来自 ${card.fromName}`;
         } else {
             info.innerText = '未绑定';
         }
@@ -34765,7 +34807,7 @@ async function loadFamilyCardInfo() {
 
 
 // 显示支付方式弹窗
-function showEmeiPaymentModal() {
+async function showEmeiPaymentModal() {
     const modal = document.getElementById('emei-payment-modal');
     if (modal) {
         modal.style.display = 'flex';
@@ -34778,6 +34820,27 @@ function showEmeiPaymentModal() {
         document.querySelectorAll('input[name="emei-payment"]').forEach(input => {
             input.checked = false;
         });
+        
+        // 🔧 获取当前账号的余额
+        const accountId = getCurrentAccountId();
+        const account = await db.accounts.get(accountId);
+        const balance = account?.balance || 0;
+        const balanceEl = document.getElementById('emei-wallet-balance');
+        if (balanceEl) balanceEl.textContent = balance.toFixed(2);
+        
+        // 🔧 获取当前账号的亲属卡
+        const myCharId = parseInt(currentMyCharId);
+        const myChar = myCharId ? await db.characters.get(myCharId) : null;
+        const familyCards = myChar?.identity?.familyCardsReceived || [];
+        const familyCardEl = document.getElementById('emei-family-card-info');
+        if (familyCardEl) {
+            if (familyCards.length > 0) {
+                const card = familyCards[0]; // 使用第一张亲属卡
+                familyCardEl.textContent = `来自 ${card.fromName}`;
+            } else {
+                familyCardEl.textContent = '未绑定';
+            }
+        }
     }
 }
 
@@ -34855,12 +34918,21 @@ async function payWithWallet(amount) {
     await sendEmeiOrderCard();
     
     alert('支付成功！');
-    hideEmeiPage();
+    
+    // 🔧 如果是给自己点单，询问是否分享给好友
+    if (emeiData.selectedRecipient === 'self') {
+        showShareOrderModal(amount);
+    } else {
+        hideEmeiPage();
+    }
 }
 
 // 亲属卡支付
 async function payWithFamilyCard(amount) {
-    const cards = await db.family_cards.toArray();
+    // 🔧 使用当前账号角色收到的亲属卡
+    const myCharId = parseInt(currentMyCharId);
+    const myChar = myCharId ? await db.characters.get(myCharId) : null;
+    const cards = myChar?.identity?.familyCardsReceived || [];
     
     if (cards.length === 0) {
         alert('未绑定亲属卡，请先绑定');
@@ -34979,36 +35051,33 @@ async function sendEmeiOrderCard() {
         recipient: emeiData.selectedRecipient === 'self' ? '我自己' : char.name
     };
     
-    // 创建卡片HTML
+    // 🔧 紧凑卡片样式 - 正方形
     const cardHtml = `
-        <div style="max-width: 280px; background: linear-gradient(135deg, #fff5f7 0%, #ffeef2 100%); border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                <div style="font-size: 20px;">🍔</div>
-                <div style="font-size: 14px; font-weight: 600; color: #333;">饿美了订单</div>
+        <div style="width: 200px; height: 200px; background: linear-gradient(135deg, #fff5f7 0%, #ffeef2 100%); border-radius: 10px; padding: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+                <span style="font-size: 14px;">🍔</span>
+                <span style="font-size: 12px; font-weight: 600; color: #333;">饿美了订单</span>
             </div>
-            <div style="font-size: 12px; color: #666; line-height: 1.6;">
-                <div style="margin-bottom: 4px;"><span style="color: #999;">店铺：</span>${orderInfo.store}</div>
-                <div style="margin-bottom: 4px;"><span style="color: #999;">商品：</span>${orderInfo.items}</div>
-                <div style="margin-bottom: 4px;"><span style="color: #999;">收货人：</span>${orderInfo.recipient}</div>
-                <div style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed rgba(255,107,157,0.2);"><span style="color: #999;">总计：</span><span style="font-size: 16px; font-weight: 600; color: var(--ins-pink);">¥${orderInfo.total}</span></div>
+            <div style="font-size: 11px; color: #666; line-height: 1.4;">
+                <div><span style="color: #999;">店铺：</span>${orderInfo.store}</div>
+                <div><span style="color: #999;">商品：</span>${orderInfo.items}</div>
+                <div style="margin-top: 4px;"><span style="color: #999;">总计：</span><span style="font-size: 13px; font-weight: 600; color: var(--ins-pink);">¥${orderInfo.total}</span></div>
             </div>
-            <div style="margin-top: 12px; font-size: 11px; color: #999; text-align: center;">预计30分钟送达</div>
         </div>
     `;
     
-    // 添加到聊天记录
-    if (!char.chat_history) char.chat_history = [];
-    char.chat_history.push({
+    // 🔧 使用按账号隔离的聊天记录（accountId 已在函数开头声明）
+    let history = getChatHistory(char, accountId);
+    history.push({
         role: 'user',
         content: `[emei_order]${cardHtml}`,
         time: Date.now()
     });
-    char.updated_at = Date.now();
-    await db.characters.put(char);
+    await setChatHistory(char, accountId, history);
     
     // 如果当前在该聊天窗口，刷新显示
     if (currentChatCharId === chatCharId) {
-        renderChatMessages();
+        renderChatBody(char);
     } else if (emeiData.selectedRecipient !== 'self') {
         // 给角色点单，即使没打开聊天窗口也提示用户
         alert(`订单已发送给 ${char.name}！可以在聊天中查看订单详情。`);
@@ -35026,36 +35095,37 @@ async function sendPaymentRequestCard(recipient, amount) {
         if (recipientChar) recipientName = recipientChar.name;
     }
     
+    // 🔧 紧凑卡片样式 - 正方形
     const cardHtml = `
-        <div style="max-width: 280px; background: linear-gradient(135deg, #fff9e6 0%, #fff5e6 100%); border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                <div style="font-size: 20px;">💰</div>
-                <div style="font-size: 14px; font-weight: 600; color: #333;">代付请求</div>
+        <div style="width: 220px; height: 220px; background: linear-gradient(135deg, #fff9e6 0%, #fff5e6 100%); border-radius: 10px; padding: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                <span style="font-size: 16px;">💰</span>
+                <span style="font-size: 13px; font-weight: 600; color: #333;">代付请求</span>
             </div>
-            <div style="font-size: 13px; color: #666; line-height: 1.6;">
-                <div style="margin-bottom: 8px;">我在饿美了点了一份外卖，请帮忙支付~</div>
-                <div style="padding: 12px; background: rgba(255,255,255,0.8); border-radius: 8px;">
-                    <div style="margin-bottom: 4px;"><span style="color: #999;">店铺：</span>${emeiData.currentStore.name}</div>
-                    <div style="margin-bottom: 4px;"><span style="color: #999;">收货人：</span>${recipientName}</div>
-                    <div style="margin-bottom: 8px;"><span style="color: #999;">商品：</span>${emeiData.cart.map(i => `${i.name} x${i.count}`).join('、')}</div>
-                    <div style="font-size: 16px; font-weight: 600; color: #ff9500;">¥${amount.toFixed(2)}</div>
+            <div style="font-size: 12px; color: #666; line-height: 1.5;">
+                <div style="margin-bottom: 6px; color: #888;">帮我付一下外卖~</div>
+                <div style="padding: 8px; background: rgba(255,255,255,0.8); border-radius: 6px;">
+                    <div><span style="color: #999;">店铺：</span>${emeiData.currentStore.name}</div>
+                    <div><span style="color: #999;">商品：</span>${emeiData.cart.map(i => i.name).join('、')}</div>
+                    <div style="margin-top: 4px; font-size: 14px; font-weight: 600; color: #ff9500;">¥${amount.toFixed(2)}</div>
                 </div>
             </div>
-            <div onclick="handlePaymentRequest(this)" style="margin-top: 12px; padding: 10px; background: linear-gradient(135deg, #ff9500 0%, #ffb300 100%); color: #fff; text-align: center; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;">立即支付</div>
+            <div onclick="handlePaymentRequest(this)" style="margin-top: 8px; padding: 8px; background: linear-gradient(135deg, #ff9500 0%, #ffb300 100%); color: #fff; text-align: center; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">立即支付</div>
         </div>
     `;
     
-    if (!recipient.chat_history) recipient.chat_history = [];
-    recipient.chat_history.push({
+    // 🔧 使用按账号隔离的聊天记录
+    const accountId = getCurrentAccountId();
+    let history = getChatHistory(recipient, accountId);
+    history.push({
         role: 'user',
         content: `[payment_request]${cardHtml}`,
         time: Date.now()
     });
-    recipient.updated_at = Date.now();
-    await db.characters.put(recipient);
+    await setChatHistory(recipient, accountId, history);
     
     if (currentChatCharId === recipient.id) {
-        renderChatMessages();
+        renderChatBody(recipient);
     }
 }
 
@@ -35066,6 +35136,125 @@ async function handlePaymentRequest(btn) {
     btn.innerText = '已支付';
     btn.style.background = '#ccc';
     btn.onclick = null;
+}
+
+// 🔧 显示分享订单弹窗（给自己点单后可以分享给好友）
+async function showShareOrderModal(amount) {
+    const allCharacters = await db.characters.toArray();
+    const accountId = getCurrentAccountId();
+    
+    // 过滤可分享的角色（有好友关系的角色）
+    const availableChars = allCharacters.filter(c => {
+        if (c.type === 'system' || c.type === 'user') return false;
+        if (!c.name || c.name.trim() === '') return false;
+        // 检查是否是好友
+        const status = getFriendStatus(c, accountId);
+        return status === 'friend';
+    });
+    
+    if (availableChars.length === 0) {
+        hideEmeiPage();
+        return;
+    }
+    
+    const modal = document.createElement('div');
+    modal.id = 'emei-share-modal';
+    modal.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; display:flex; align-items:center; justify-content:center;';
+    
+    modal.innerHTML = `
+        <div style="background:#fff; border-radius:16px; padding:20px; width:85%; max-width:350px; max-height:70vh; display:flex; flex-direction:column;">
+            <h3 style="margin:0 0 8px 0; text-align:center; font-size:16px; font-weight:600;">分享订单给好友</h3>
+            <p style="margin:0 0 16px 0; text-align:center; font-size:12px; color:#999;">选择想要分享的好友（可多选）</p>
+            <div id="share-char-list" style="flex:1; overflow-y:auto; margin-bottom:16px; max-height:300px;">
+                ${availableChars.map(char => `
+                    <label style="display:flex; align-items:center; padding:12px; border-bottom:1px solid #f5f5f5; cursor:pointer;">
+                        <input type="checkbox" value="${char.id}" style="width:18px; height:18px; margin-right:12px; accent-color:var(--ins-pink);">
+                        <div style="width:40px; height:40px; border-radius:50%; background-image:url(${char.avatar || ''}); background-size:cover; background-color:#e0e0e0; margin-right:12px; flex-shrink:0;"></div>
+                        <span style="font-size:14px; color:#333;">${char.name}</span>
+                    </label>
+                `).join('')}
+            </div>
+            <div style="display:flex; gap:12px;">
+                <button onclick="closeShareOrderModal()" style="flex:1; padding:12px; background:#f0f0f0; color:#666; border:none; border-radius:8px; font-size:14px; cursor:pointer;">跳过</button>
+                <button onclick="confirmShareOrder()" style="flex:1; padding:12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:14px; cursor:pointer;">分享</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+}
+
+// 关闭分享弹窗
+function closeShareOrderModal() {
+    const modal = document.getElementById('emei-share-modal');
+    if (modal) modal.remove();
+    hideEmeiPage();
+}
+
+// 确认分享订单
+async function confirmShareOrder() {
+    const checkboxes = document.querySelectorAll('#share-char-list input[type="checkbox"]:checked');
+    const selectedIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+    
+    if (selectedIds.length === 0) {
+        closeShareOrderModal();
+        return;
+    }
+    
+    const accountId = getCurrentAccountId();
+    
+    // 向每个选中的好友发送分享卡片
+    for (const charId of selectedIds) {
+        await sendShareOrderCard(charId, accountId);
+    }
+    
+    showToast(`已分享给 ${selectedIds.length} 位好友`);
+    closeShareOrderModal();
+}
+
+// 发送分享订单卡片
+async function sendShareOrderCard(charId, accountId) {
+    const char = await db.characters.get(charId);
+    if (!char) return;
+    
+    const orderInfo = {
+        store: emeiData.currentStore.name,
+        items: emeiData.cart.map(item => `${item.name} x${item.count}`).join('、'),
+        total: (emeiData.cart.reduce((sum, item) => sum + item.price * item.count, 0) + 3 - (emeiData.selectedCoupon ? emeiData.selectedCoupon.amount : 0)).toFixed(2)
+    };
+    
+    // 创建分享卡片HTML
+    const cardHtml = `
+        <div style="width: 280px; height: 280px; background: linear-gradient(135deg, #e8f5e9 0%, #f1f8e9 100%); border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                <div style="font-size: 20px;">🛵</div>
+                <div style="font-size: 14px; font-weight: 600; color: #333;">外卖分享</div>
+            </div>
+            <div style="font-size: 13px; color: #666; line-height: 1.6;">
+                <div style="margin-bottom: 8px;">我刚点了外卖，分享给你看看~</div>
+                <div style="padding: 12px; background: rgba(255,255,255,0.8); border-radius: 8px;">
+                    <div style="margin-bottom: 4px;"><span style="color: #999;">店铺：</span>${orderInfo.store}</div>
+                    <div style="margin-bottom: 4px;"><span style="color: #999;">商品：</span>${orderInfo.items}</div>
+                    <div style="margin-top: 8px; font-size: 12px; color: #4caf50;">💰 ¥${orderInfo.total}</div>
+                </div>
+            </div>
+            <div style="margin-top: 12px; font-size: 11px; color: #999; text-align: center;">🍔 一起点外卖呀~</div>
+        </div>
+    `;
+    
+    // 添加到聊天记录
+    let history = getChatHistory(char, accountId);
+    history.push({
+        role: 'user',
+        content: `[emei_share]${cardHtml}`,
+        time: Date.now()
+    });
+    await setChatHistory(char, accountId, history);
+    
+    // 如果当前在该聊天窗口，刷新显示
+    if (currentChatCharId === charId) {
+        renderChatBody(char);
+    }
 }
 
 // 注册全局函数
@@ -35088,3 +35277,6 @@ window.selectEmeiPaymentMethod = selectEmeiPaymentMethod;
 window.confirmEmeiPayment = confirmEmeiPayment;
 window.handlePaymentRequest = handlePaymentRequest;
 window.selectPaymentRequestTarget = selectPaymentRequestTarget;
+window.showShareOrderModal = showShareOrderModal;
+window.closeShareOrderModal = closeShareOrderModal;
+window.confirmShareOrder = confirmShareOrder;

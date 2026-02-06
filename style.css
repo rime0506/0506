@@ -2116,8 +2116,29 @@
             display: block;
             word-break: normal !important;
             white-space: normal !important;
-            margin: 4px 0;
+            margin: 0;
             pointer-events: auto;
+        }
+        /* 🔧 纯图片消息 - 移除气泡样式 */
+        .message-content.image-only {
+            padding: 0 !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            border-radius: 12px !important;
+        }
+        .message-content.image-only .chat-image {
+            margin: 0;
+        }
+        /* 🔧 卡片消息样式（外卖卡片等） */
+        .message-content.card-message {
+            padding: 0 !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            max-width: 240px !important;
+        }
+        .message-content.card-message > div {
+            width: 220px !important;
+            max-width: 220px !important;
         }
         /* 消息中的链接保护 - 保持URL完整 */
         .message-content a {
@@ -4915,22 +4936,22 @@
     box-shadow: 0 2px 8px rgba(255, 192, 203, 0.08);
 }
 .family-card-msg-title {
-    font-size: 22px;
+    font-size: 18px;
     font-weight: 500;
     color: #333;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
     letter-spacing: -0.5px;
 }
 .family-card-msg-desc {
-    font-size: 13px;
+    font-size: 11px;
     color: #999;
-    margin-bottom: 12px;
+    margin-bottom: 6px;
 }
 .family-card-msg-line {
     height: 1px;
     background-color: rgba(0,0,0,0.04);
     width: 100%;
-    margin-bottom: 8px;
+    margin-bottom: 4px;
 }
 .family-card-msg-footer {
     display: flex;
@@ -4938,7 +4959,7 @@
     align-items: center;
 }
 .family-card-msg-status {
-    font-size: 11px;
+    font-size: 10px;
     color: #b0b0b0;
 }
 .family-card-msg-dot {
