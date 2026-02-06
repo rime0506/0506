@@ -1475,6 +1475,8 @@
             height: 100%;
             background-size: cover;
             background-position: center;
+            object-fit: cover;
+            border-radius: 8px;
         }
         .sticker-desc-tag {
             position: absolute;

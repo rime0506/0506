@@ -8819,7 +8819,7 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             // 处理图片
             else if (msg.content.startsWith('[img:')) {
                 const imgUrl = msg.content.substring(5, msg.content.length - 1).trim();
-                renderedContent = `<img src="${imgUrl}" class="chat-image" style="max-width:200px; max-height:200px; border-radius:8px; cursor:pointer;" onclick="showFullImage(this.src)" onerror="this.style.display='none';" />`;
+                renderedContent = `<img src="${imgUrl}" class="chat-image" style="max-width:200px; max-height:200px; border-radius:8px; cursor:pointer;" onclick="showFullImage(this.src)" ${getImageErrorHandler()} />`;
             }
             // 处理语音
             else if (msg.content.startsWith('[voice:')) {
@@ -8967,7 +8967,7 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 // 处理图片消息 [img:url]
                 if (content.startsWith('[img:')) {
                     const imgUrl = content.substring(5, content.length - 1).trim();
-                    return `<img src="${imgUrl}" class="chat-image" style="max-width:200px; max-height:200px; border-radius:8px; cursor:pointer;" onclick="showFullImage(this.src)" onerror="this.style.display='none';" />`;
+                    return `<img src="${imgUrl}" class="chat-image" style="max-width:200px; max-height:200px; border-radius:8px; cursor:pointer;" onclick="showFullImage(this.src)" ${getImageErrorHandler()} />`;
                 }
                 
                 // 处理语音消息 [voice:文字内容]
@@ -11723,9 +11723,15 @@ ${loreContext}
                         }
                     }
                 
-                // ✅ 修复：清理末尾多余的 ]
+                // ✅ 修复：清理末尾多余的 ]，但保留 [img:] [voice:] [imgcard:] 等格式的闭合括号
                 function cleanMessage(text) {
                     if (!text) return text;
+                    // 检查是否是特殊格式消息（以 [ 开头，以 ] 结尾）
+                    const specialFormats = /^\[(img|voice|imgcard):/i;
+                    if (specialFormats.test(text) && text.endsWith(']')) {
+                        // 是特殊格式，不删除末尾的 ]
+                        return text;
+                    }
                     // 删除末尾多余的 ]
                     return text.replace(/\]+$/, '');
                 }
@@ -13309,7 +13315,7 @@ ${groupContextStr}
             
             // 如果整个消息就是一个图片URL，直接渲染为图片
             if (isImageUrl(finalClean)) {
-                return `<img src="${finalClean}" class="chat-image" onerror="this.style.display='none';" />`;
+                return `<img src="${finalClean}" class="chat-image" ${getImageErrorHandler()} />`;
             }
             
             // 检查是否包含[img:...]格式的图片标记
@@ -13334,7 +13340,7 @@ ${groupContextStr}
                     let imgUrl = sanitizeMessage(match[1]);
                     // 🔥 额外保护：再次确保没有img:前缀
                     imgUrl = imgUrl.replace(/^img:/, '');
-                    html += `<img src="${imgUrl}" class="chat-image" onerror="this.style.display='none';" />`;
+                    html += `<img src="${imgUrl}" class="chat-image" ${getImageErrorHandler()} />`;
                     
                     lastIndex = match.index + match[0].length;
                 });
@@ -13362,7 +13368,7 @@ ${groupContextStr}
                     cleanUrl = cleanUrl.replace(/^img:/, '');
                     // 检查是否是图片URL
                     if (isImageUrl(cleanUrl)) {
-                        return `<img src="${cleanUrl}" class="chat-image" onerror="this.style.display='none';" />`;
+                        return `<img src="${cleanUrl}" class="chat-image" ${getImageErrorHandler()} />`;
                     } else {
                         // 普通链接
                         return `<a href="${cleanUrl}" target="_blank" style="color:#007aff; word-break:break-all;">${escapeHtml(cleanUrl)}</a>`;
@@ -13379,6 +13385,11 @@ ${groupContextStr}
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+        
+        // 辅助函数：生成图片加载失败的HTML
+        function getImageErrorHandler() {
+            return `onerror="this.onerror=null; this.style.cssText='width:80px; height:80px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px;'; this.outerHTML='<div style=\\'width:80px; height:80px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px; color:#999; font-size:11px; text-align:center;\\'>图片加载失败</div>';"`;
         }
 
         // 群聊图片卡片点击展开 - 使用与私聊相同的样式
@@ -13747,7 +13758,7 @@ ${groupContextStr}
                 
                 // 如果包含图片，在语音气泡下方添加图片（使用chat-image类）
                 if (hasImage) {
-                    voiceHtml += `<div style="margin-top:8px;"><img src="${imgUrl}" class="chat-image" onerror="this.style.display='none';" /></div>`;
+                    voiceHtml += `<div style="margin-top:8px;"><img src="${imgUrl}" class="chat-image" ${getImageErrorHandler()} /></div>`;
                 }
                 
                 content.innerHTML = voiceHtml;
@@ -13822,7 +13833,7 @@ ${groupContextStr}
             else if (msg.content.startsWith('[img:')) {
                 // 直接提取URL，不要用 sanitizeMessage
                 const imgUrl = msg.content.substring(5, msg.content.length - 1).trim();
-                content.innerHTML = `<img src="${imgUrl}" class="chat-image" onerror="this.style.display='none';" />`;
+                content.innerHTML = `<img src="${imgUrl}" class="chat-image" onerror="this.onerror=null; this.style.cssText='width:80px; height:80px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px;'; this.outerHTML='<div style=\\'width:80px; height:80px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px; color:#999; font-size:12px;\\'>图片加载失败</div>';" />`;
                 // 🔧 添加 image-only 类，移除气泡样式
                 content.classList.add('image-only');
             } 
@@ -17090,9 +17101,15 @@ ${loreContext}
                 // 2. 调用 AI（已经是防御式解析，直接拿到内容）
                 const aiResponse = await callAI(messages);
                 
-                // ✅ 修复：清理末尾多余的 ]
+                // ✅ 修复：清理末尾多余的 ]，但保留 [img:] [voice:] [imgcard:] 等格式的闭合括号
                 function cleanMessage(text) {
                     if (!text) return text;
+                    // 检查是否是特殊格式消息（以 [ 开头，以 ] 结尾）
+                    const specialFormats = /^\[(img|voice|imgcard):/i;
+                    if (specialFormats.test(text) && text.endsWith(']')) {
+                        // 是特殊格式，不删除末尾的 ]
+                        return text;
+                    }
                     // 删除末尾多余的 ]
                     return text.replace(/\]+$/, '');
                 }
@@ -19367,7 +19384,7 @@ async function renderStickerCategoryDetail() {
                 </div>
                 ${(cat.stickers || []).map((s, idx) => `
                     <div class="sticker-grid-item" onclick="previewSticker(${idx})">
-                        <div class="sticker-img" style="background-image:url(${s.url})"></div>
+                        <img src="${s.url}" class="sticker-img" style="object-fit:cover;" onerror="this.onerror=null; this.style.cssText='width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px;'; this.outerHTML='<div class=\\'sticker-img\\' style=\\'display:flex; align-items:center; justify-content:center; background:#f5f5f5; color:#ccc; font-size:10px;\\'>失败</div>';" />
                         ${s.description ? `<div class="sticker-desc-tag">AI可识</div>` : ''}
                         <div class="sticker-del-btn" onclick="deleteSticker(${idx}, event)">
                             <svg style="width:12px; height:12px; stroke:#fff; stroke-width:2;" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -19833,7 +19850,7 @@ async function updateChatStickerPanel() {
         const safeUrl = s.url.replace(/'/g, "\\'").replace(/"/g, '&quot;');
         const safeDesc = (s.description || '').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         contentHtml += `<div class="emoji-item" onclick="sendGlobalSticker(${currentCategory.id}, '${safeUrl}')" style="display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer;">
-            <div style="background-image:url(${s.url}); background-size:cover; background-position:center; width:60px; height:60px; border-radius:8px;"></div>
+            <img src="${s.url}" style="width:60px; height:60px; border-radius:8px; object-fit:cover;" onerror="this.onerror=null; this.style.cssText='width:60px; height:60px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px;'; this.outerHTML='<div style=\\'width:60px; height:60px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px; color:#ccc; font-size:10px;\\'>失败</div>';" />
             ${safeDesc ? `<div style="font-size:10px; color:#999; text-align:center; max-width:60px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safeDesc}</div>` : ''}
         </div>`;
     });
@@ -19898,7 +19915,7 @@ async function searchStickers(keyword) {
         const safeUrl = s.url.replace(/'/g, "\\'").replace(/"/g, '&quot;');
         const safeDesc = (s.description || '').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         contentHtml += `<div class="emoji-item" onclick="sendGlobalSticker(${s.categoryId}, '${safeUrl}')" style="display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer;">
-            <div style="background-image:url(${s.url}); background-size:cover; background-position:center; width:60px; height:60px; border-radius:8px;"></div>
+            <img src="${s.url}" style="width:60px; height:60px; border-radius:8px; object-fit:cover;" onerror="this.onerror=null; this.style.cssText='width:60px; height:60px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px;'; this.outerHTML='<div style=\\'width:60px; height:60px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px; color:#ccc; font-size:10px;\\'>失败</div>';" />
             ${safeDesc ? `<div style="font-size:10px; color:#999; text-align:center; max-width:60px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safeDesc}</div>` : ''}
         </div>`;
     });
@@ -19965,7 +19982,7 @@ async function detectAndSuggestStickers(inputText) {
                 cursor: pointer;
                 vertical-align: top;
             ">
-                <div style="background-image:url(${s.url}); background-size:cover; background-position:center; width:50px; height:50px; border-radius:8px; border: 2px solid transparent; transition: border-color 0.2s;" onmouseover="this.style.borderColor='var(--ins-pink)'" onmouseout="this.style.borderColor='transparent'"></div>
+                <img src="${s.url}" style="width:50px; height:50px; border-radius:8px; object-fit:cover; border: 2px solid transparent; transition: border-color 0.2s;" onmouseover="this.style.borderColor='var(--ins-pink)'" onmouseout="this.style.borderColor='transparent'" onerror="this.onerror=null; this.style.cssText='width:50px; height:50px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px;'; this.outerHTML='<div style=\\'width:50px; height:50px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px; color:#ccc; font-size:9px;\\'>失败</div>';" />
             </div>`;
         });
         
@@ -32649,7 +32666,7 @@ async function loadOnlineGroupStickers() {
         const safeUrl = s.url.replace(/'/g, "\\'").replace(/"/g, '&quot;');
         const safeDesc = (s.description || '').replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         contentHtml += `<div class="emoji-item" onclick="sendOnlineGroupSticker('${safeUrl}')" style="display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer;">
-            <div style="background-image:url(${s.url}); background-size:cover; background-position:center; width:60px; height:60px; border-radius:8px;"></div>
+            <img src="${s.url}" style="width:60px; height:60px; border-radius:8px; object-fit:cover;" onerror="this.onerror=null; this.style.cssText='width:60px; height:60px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px;'; this.outerHTML='<div style=\\'width:60px; height:60px; display:flex; align-items:center; justify-content:center; background:#f5f5f5; border-radius:8px; color:#ccc; font-size:10px;\\'>失败</div>';" />
             ${safeDesc ? `<div style="font-size:10px; color:#999; text-align:center; max-width:60px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safeDesc}</div>` : ''}
         </div>`;
     });
