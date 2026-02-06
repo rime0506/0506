@@ -2134,11 +2134,16 @@
             padding: 0 !important;
             background: transparent !important;
             box-shadow: none !important;
-            max-width: 240px !important;
+            max-width: 300px !important;
+            white-space: normal !important; /* 修复：覆盖pre-wrap，防止换行符导致显示异常 */
         }
         .message-content.card-message > div {
-            width: 220px !important;
-            max-width: 220px !important;
+            width: 260px !important;
+            max-width: 260px !important;
+            box-sizing: border-box !important;
+        }
+        .message-content.card-message * {
+            white-space: normal !important; /* 确保所有子元素也正常处理空白 */
         }
         /* 消息中的链接保护 - 保持URL完整 */
         .message-content a {

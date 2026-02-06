@@ -10734,7 +10734,10 @@ ${chatContext || '（没有聊天记录）'}
             // 6. 加载挂载的表情包库
             updateMountedStickerCount();
             
-            // 6. 更新视频通话记录数量
+            // 6.5 加载挂载的用户档案
+            updateMountedUserDisplay();
+            
+            // 7. 更新视频通话记录数量
             updateVideoCallRecordCount();
             
             // 7. 加载自定义样式设置
@@ -10975,6 +10978,117 @@ async function updateMountedStickerCount() {
 window.showMountStickerModal = showMountStickerModal;
 window.hideMountStickerModal = hideMountStickerModal;
 window.saveMountedStickers = saveMountedStickers;
+
+// 显示挂载用户档案弹窗
+async function showMountUserModal() {
+    if (!currentChatCharId) return;
+    
+    const char = await db.characters.get(currentChatCharId);
+    const currentUserId = char.linked_user_id || null;
+    
+    const modal = document.getElementById('mount-user-modal');
+    const listContainer = document.getElementById('mount-user-list');
+    
+    if (!modal || !listContainer) {
+        console.error('挂载用户档案弹窗元素未找到');
+        return;
+    }
+    
+    // 获取所有User类型档案
+    const users = await db.characters.where('type').equals('user').toArray();
+    
+    if (users.length === 0) {
+        listContainer.innerHTML = '<div style="text-align:center; color:#999; padding:40px;">暂无用户档案<br>请先去【角色档案-User】创建用户</div>';
+    } else {
+        listContainer.innerHTML = users.map(user => {
+            const isSelected = currentUserId === user.id;
+            const avatarStyle = user.avatar ? `background-image:url(${user.avatar}); background-size:cover; background-position:center;` : 'background:#f0f0f0;';
+            return `
+                <div onclick="selectMountUser(${user.id})" style="display:flex; align-items:center; padding:12px; background:${isSelected ? '#ffe4e8' : '#fff'}; border:2px solid ${isSelected ? 'var(--ins-pink)' : '#f0f0f0'}; border-radius:12px; cursor:pointer; transition:all 0.2s;">
+                    <div style="width:48px; height:48px; border-radius:50%; ${avatarStyle} margin-right:12px; flex-shrink:0;"></div>
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-size:15px; font-weight:500; color:#333; margin-bottom:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${user.name}</div>
+                        <div style="font-size:12px; color:#999; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${user.description ? user.description.substring(0, 30) + (user.description.length > 30 ? '...' : '') : '暂无简介'}</div>
+                    </div>
+                    ${isSelected ? '<div style="color:var(--ins-pink); font-size:20px; margin-left:8px;">✓</div>' : ''}
+                </div>
+            `;
+        }).join('');
+    }
+    
+    modal.style.display = 'flex';
+    
+    // 点击外部区域关闭弹窗
+    modal.onclick = function(e) {
+        if (e.target === modal) {
+            hideMountUserModal();
+        }
+    };
+}
+
+// 隐藏挂载用户档案弹窗
+function hideMountUserModal() {
+    const modal = document.getElementById('mount-user-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+// 选择挂载的用户档案
+async function selectMountUser(userId) {
+    if (!currentChatCharId) return;
+    
+    const char = await db.characters.get(currentChatCharId);
+    char.linked_user_id = userId;
+    await db.characters.put(char);
+    
+    // 更新显示
+    updateMountedUserDisplay();
+    hideMountUserModal();
+    showToast('已挂载用户档案');
+}
+
+// 卸载用户档案
+async function unmountUser() {
+    if (!currentChatCharId) return;
+    
+    const char = await db.characters.get(currentChatCharId);
+    char.linked_user_id = null;
+    await db.characters.put(char);
+    
+    // 更新显示
+    updateMountedUserDisplay();
+    hideMountUserModal();
+    showToast('已卸载用户档案');
+}
+
+// 更新挂载用户档案显示
+async function updateMountedUserDisplay() {
+    if (!currentChatCharId) return;
+    
+    const char = await db.characters.get(currentChatCharId);
+    const displayEl = document.getElementById('detail-mounted-user');
+    
+    if (!displayEl) return;
+    
+    if (char.linked_user_id) {
+        const user = await db.characters.get(char.linked_user_id);
+        if (user) {
+            displayEl.innerText = user.name;
+            displayEl.style.color = 'var(--ins-pink)';
+        } else {
+            displayEl.innerText = '未挂载';
+            displayEl.style.color = '#999';
+        }
+    } else {
+        displayEl.innerText = '未挂载';
+        displayEl.style.color = '#999';
+    }
+}
+
+// 确保挂载用户档案函数在全局作用域可访问
+window.showMountUserModal = showMountUserModal;
+window.hideMountUserModal = hideMountUserModal;
+window.selectMountUser = selectMountUser;
+window.unmountUser = unmountUser;
 
         async function setChatDetailAvatar(input) {
             const file = input.files[0];
@@ -14361,12 +14475,14 @@ ${groupContextStr}
                 history[activeMsgIndex] = msg;
                 await setChatHistory(char, accountId, history);
                 
+                // 🔧 立即更新UI，不重新渲染整个聊天
                 const chatBody = document.getElementById('chat-body');
                 const messageRows = chatBody.querySelectorAll('.message-row');
                 if (messageRows[activeMsgIndex]) {
-                    const bubbleText = messageRows[activeMsgIndex].querySelector('.bubble-text');
-                    if (bubbleText) {
-                        bubbleText.textContent = newContent.trim();
+                    const messageContent = messageRows[activeMsgIndex].querySelector('.message-content');
+                    if (messageContent) {
+                        // 使用renderMessageContent来正确渲染内容（支持表情等）
+                        messageContent.innerHTML = renderMessageContent(newContent.trim());
                     }
                 }
             }
@@ -29812,17 +29928,24 @@ async function generateChatSummary(chatType, chatId, accountId, chatHistory) {
     
     // 获取真实姓名
     let charName = '对方';
-    let userName = '我';
+    let userName = '用户';
     
     if (chatType === 'private') {
         // 私聊：获取角色名和用户名
         const char = await db.characters.get(parseInt(chatId));
         if (char) {
             charName = char.remark || char.name;
+            // 优先使用挂载的用户档案名
             if (char.linked_user_id) {
                 const user = await db.characters.get(char.linked_user_id);
                 if (user) {
                     userName = user.name;
+                }
+            } else {
+                // 没挂载时尝试用当前登录账号名
+                const myChar = await db.characters.get(parseInt(accountId));
+                if (myChar) {
+                    userName = myChar.name;
                 }
             }
         }
@@ -29831,6 +29954,11 @@ async function generateChatSummary(chatType, chatId, accountId, chatHistory) {
         const group = await db.group_chats.get(parseInt(chatId));
         if (group) {
             charName = group.name || '群聊';
+        }
+        // 尝试获取用户名
+        const myChar = await db.characters.get(parseInt(accountId));
+        if (myChar) {
+            userName = myChar.name;
         }
     }
     
@@ -29850,14 +29978,15 @@ async function generateChatSummary(chatType, chatId, accountId, chatHistory) {
     const systemPrompt = `你是一个专业的聊天记录总结助手。请根据以下聊天记录，生成一份简洁但完整的总结。
 
 总结要求：
-1. **必须包含时间信息**：在总结开头注明时间段，例如"在X月X日至X月X日期间"
-2. **使用真实姓名**：总结中直接使用"${userName}"和"${charName}"，严禁使用"AI"、"助手"、"机器人"等词汇
-3. 用第三人称视角客观描述对话双方的交流内容
-4. 提炼出主要话题和关键信息
-5. 如果有重要的情感变化或事件，要特别指出
-6. 总结长度控制在200-400字之间
-7. 使用自然流畅的中文表达
-8. 如果能提取3-5个关键词，请在最后用【关键词】标注
+1. **必须使用第三人称视角**：以旁观者角度客观描述，严禁使用"我"、"我们"、"你"等第一/第二人称
+2. **必须包含时间信息**：在总结开头注明时间段，例如"在X月X日至X月X日期间"
+3. **使用真实姓名**：总结中直接使用"${userName}"和"${charName}"的名字，严禁使用"AI"、"助手"、"机器人"、"用户"等词汇
+4. 用客观的叙事口吻描述双方的交流，例如："${userName}向${charName}表示..."、"${charName}回应道..."
+5. 提炼出主要话题和关键信息
+6. 如果有重要的情感变化或事件，要特别指出
+7. 总结长度控制在200-400字之间
+8. 使用自然流畅的中文表达
+9. 如果能提取3-5个关键词，请在最后用【关键词】标注
 
 聊天时间：${timeRange}
 聊天记录如下：
@@ -34770,8 +34899,13 @@ async function loadEmeiWalletBalance() {
     let balance = 0;
     
     try {
-        const account = await db.accounts.get(accountId);
-        balance = account?.balance || 0;
+        // 🔧 从当前登录角色的 identity.balance 获取余额
+        if (accountId) {
+            const myChar = await db.characters.get(parseInt(accountId));
+            if (myChar && myChar.identity) {
+                balance = parseFloat(myChar.identity.balance || 0);
+            }
+        }
     } catch (err) {
         console.error('加载钱包余额失败:', err);
     }
@@ -34821,10 +34955,15 @@ async function showEmeiPaymentModal() {
             input.checked = false;
         });
         
-        // 🔧 获取当前账号的余额
+        // 🔧 获取当前账号的余额（从角色的identity.balance获取）
         const accountId = getCurrentAccountId();
-        const account = await db.accounts.get(accountId);
-        const balance = account?.balance || 0;
+        let balance = 0;
+        if (accountId) {
+            const myChar = await db.characters.get(parseInt(accountId));
+            if (myChar && myChar.identity) {
+                balance = parseFloat(myChar.identity.balance || 0);
+            }
+        }
         const balanceEl = document.getElementById('emei-wallet-balance');
         if (balanceEl) balanceEl.textContent = balance.toFixed(2);
         
@@ -34893,26 +35032,29 @@ async function confirmEmeiPayment() {
 // 零钱支付
 async function payWithWallet(amount) {
     const accountId = getCurrentAccountId();
-    const account = await db.accounts.get(accountId);
+    if (!accountId) {
+        alert('请先登录账号');
+        return;
+    }
     
-    if (!account || account.balance < amount) {
+    // 🔧 从当前登录角色的 identity.balance 获取余额
+    const myChar = await db.characters.get(parseInt(accountId));
+    if (!myChar) {
+        alert('账号数据异常');
+        return;
+    }
+    
+    if (!myChar.identity) myChar.identity = {};
+    const balance = parseFloat(myChar.identity.balance || 0);
+    
+    if (balance < amount) {
         alert('余额不足，请选择其他支付方式');
         return;
     }
     
     // 扣款
-    account.balance -= amount;
-    await db.accounts.put(account);
-    
-    // 添加账单记录
-    await db.bills.add({
-        account_id: accountId,
-        type: 'expense',
-        category: '餐饮',
-        amount: amount,
-        description: `饿美了 - ${emeiData.currentStore.name}`,
-        time: Date.now()
-    });
+    myChar.identity.balance = (balance - amount).toFixed(2);
+    await db.characters.put(myChar);
     
     // 发送订单卡片
     await sendEmeiOrderCard();
@@ -35051,20 +35193,8 @@ async function sendEmeiOrderCard() {
         recipient: emeiData.selectedRecipient === 'self' ? '我自己' : char.name
     };
     
-    // 🔧 紧凑卡片样式 - 正方形
-    const cardHtml = `
-        <div style="width: 200px; height: 200px; background: linear-gradient(135deg, #fff5f7 0%, #ffeef2 100%); border-radius: 10px; padding: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
-                <span style="font-size: 14px;">🍔</span>
-                <span style="font-size: 12px; font-weight: 600; color: #333;">饿美了订单</span>
-            </div>
-            <div style="font-size: 11px; color: #666; line-height: 1.4;">
-                <div><span style="color: #999;">店铺：</span>${orderInfo.store}</div>
-                <div><span style="color: #999;">商品：</span>${orderInfo.items}</div>
-                <div style="margin-top: 4px;"><span style="color: #999;">总计：</span><span style="font-size: 13px; font-weight: 600; color: var(--ins-pink);">¥${orderInfo.total}</span></div>
-            </div>
-        </div>
-    `;
+    // 🔧 紧凑卡片样式（无换行，避免white-space问题）
+    const cardHtml = `<div style="width:100%;background:linear-gradient(135deg,#fff5f7 0%,#ffeef2 100%);border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,0.06);box-sizing:border-box;"><div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;"><span style="font-size:16px;">🍔</span><span style="font-size:13px;font-weight:600;color:#333;">饿美了订单</span></div><div style="font-size:12px;color:#666;line-height:1.5;"><div style="margin-bottom:4px;"><span style="color:#999;">店铺：</span>${orderInfo.store}</div><div style="margin-bottom:4px;"><span style="color:#999;">商品：</span>${orderInfo.items}</div><div style="margin-top:6px;"><span style="color:#999;">总计：</span><span style="font-size:14px;font-weight:600;color:#FF6B9D;">¥${orderInfo.total}</span></div></div></div>`;
     
     // 🔧 使用按账号隔离的聊天记录（accountId 已在函数开头声明）
     let history = getChatHistory(char, accountId);
@@ -35095,24 +35225,10 @@ async function sendPaymentRequestCard(recipient, amount) {
         if (recipientChar) recipientName = recipientChar.name;
     }
     
-    // 🔧 紧凑卡片样式 - 正方形
-    const cardHtml = `
-        <div style="width: 220px; height: 220px; background: linear-gradient(135deg, #fff9e6 0%, #fff5e6 100%); border-radius: 10px; padding: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
-                <span style="font-size: 16px;">💰</span>
-                <span style="font-size: 13px; font-weight: 600; color: #333;">代付请求</span>
-            </div>
-            <div style="font-size: 12px; color: #666; line-height: 1.5;">
-                <div style="margin-bottom: 6px; color: #888;">帮我付一下外卖~</div>
-                <div style="padding: 8px; background: rgba(255,255,255,0.8); border-radius: 6px;">
-                    <div><span style="color: #999;">店铺：</span>${emeiData.currentStore.name}</div>
-                    <div><span style="color: #999;">商品：</span>${emeiData.cart.map(i => i.name).join('、')}</div>
-                    <div style="margin-top: 4px; font-size: 14px; font-weight: 600; color: #ff9500;">¥${amount.toFixed(2)}</div>
-                </div>
-            </div>
-            <div onclick="handlePaymentRequest(this)" style="margin-top: 8px; padding: 8px; background: linear-gradient(135deg, #ff9500 0%, #ffb300 100%); color: #fff; text-align: center; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;">立即支付</div>
-        </div>
-    `;
+    // 🔧 紧凑卡片样式（无换行，避免white-space问题）
+    const storeName = emeiData.currentStore.name;
+    const itemNames = emeiData.cart.map(i => i.name).join('、');
+    const cardHtml = `<div style="width:100%;background:linear-gradient(135deg,#fff9e6 0%,#fff5e6 100%);border-radius:10px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,0.06);box-sizing:border-box;"><div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;"><span style="font-size:16px;">💰</span><span style="font-size:13px;font-weight:600;color:#333;">代付请求</span></div><div style="font-size:12px;color:#666;line-height:1.5;"><div style="margin-bottom:6px;color:#888;">帮我付一下外卖~</div><div style="padding:10px;background:rgba(255,255,255,0.8);border-radius:6px;"><div style="margin-bottom:4px;"><span style="color:#999;">店铺：</span>${storeName}</div><div style="margin-bottom:4px;"><span style="color:#999;">商品：</span>${itemNames}</div><div style="margin-top:6px;font-size:14px;font-weight:600;color:#ff9500;">¥${amount.toFixed(2)}</div></div></div><div onclick="handlePaymentRequest(this)" style="margin-top:10px;padding:10px;background:linear-gradient(135deg,#ff9500 0%,#ffb300 100%);color:#fff;text-align:center;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">立即支付</div></div>`;
     
     // 🔧 使用按账号隔离的聊天记录
     const accountId = getCurrentAccountId();
@@ -35223,24 +35339,8 @@ async function sendShareOrderCard(charId, accountId) {
         total: (emeiData.cart.reduce((sum, item) => sum + item.price * item.count, 0) + 3 - (emeiData.selectedCoupon ? emeiData.selectedCoupon.amount : 0)).toFixed(2)
     };
     
-    // 创建分享卡片HTML
-    const cardHtml = `
-        <div style="width: 280px; height: 280px; background: linear-gradient(135deg, #e8f5e9 0%, #f1f8e9 100%); border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                <div style="font-size: 20px;">🛵</div>
-                <div style="font-size: 14px; font-weight: 600; color: #333;">外卖分享</div>
-            </div>
-            <div style="font-size: 13px; color: #666; line-height: 1.6;">
-                <div style="margin-bottom: 8px;">我刚点了外卖，分享给你看看~</div>
-                <div style="padding: 12px; background: rgba(255,255,255,0.8); border-radius: 8px;">
-                    <div style="margin-bottom: 4px;"><span style="color: #999;">店铺：</span>${orderInfo.store}</div>
-                    <div style="margin-bottom: 4px;"><span style="color: #999;">商品：</span>${orderInfo.items}</div>
-                    <div style="margin-top: 8px; font-size: 12px; color: #4caf50;">💰 ¥${orderInfo.total}</div>
-                </div>
-            </div>
-            <div style="margin-top: 12px; font-size: 11px; color: #999; text-align: center;">🍔 一起点外卖呀~</div>
-        </div>
-    `;
+    // 创建分享卡片HTML（紧凑格式，避免white-space问题）
+    const cardHtml = `<div style="width:100%;background:linear-gradient(135deg,#e8f5e9 0%,#f1f8e9 100%);border-radius:12px;padding:14px;box-shadow:0 2px 8px rgba(0,0,0,0.08);box-sizing:border-box;"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><div style="font-size:18px;">🛵</div><div style="font-size:14px;font-weight:600;color:#333;">外卖分享</div></div><div style="font-size:13px;color:#666;line-height:1.5;"><div style="margin-bottom:8px;">我刚点了外卖，分享给你看看~</div><div style="padding:10px;background:rgba(255,255,255,0.8);border-radius:8px;"><div style="margin-bottom:4px;"><span style="color:#999;">店铺：</span>${orderInfo.store}</div><div style="margin-bottom:4px;"><span style="color:#999;">商品：</span>${orderInfo.items}</div><div style="margin-top:6px;font-size:12px;color:#4caf50;">💰 ¥${orderInfo.total}</div></div></div><div style="margin-top:10px;font-size:11px;color:#999;text-align:center;">🍔 一起点外卖呀~</div></div>`;
     
     // 添加到聊天记录
     let history = getChatHistory(char, accountId);

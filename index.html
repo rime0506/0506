@@ -1692,6 +1692,16 @@
                         <span id="detail-lorebook-toggle" style="font-size:12px; color:var(--ins-pink); cursor:pointer;" onclick="toggleLorebookList()">展开</span>
                     </div>
                 </div>
+                <div class="detail-item" onclick="showMountUserModal()" style="cursor:pointer;">
+                    <div style="display:flex; flex-direction:column; gap:4px;">
+                        <div>挂载用户档案</div>
+                        <div style="font-size:12px; color:#999; line-height:1.4;">AI回复时读取用户人设</div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <div id="detail-mounted-user" style="font-size:14px; color:#999;">未挂载</div>
+                        <div class="detail-arrow">›</div>
+                    </div>
+                </div>
             </div>
 
             <!-- 主动聊天设置 -->
@@ -2150,6 +2160,21 @@
             <div style="display:flex; gap:10px; margin-top:20px;">
                 <button onclick="hideMountStickerModal()" style="flex:1; padding:12px; background:#f2f2f7; border:none; border-radius:8px; font-size:15px; font-weight:500;">取消</button>
                 <button onclick="saveMountedStickers()" style="flex:1; padding:12px; background:var(--ins-pink); color:#fff; border:none; border-radius:8px; font-size:15px; font-weight:500;">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 挂载用户档案弹窗 -->
+    <div id="mount-user-modal" class="sticker-modal-overlay" style="display:none;">
+        <div class="sticker-modal-box" style="max-height:80vh; overflow-y:auto;">
+            <h3 style="text-align:center; margin-bottom:20px; font-size:18px; font-weight:600;">挂载用户档案</h3>
+            <div style="font-size:13px; color:#666; margin-bottom:16px; text-align:center;">选择AI回复时读取的用户人设</div>
+            <div id="mount-user-list" style="display:flex; flex-direction:column; gap:8px;">
+                <!-- 动态生成 -->
+            </div>
+            <div style="display:flex; gap:10px; margin-top:20px;">
+                <button onclick="hideMountUserModal()" style="flex:1; padding:12px; background:#f2f2f7; border:none; border-radius:8px; font-size:15px; font-weight:500;">取消</button>
+                <button onclick="unmountUser()" style="flex:1; padding:12px; background:#f2f2f7; color:#ff3b30; border:none; border-radius:8px; font-size:15px; font-weight:500;">卸载</button>
             </div>
         </div>
     </div>
