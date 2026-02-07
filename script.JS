@@ -7514,9 +7514,28 @@ ${loreContext}
                 const char = await db.characters.get(id);
                 if (char) {
                     const accountId = getCurrentAccountId();
-                    await setFriendStatus(char, accountId, 'stranger');
+                    await setFriendStatus(char, accountId, 'deleted');
                     char.is_pinned = false;
+                    
+                    // 初始化等待好友申请的设置
+                    if (!char.wait_friend_settings) {
+                        char.wait_friend_settings = {};
+                    }
+                    if (!char.wait_friend_settings[accountId]) {
+                        char.wait_friend_settings[accountId] = {
+                            enabled: false,
+                            interval: 60,
+                            lastCheckTime: Date.now(),
+                            nextCheckTime: null
+                        };
+                    }
                     await db.characters.put(char);
+                    
+                    // 刷新聊天窗口显示等待界面
+                    if (currentChatCharId === id) {
+                        await renderChatBody(char, true);
+                    }
+                    
                     renderWechatList(document.getElementById('wechat-content'));
                 }
             }
@@ -9937,9 +9956,9 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             // 关闭聊天详情页但保持聊天窗口打开，显示等待界面
             hideChatDetail();
             
-            // 刷新聊天窗口显示等待界面
+            // 刷新聊天窗口显示等待界面（forceRender=true 绕过优化）
             if (currentChatCharId === charId) {
-                await renderChatBody(char);
+                await renderChatBody(char, true);
             }
             
             // 刷新微信页面
@@ -9978,9 +9997,9 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             // 关闭聊天详情页但保持聊天窗口打开，显示等待界面
             hideChatDetail();
             
-            // 刷新聊天窗口显示等待界面
+            // 刷新聊天窗口显示等待界面（forceRender=true 绕过优化）
             if (currentChatCharId === charId) {
-                await renderChatBody(char);
+                await renderChatBody(char, true);
             }
             
             // 刷新微信页面
@@ -9994,23 +10013,32 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
         }
 
         async function sendFriendRequestTo(charId, message) {
+            console.log('[FriendRequest] sendFriendRequestTo 开始, charId:', charId);
             const accountId = getCurrentAccountId();
             if (!accountId) {
+                console.error('[FriendRequest] 没有当前账号ID');
                 alert('请先切换到你的账号（User类型角色）');
                 return;
             }
+            console.log('[FriendRequest] accountId:', accountId);
             
             const targetChar = await db.characters.get(charId);
-            if (!targetChar) return;
+            if (!targetChar) {
+                console.error('[FriendRequest] 找不到目标角色, charId:', charId);
+                return;
+            }
+            console.log('[FriendRequest] 目标角色:', targetChar.name, '类型:', targetChar.type);
             
             // 检查角色是否被用户拉黑
             const status = getFriendStatus(targetChar, accountId);
+            console.log('[FriendRequest] 好友状态:', status);
             if (status === 'blocked') {
                 alert('该角色已被你拉黑，无法发送好友申请');
                 return;
             }
             
             // 检查是否已经发送过申请（使用toArray+filter避免索引字段不匹配问题）
+            // 🔥 清理之前残留的 pending 申请（如果之前AI调用失败可能留下残留记录）
             const allPendingRequests = await db.friend_requests
                 .where('status').equals('pending')
                 .toArray();
@@ -10020,11 +10048,13 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             );
             
             if (existingRequest) {
-                alert('已发送过好友申请，请等待对方处理');
-                return;
+                console.log('[FriendRequest] 发现已有待处理的申请, id:', existingRequest.id, '将自动清理并重新发送');
+                // 自动清理旧的待处理申请，允许重新发送
+                await db.friend_requests.delete(existingRequest.id);
             }
             
             // 创建好友申请记录（同时保存 toCharId 和 toAccountId 确保兼容性）
+            console.log('[FriendRequest] 创建好友申请记录...');
             const requestId = await db.friend_requests.add({
                 fromCharId: parseInt(accountId),
                 toCharId: charId,
@@ -10033,80 +10063,109 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 status: 'pending',
                 time: Date.now()
             });
+            console.log('[FriendRequest] 好友申请已创建, requestId:', requestId);
             
-            alert(`好友申请已发送给 ${targetChar.name}\n\n对方需要在"新的好友"中接受申请，或者你可以让AI自动判断是否接受。`);
-            
-            // 询问是否让AI自动判断
+            // 🔥 自动调用AI判断是否接受好友申请（非user类型角色）
             if (targetChar.type !== 'user') {
+                console.log('[FriendRequest] 角色非user类型，开始调用AI判断...');
                 // 检查API密钥（从数据库获取，和正常聊天一样）
                 const apiKeyData = await db.dexiData.get('aiApiKey');
                 const apiKey = apiKeyData?.value ? apiKeyData.value.trim() : '';
                 
                 if (!apiKey) {
-                    const configNow = confirm('⚠️ 未配置AI密钥\n\nAI自动判断需要配置API密钥。\n\n是否现在去配置？\n（点击取消则需要在"新的好友"中手动接受）');
-                    if (configNow) {
-                        document.getElementById('setting-page').style.display = 'flex';
-                    }
+                    console.error('[FriendRequest] ❌ 未配置AI密钥');
+                    alert(`好友申请已发送给 ${targetChar.name}\n\n⚠️ 未配置AI密钥，无法自动判断。请前往"新的好友"中手动接受。`);
                     return;
                 }
+                console.log('[FriendRequest] API密钥已配置, 长度:', apiKey.length);
                 
-                const useAI = confirm('是否让AI根据角色性格自动判断是否接受？\n\n点击"确定"使用AI判断，点击"取消"需要手动在"新的好友"中接受。');
+                // 直接调用AI判断，不需要额外确认
+                const loadingDiv = document.createElement('div');
+                loadingDiv.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999;';
+                loadingDiv.innerHTML = `
+                    <div style="background:#fff; padding:30px 40px; border-radius:16px; text-align:center; box-shadow:0 10px 40px rgba(0,0,0,0.3);">
+                        <div style="width:50px; height:50px; border:4px solid #f3f3f3; border-top:4px solid var(--ins-pink); border-radius:50%; margin:0 auto 20px; animation:spin 1s linear infinite;"></div>
+                        <div style="font-size:18px; font-weight:600; color:#333; margin-bottom:8px;">好友申请已发送</div>
+                        <div style="font-size:14px; color:#999;">${targetChar.name} 正在考虑是否接受...</div>
+                    </div>
+                `;
+                document.body.appendChild(loadingDiv);
                 
-                if (useAI) {
-                    // 显示加载提示
-                    const loadingDiv = document.createElement('div');
-                    loadingDiv.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:9999;';
-                    loadingDiv.innerHTML = `
-                        <div style="background:#fff; padding:30px 40px; border-radius:16px; text-align:center; box-shadow:0 10px 40px rgba(0,0,0,0.3);">
-                            <div style="width:50px; height:50px; border:4px solid #f3f3f3; border-top:4px solid var(--ins-pink); border-radius:50%; margin:0 auto 20px; animation:spin 1s linear infinite;"></div>
-                            <div style="font-size:18px; font-weight:600; color:#333; margin-bottom:8px;">AI判断中...</div>
-                            <div style="font-size:14px; color:#999;">${targetChar.name} 正在考虑是否接受</div>
-                        </div>
-                    `;
-                    document.body.appendChild(loadingDiv);
+                try {
+                    // 调用AI判断是否接受好友申请（同时返回回复消息）
+                    console.log('[FriendRequest] 🚀 开始调用AI判断是否接受...');
+                    const result = await aiDecideAcceptFriendRequest(targetChar, accountId, message);
+                    console.log('[FriendRequest] AI返回结果:', JSON.stringify(result));
                     
-                    try {
-                        // 调用AI判断是否接受好友申请
-                        const willAccept = await aiDecideAcceptFriendRequest(targetChar, accountId, message);
-                        
+                    if (document.body.contains(loadingDiv)) {
                         document.body.removeChild(loadingDiv);
-                        
-                        if (willAccept) {
-                            // AI决定接受
-                            const request = await db.friend_requests.get(requestId);
+                    }
+                    
+                    if (result.accepted) {
+                        console.log('[FriendRequest] ✅ AI决定接受，开始处理...');
+                        // AI决定接受
+                        const request = await db.friend_requests.get(requestId);
+                        if (request) {
                             request.status = 'accepted';
                             await db.friend_requests.put(request);
-                            
-                            // 添加为好友
-                            await setFriendStatus(targetChar, accountId, 'friend');
-                            
-                            alert(`✅ ${targetChar.name} 接受了你的好友申请！`);
-                            
-                            // 刷新界面
-                            const activeTab = document.querySelector('.wechat-tab-item.active');
-                            if (activeTab) {
-                                const tabIndex = Array.from(document.querySelectorAll('.wechat-tab-item')).indexOf(activeTab);
-                                switchWechatTab(tabIndex);
+                        }
+                        
+                        // 添加为好友
+                        await setFriendStatus(targetChar, accountId, 'friend');
+                        console.log('[FriendRequest] 好友状态已更新为 friend');
+                        
+                        // 🔥 将AI生成的回复消息添加到聊天记录
+                        if (result.messages && result.messages.length > 0) {
+                            console.log('[FriendRequest] 写入', result.messages.length, '条回复消息到聊天记录');
+                            let chatHistory = getChatHistory(targetChar, accountId);
+                            for (let i = 0; i < result.messages.length; i++) {
+                                chatHistory.push({
+                                    role: 'char',
+                                    content: result.messages[i],
+                                    time: Date.now() + i * 100
+                                });
                             }
-                        } else {
-                            // AI决定拒绝
-                            alert(`❌ ${targetChar.name} 拒绝了你的好友申请。`);
+                            await setChatHistory(targetChar, accountId, chatHistory);
                         }
-                    } catch (error) {
-                        if (document.body.contains(loadingDiv)) {
-                            document.body.removeChild(loadingDiv);
+                        
+                        alert(`✅ ${targetChar.name} 接受了你的好友申请！`);
+                        
+                        // 刷新界面
+                        if (currentChatCharId === targetChar.id) {
+                            const refreshedChar = await db.characters.get(targetChar.id);
+                            if (refreshedChar) await renderChatBody(refreshedChar);
                         }
-                        alert('AI判断失败：' + error.message + '\n\n请前往"新的好友"中手动处理。');
+                        const activeTab = document.querySelector('.wechat-tab-item.active');
+                        if (activeTab) {
+                            const tabIndex = Array.from(document.querySelectorAll('.wechat-tab-item')).indexOf(activeTab);
+                            switchWechatTab(tabIndex);
+                        }
+                    } else {
+                        console.log('[FriendRequest] ❌ AI决定拒绝');
+                        // AI决定拒绝
+                        alert(`❌ ${targetChar.name} 拒绝了你的好友申请。`);
                     }
+                } catch (error) {
+                    if (document.body.contains(loadingDiv)) {
+                        document.body.removeChild(loadingDiv);
+                    }
+                    console.error('[FriendRequest] AI判断失败:', error);
+                    alert('AI判断失败：' + error.message + '\n\n好友申请已发送，请前往"新的好友"中查看。');
                 }
+            } else {
+                alert(`好友申请已发送给 ${targetChar.name}`);
             }
         }
         
-        // AI判断是否接受好友申请（使用统一的callAI函数）
+        // AI判断是否接受好友申请并生成回复消息（使用统一的callAI函数）
+        // 返回 { accepted: boolean, messages: string[] }
         async function aiDecideAcceptFriendRequest(char, accountId, requestMessage) {
             try {
                 const myChar = await db.characters.get(parseInt(accountId));
                 const myName = myChar?.name || '用户';
+                
+                const minCount = char.reply_min_count || 1;
+                const maxCount = char.reply_max_count || 3;
                 
                 // 获取聊天历史
                 const history = getChatHistory(char, accountId);
@@ -10116,29 +10175,82 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 }).join('\n');
                 
                 const prompt = `你是 ${char.name}。
+⚠️ 重要：你的名字是${char.name}，你不是${myName}！
 
-你的人设：
+【你的人设】
 ${char.description || char.desc || '（无详细人设）'}
 
-${myName} 向你发送了好友申请，申请消息是：
-"${requestMessage}"
+【情境】
+${myName} 向你发送了好友申请，申请消息是："${requestMessage}"
+${history.length > 0 ? `\n你们之前的聊天记录：\n${recentMessages}` : '你们之前没有聊过天。'}
 
-${history.length > 0 ? `你们之前的聊天记录：\n${recentMessages}` : '你们之前没有聊过天。'}
+【任务】
+1. 根据你的性格、与 ${myName} 的关系，判断你是否会接受这个好友申请。
+2. 如果接受，请以你的身份写出接受后你会发给 ${myName} 的消息。
 
-根据你的性格、与 ${myName} 的关系（如果有的话），以及申请消息的内容，请判断你是否会接受这个好友申请。
+【输出格式】
+如果拒绝，只回复：[拒绝]
+如果接受，回复格式如下：
+[接受]
+你要发的消息内容
 
-请只回复"接受"或"拒绝"，不要有任何其他内容。`;
+【消息要求】
+- 用「|||」分隔多条消息（${minCount}-${maxCount}条）
+- 严格贴合你的人设和说话风格
+- 少用标点符号 用空格代替逗号
+- 像真人发微信一样自然`;
 
-                // 🔥 使用统一的callAI函数，避免URL拼接错误和格式不一致问题
+                // 🔥 使用统一的callAI函数
                 const answer = await callAI([
-                    { role: 'system', content: '你是一个专业的角色扮演助手。请只回复"接受"或"拒绝"。' },
+                    { role: 'system', content: `你是${char.name}，正在进行角色扮演。请严格按照格式输出。` },
                     { role: 'user', content: prompt }
                 ]);
                 
                 const trimmedAnswer = (answer || '').trim();
                 console.log('[AI决定] ' + char.name + ' 的回答:', trimmedAnswer);
                 
-                return trimmedAnswer.includes('接受') || trimmedAnswer.includes('同意');
+                const accepted = trimmedAnswer.includes('[接受]') || trimmedAnswer.includes('接受') || trimmedAnswer.includes('同意');
+                const rejected = trimmedAnswer.includes('[拒绝]') || trimmedAnswer.startsWith('拒绝');
+                
+                if (rejected) {
+                    return { accepted: false, messages: [] };
+                }
+                
+                if (accepted) {
+                    // 提取消息部分（去掉 [接受] 标记）
+                    let msgPart = trimmedAnswer
+                        .replace(/\[接受\]/g, '')
+                        .replace(/^接受[：:\s]*/i, '')
+                        .trim();
+                    
+                    // 按 ||| 分割成多条消息
+                    let messages = [];
+                    if (msgPart) {
+                        messages = msgPart.split('|||')
+                            .map(s => s.trim())
+                            .filter(s => s.length > 0 && !s.startsWith('[') && !s.startsWith('（'));
+                    }
+                    
+                    // 如果没有解析出消息，生成一条默认消息
+                    if (messages.length === 0) {
+                        messages = ['好的 通过了'];
+                    }
+                    
+                    return { accepted: true, messages };
+                }
+                
+                // 如果AI没有明确标记，尝试智能判断
+                // 如果回复看起来像正常消息（没有拒绝意味），视为接受
+                if (!rejected && trimmedAnswer.length > 0) {
+                    let messages = trimmedAnswer.split('|||')
+                        .map(s => s.trim())
+                        .filter(s => s.length > 0 && !s.startsWith('['));
+                    if (messages.length > 0) {
+                        return { accepted: true, messages };
+                    }
+                }
+                
+                return { accepted: false, messages: [] };
             } catch (error) {
                 console.error('[AI决定] 错误:', error);
                 throw error;
@@ -10580,12 +10692,19 @@ ${recentMessages || '（无记录）'}
         
         // 手动发送好友申请（用户主动）
         async function manualSendFriendRequest(charId) {
+            console.log('[FriendRequest] 点击主动发送好友申请, charId:', charId);
             const char = await db.characters.get(charId);
-            if (!char) return;
+            if (!char) {
+                console.error('[FriendRequest] 找不到角色, charId:', charId);
+                return;
+            }
             
             const message = prompt(`发送好友申请给 ${char.name}\n\n请输入申请理由（可选）：`, '我是' + (await getCurrentUserName()));
             if (message !== null) {
+                console.log('[FriendRequest] 开始发送好友申请给:', char.name, '消息:', message);
                 await sendFriendRequestTo(charId, message);
+            } else {
+                console.log('[FriendRequest] 用户取消了发送');
             }
         }
         
