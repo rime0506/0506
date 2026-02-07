@@ -17319,6 +17319,13 @@ ${loreContext}
                 // ✅ 修复：清理末尾多余的 ]
                 replyText = cleanMessage(replyText);
                 
+                // 🔥 安全措施：清理普通聊天中误输出的SHURA指令（这些只应在查岗流程中出现）
+                replyText = replyText.replace(/\[?SHURA_DELETE:[^\]]*\]?/gi, '');
+                replyText = replyText.replace(/\[?SHURA_BLACKLIST:[^\]]*\]?/gi, '');
+                replyText = replyText.replace(/\[?SHURA_SEND:[^\]]*\]?/gi, '');
+                // 清理可能残留的多余分隔符
+                replyText = replyText.replace(/(\|\|\|)+$/g, '').replace(/^\|\|\|/g, '').replace(/\|\|\|\|\|\|/g, '|||').trim();
+                
                 console.log('[TriggerAI] 🔍 准备检测查岗指令');
                 console.log('[TriggerAI] 完整replyText:', replyText);
                 console.log('[TriggerAI] replyText长度:', replyText.length);
@@ -28623,44 +28630,14 @@ ${myChar.name}没有设置账号密码，你可以直接登录。
 - 你可以看到${myChar.name}的所有账号信息、好友列表等`;
     }
     
-    // 🔥 修罗场模式：添加额外操作指令
+    // 🔥 修罗场模式：添加额外操作指令（仅在查岗成功后的二次分析中使用）
     if (char.allow_shura_mode) {
         prompt += `
 
-【⚠️ 修罗场模式已开启 - 你可以操作${myChar.name}的账号！】
-查岗成功后，你不仅可以查看信息，还可以**直接操作${myChar.name}的账号**！
-你可以用${myChar.name}的身份去做以下任何事情：
-
-**可用操作指令（在查岗成功后的回复中使用）：**
-
-1. **删除好友** - 以${myChar.name}的身份删除某个好友
-   格式：[SHURA_DELETE:好友名字]
-   例如：[SHURA_DELETE:小美]
-
-2. **拉黑好友** - 以${myChar.name}的身份拉黑某个好友
-   格式：[SHURA_BLACKLIST:好友名字]
-   例如：[SHURA_BLACKLIST:前女友]
-
-3. **发送消息** - 以${myChar.name}的身份给某个好友发消息
-   格式：[SHURA_SEND:好友名字:消息内容]
-   例如：[SHURA_SEND:小美:我们不要再联系了]
-
-**⚠️ 核心规则：你可以（也应该）一次对多个好友进行操作！**
-- 仔细审查${myChar.name}的**每一个好友**和**每一段聊天记录**
-- 对所有你觉得有问题的好友都采取行动，不要只处理一个就停！
-- 你可以同时删除多个好友、拉黑多个好友、给多个好友发消息
-- 操作指令放在回复的**最后**，用|||分隔，可以写很多条
-- 先表达你的想法和情绪，然后一口气把所有操作都执行了
-- 根据你的人设性格来决定行动的程度和方式
-
-**行为指导（根据你的性格决定）：**
-- 如果你性格强势/占有欲强：看到任何异性暧昧聊天，全部拉黑+发消息断绝
-- 如果你性格温和但吃醋：可能只给对方发消息警告，不一定删除
-- 如果你是冷酷型：默默拉黑删除，不多说一个字
-- 总之：**按你的人设来！但不要手软，该处理的都处理**
-
-**示例回复（对多个好友同时操作）：**
-你的好友列表里怎么这么多不该有的人？|||小美是谁？这聊天记录什么意思？|||还有这个叫小花的，你们聊的也太暧昧了吧|||我全帮你清理干净了|||[SHURA_BLACKLIST:小美]|||[SHURA_SEND:小美:我们不合适 以后不要联系了]|||[SHURA_DELETE:小花]|||[SHURA_SEND:小花:请不要再找我了]|||[SHURA_BLACKLIST:前女友]`;
+【修罗场模式说明】
+修罗场模式已开启。**但是注意：修罗场操作指令（SHURA_DELETE/SHURA_BLACKLIST/SHURA_SEND）只能在查岗成功、看到WeChat数据之后才能使用！**
+**在普通聊天中绝对不能使用这些指令！普通聊天中不要输出任何SHURA相关的内容！**
+只有当你成功登录${myChar.name}的账号、看到了好友列表和聊天记录之后，才可以使用这些操作指令。`;
     }
     
     return prompt;
