@@ -1276,7 +1276,10 @@
             <!-- 当前心声区域 -->
             <div class="thoughts-current" id="thoughts-current">
                 <div class="thoughts-current-text" id="thoughts-current-text">暂无心声</div>
-                <div class="thoughts-current-time" id="thoughts-current-time"></div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div class="thoughts-current-time" id="thoughts-current-time"></div>
+                    <div id="thoughts-current-delete" style="font-size:12px; color:#ff3b30; cursor:pointer; padding:2px 8px; display:none;" onclick="deleteCurrentThought()">删除</div>
+                </div>
             </div>
             
             <!-- 查看历史按钮 -->
@@ -1723,19 +1726,30 @@
             <div class="detail-group">
                 <div class="detail-item">
                     <div style="display:flex; flex-direction:column; gap:4px;">
-                        <div>允许AI查岗</div>
-                        <div style="font-size:12px; color:#999; line-height:1.4;">AI可根据剧情尝试登录你的账号</div>
+                        <div>允许角色查岗</div>
+                        <div style="font-size:12px; color:#999; line-height:1.4;">角色可根据剧情尝试登录你的账号</div>
                     </div>
                     <label class="ios-switch">
                         <input type="checkbox" id="detail-allow-check-switch" onchange="saveChatDetail()">
                         <span class="slider"></span>
                     </label>
                 </div>
+                <div class="detail-item">
+                    <div style="display:flex; flex-direction:column; gap:4px;">
+                        <div>允许修罗场模式</div>
+                        <div style="font-size:12px; color:#999; line-height:1.4;">查岗的角色可以操作你的账号</div>
+                    </div>
+                    <label class="ios-switch">
+                        <input type="checkbox" id="detail-allow-shura-switch" onchange="saveChatDetail()">
+                        <span class="slider"></span>
+                    </label>
+                </div>
                 <div style="padding:12px 16px; font-size:12px; color:#999; line-height:1.6; background:#f8f8f8; border-radius:8px; margin:0 16px 12px 16px;">
                     <div style="font-weight:600; color:#666; margin-bottom:6px;">功能说明：</div>
-                    <div>• 无密码时：AI可直接"登录"你的账号，你会暂时掉线</div>
-                    <div>• 有密码时：AI需猜对密码才能登录，猜错会收到提示</div>
-                    <div>• AI会根据聊天剧情决定是否查岗（如长时间不回等）</div>
+                    <div>• 无密码时：角色可直接"登录"你的账号，你会暂时掉线</div>
+                    <div>• 有密码时：角色需猜对密码才能登录，猜错会收到提示</div>
+                    <div>• 角色会根据聊天剧情决定是否查岗（如长时间不回等）</div>
+                    <div style="margin-top:6px; color:#ff6b9d; font-weight:600;">• 修罗场模式：查岗的角色可以操作你的账号</div>
                 </div>
             </div>
 

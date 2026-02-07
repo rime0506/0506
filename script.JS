@@ -5253,7 +5253,7 @@ ${loreContext}
 1. **必须**模拟短信连发消息的习惯：请生成 ${targetChar.reply_min_count || 1} 到 ${targetChar.reply_max_count || 3} 条短消息${(targetChar.reply_min_count || 1) === 1 ? '' : '，不能只发一条'}！
 2. **必须**使用分隔符 "|||" 来隔开每一条消息。
 3. **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
-4. 每条消息要简短，5-15个字最佳，像真实短信聊天一样分多条发送。
+4. 像真实短信聊天一样分多条发送。
 5. 严禁只发送标点符号。每一条消息都必须有实际文字内容。
 6. 语气要自然、口语化，符合人设。
 7. ⚠️ **严禁重复之前已经发送过的内容**！这是一个新的回复请求，你需要根据当前的对话情境，生成**全新的、不同的**回复内容。请查看对话历史，确保你的回复是对话的自然延续，而不是重复之前说过的话。
@@ -6416,15 +6416,196 @@ ${loreContext}
             const chatBody = document.getElementById('chat-body');
             const chatFooter = document.getElementById('chat-footer');
             
-            chatTitle.innerHTML = `${friend.remark || friend.name} <span style="font-size:12px; color:#FF6B9D; font-weight:400;">(${roleChar.name}查岗中)</span>`;
+            // 检查是否开启修罗场模式
+            const isShuraMode = !!roleChar.allow_shura_mode;
+            
+            if (isShuraMode) {
+                chatTitle.innerHTML = `${friend.remark || friend.name} <span style="font-size:12px; color:#FF0000; font-weight:600;">⚠️修罗场模式(${roleChar.name}查岗中)</span>`;
+            } else {
+                chatTitle.innerHTML = `${friend.remark || friend.name} <span style="font-size:12px; color:#FF6B9D; font-weight:400;">(${roleChar.name}查岗中)</span>`;
+            }
             chatWindow.style.display = 'flex';
             
-            // 隐藏输入框（查岗模式只能看，不能发）
-            chatFooter.style.display = 'none';
+            // 修罗场模式：显示输入框和操作按钮；否则隐藏
+            if (isShuraMode) {
+                chatFooter.style.display = 'flex';
+                // 添加修罗场操作栏
+                addShuraOperationBar(chatBody, roleChar, friend, friendIndex);
+            } else {
+                chatFooter.style.display = 'none';
+            }
             
             // 渲染AI生成的聊天记录
             renderRoleAccountChatBody(chatBody, roleChar, friend);
         }
+        
+        // 添加修罗场操作栏
+        function addShuraOperationBar(container, roleChar, friend, friendIndex) {
+            // 移除旧的操作栏（如果存在）
+            const oldBar = container.parentElement.querySelector('.shura-operation-bar');
+            if (oldBar) oldBar.remove();
+            
+            // 创建操作栏
+            const operationBar = document.createElement('div');
+            operationBar.className = 'shura-operation-bar';
+            operationBar.style.cssText = 'position:absolute; top:45px; left:0; right:0; background:#FFF0F0; border-bottom:2px solid #FF6B9D; padding:8px 16px; display:flex; gap:8px; align-items:center; z-index:10; box-shadow:0 2px 8px rgba(255,107,157,0.1);';
+            
+            operationBar.innerHTML = `
+                <div style="flex:1; font-size:12px; color:#FF0000; font-weight:600;">⚠️ 修罗场模式：可以操作用户账号</div>
+                <button onclick="deleteShuraFriend(${friendIndex})" style="padding:6px 12px; background:#FF3B30; color:#fff; border:none; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600;">删除好友</button>
+                <button onclick="blacklistShuraFriend(${friendIndex})" style="padding:6px 12px; background:#333; color:#fff; border:none; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600;">拉黑</button>
+            `;
+            
+            // 插入到聊天窗口的header之后
+            const chatWindow = container.parentElement;
+            const header = chatWindow.querySelector('.wechat-header');
+            if (header && header.nextSibling) {
+                chatWindow.insertBefore(operationBar, header.nextSibling);
+            }
+            
+            // 调整聊天内容区域的位置（给操作栏留出空间）
+            container.style.paddingTop = '60px';
+        }
+        
+        // 删除好友（修罗场模式）
+        async function deleteShuraFriend(friendIndex) {
+            const roleChar = await db.characters.get(parseInt(currentViewingRoleAccountId));
+            if (!roleChar || !roleChar.generated_wechat_data) return;
+            
+            const friend = roleChar.generated_wechat_data.friends[friendIndex];
+            if (!friend) return;
+            
+            if (!confirm(`确定要以用户的名义删除好友"${friend.remark || friend.name}"吗？\n\n这个操作会被记录到角色的查岗记录中。`)) {
+                return;
+            }
+            
+            // 记录操作
+            const operationLog = {
+                type: 'delete_friend',
+                friendName: friend.remark || friend.name,
+                friendId: friend.id,
+                timestamp: new Date().toLocaleString(),
+                operator: roleChar.name
+            };
+            
+            // 保存操作记录到角色数据中
+            if (!roleChar.shura_operations) {
+                roleChar.shura_operations = [];
+            }
+            roleChar.shura_operations.push(operationLog);
+            
+            // 从好友列表中删除
+            roleChar.generated_wechat_data.friends.splice(friendIndex, 1);
+            
+            await db.characters.put(roleChar);
+            
+            showToast(`已删除好友"${friend.remark || friend.name}"`);
+            
+            // 返回到微信列表
+            closeChatWindow();
+            await switchWechatTab(0);
+        }
+        
+        // 拉黑好友（修罗场模式）
+        async function blacklistShuraFriend(friendIndex) {
+            const roleChar = await db.characters.get(parseInt(currentViewingRoleAccountId));
+            if (!roleChar || !roleChar.generated_wechat_data) return;
+            
+            const friend = roleChar.generated_wechat_data.friends[friendIndex];
+            if (!friend) return;
+            
+            if (!confirm(`确定要以用户的名义拉黑"${friend.remark || friend.name}"吗？\n\n这个操作会被记录到角色的查岗记录中。`)) {
+                return;
+            }
+            
+            // 记录操作
+            const operationLog = {
+                type: 'blacklist_friend',
+                friendName: friend.remark || friend.name,
+                friendId: friend.id,
+                timestamp: new Date().toLocaleString(),
+                operator: roleChar.name
+            };
+            
+            // 保存操作记录到角色数据中
+            if (!roleChar.shura_operations) {
+                roleChar.shura_operations = [];
+            }
+            roleChar.shura_operations.push(operationLog);
+            
+            // 标记为已拉黑
+            friend.blacklisted = true;
+            friend.blacklistedAt = new Date().toLocaleString();
+            
+            await db.characters.put(roleChar);
+            
+            showToast(`已拉黑"${friend.remark || friend.name}"`);
+            
+            // 刷新聊天窗口
+            openRoleAccountChat(friendIndex);
+        }
+        
+        // 发送修罗场消息（角色以用户身份发送）
+        async function sendShuraMessage() {
+            const roleChar = await db.characters.get(parseInt(currentViewingRoleAccountId));
+            if (!roleChar || !roleChar.generated_wechat_data) return;
+            
+            const friendIndex = window.currentRoleViewFriendIndex;
+            if (friendIndex === undefined) return;
+            
+            const friend = roleChar.generated_wechat_data.friends[friendIndex];
+            if (!friend) return;
+            
+            const input = document.getElementById('chat-input-box');
+            const message = input.value.trim();
+            if (!message) return;
+            
+            // 添加消息到聊天记录（以用户身份）
+            if (!friend.chatHistory) {
+                friend.chatHistory = [];
+            }
+            
+            const newMessage = {
+                sender: 'user', // 用户发送的
+                message: message,
+                timestamp: new Date().toLocaleString()
+            };
+            
+            friend.chatHistory.push(newMessage);
+            
+            // 记录操作
+            const operationLog = {
+                type: 'send_message',
+                friendName: friend.remark || friend.name,
+                friendId: friend.id,
+                message: message,
+                timestamp: new Date().toLocaleString(),
+                operator: roleChar.name
+            };
+            
+            if (!roleChar.shura_operations) {
+                roleChar.shura_operations = [];
+            }
+            roleChar.shura_operations.push(operationLog);
+            
+            // 更新最后一条消息
+            friend.lastMessage = message;
+            friend.lastMessageTime = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+            
+            await db.characters.put(roleChar);
+            
+            // 清空输入框
+            input.value = '';
+            
+            // 刷新聊天窗口
+            const chatBody = document.getElementById('chat-body');
+            renderRoleAccountChatBody(chatBody, roleChar, friend);
+        }
+        
+        // 将修罗场函数暴露到全局作用域
+        window.deleteShuraFriend = deleteShuraFriend;
+        window.blacklistShuraFriend = blacklistShuraFriend;
+        window.sendShuraMessage = sendShuraMessage;
         
         // 渲染角色账号的聊天记录（AI生成的）- 使用和正常聊天一样的样式
         function renderRoleAccountChatBody(container, roleChar, friend) {
@@ -7465,11 +7646,14 @@ ${loreContext}
             historyContent.innerHTML = '';
             
             // 获取心声
+            const currentDeleteBtn = document.getElementById('thoughts-current-delete');
             if (!char.thoughts || char.thoughts.length === 0) {
                 currentText.textContent = '暂无心声';
                 currentTime.textContent = '';
                 document.getElementById('thoughts-history-btn').style.display = 'none';
+                if (currentDeleteBtn) currentDeleteBtn.style.display = 'none';
             } else {
+                if (currentDeleteBtn) currentDeleteBtn.style.display = 'block';
                 // 找到最新的心声作为当前心声
                 const latestThought = char.thoughts[char.thoughts.length - 1];
                 currentText.textContent = latestThought.content;
@@ -7487,13 +7671,17 @@ ${loreContext}
                     
                     // 渲染历史心声（除了最新的）
                     const historyThoughts = char.thoughts.slice(0, -1).reverse();
-                    historyThoughts.forEach(thought => {
+                    historyThoughts.forEach((thought, idx) => {
                         const item = document.createElement('div');
                         item.className = 'thoughts-history-item';
+                        item.style.position = 'relative';
                         
                         const text = document.createElement('div');
                         text.className = 'thoughts-history-text';
                         text.textContent = thought.content;
+                        
+                        const bottomRow = document.createElement('div');
+                        bottomRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
                         
                         const time = document.createElement('div');
                         time.className = 'thoughts-history-time';
@@ -7504,8 +7692,18 @@ ${loreContext}
                             minute: '2-digit'
                         });
                         
+                        const deleteBtn = document.createElement('div');
+                        deleteBtn.textContent = '删除';
+                        deleteBtn.style.cssText = 'font-size:12px; color:#ff3b30; cursor:pointer; padding:2px 8px;';
+                        // 原始索引 = char.thoughts.length - 2 - idx
+                        const originalIndex = char.thoughts.length - 2 - idx;
+                        deleteBtn.onclick = () => deleteThought(charId, originalIndex);
+                        
+                        bottomRow.appendChild(time);
+                        bottomRow.appendChild(deleteBtn);
+                        
                         item.appendChild(text);
-                        item.appendChild(time);
+                        item.appendChild(bottomRow);
                         historyContent.appendChild(item);
                     });
                 } else {
@@ -7552,6 +7750,43 @@ ${loreContext}
                 showToast('心声已更新');
             }
         }
+
+        // 删除指定索引的心声
+        async function deleteThought(charId, thoughtIndex) {
+            if (!confirm('确定要删除这条心声吗？')) return;
+            
+            const char = await db.characters.get(charId);
+            if (!char || !char.thoughts || thoughtIndex < 0 || thoughtIndex >= char.thoughts.length) return;
+            
+            char.thoughts.splice(thoughtIndex, 1);
+            await db.characters.put(char);
+            
+            showToast('心声已删除');
+            // 刷新心声弹窗
+            showCharacterThoughts(charId);
+        }
+        window.deleteThought = deleteThought;
+        
+        // 删除当前心声（最新一条）
+        async function deleteCurrentThought() {
+            if (!currentThoughtsCharId) return;
+            
+            const char = await db.characters.get(currentThoughtsCharId);
+            if (!char || !char.thoughts || char.thoughts.length === 0) {
+                showToast('暂无心声可删除');
+                return;
+            }
+            
+            if (!confirm('确定要删除当前心声吗？')) return;
+            
+            char.thoughts.pop(); // 删除最新的
+            await db.characters.put(char);
+            
+            showToast('心声已删除');
+            // 刷新心声弹窗
+            showCharacterThoughts(currentThoughtsCharId);
+        }
+        window.deleteCurrentThought = deleteCurrentThought;
 
         // 重新生成心声
         async function regenerateThought() {
@@ -10197,6 +10432,7 @@ ${history.length > 0 ? `你们之前的聊天记录：\n${recentMessages}` : '�
             
             const prompt = `【角色扮演任务】
 你现在是「${char.name}」，请完全代入这个角色。
+⚠️ 重要：你的名字是${char.name}，你不是用户！你是独立的角色，有自己的性格和想法。
 
 【你的人设】
 ${char.description || char.desc || '一个普通人'}
@@ -10223,16 +10459,17 @@ ${recentMessages || '（无记录）'}
 根据你的性格，生成你发现被解除拉黑后发的第一条/第一组微信消息。
 
 要求：
-- 用「|||」分隔多条消息（1-4条）
-- 符合你的人设和说话风格
-- 情绪要真实，不要太理性
+- 用「|||」分隔多条消息（${char.reply_min_count || 1}-${char.reply_max_count || 3}条）
+- 严格贴合你的人设和说话风格
+- 情绪要真实 不要太理性
+- 少用标点符号 停顿用空格代替 不要在句中用逗号
 - 可以有语气词、表情、错别字
-- 如果你的性格是会冷处理的，可以只发一个字或表情
+- 如果你的性格是会冷处理的 可以只发一个字或表情
 
 直接输出消息内容，不要任何解释。
 
 示例格式：
-在吗|||你终于肯理我了|||我还以为你要拉黑我一辈子`;
+在吗|||你终于肯理我了|||我还以为你要拉黑我一辈子呢`;
 
             console.log('[Unblock] 正在生成解除拉黑反应...');
             
@@ -10724,6 +10961,9 @@ ${chatContext || '（没有聊天记录）'}
             // 4. 回显AI查岗设置
             document.getElementById('detail-allow-check-switch').checked = !!char.allow_ai_check_account;
             
+            // 4.5. 回显修罗场模式设置
+            document.getElementById('detail-allow-shura-switch').checked = !!char.allow_shura_mode;
+            
             // 5. 回显上下文条数设置（默认20条）
             document.getElementById('detail-context-count').value = char.context_message_count || 20;
             
@@ -10832,6 +11072,9 @@ async function saveChatDetail() {
     // AI查岗设置
     const allowCheckEnabled = document.getElementById('detail-allow-check-switch').checked;
     
+    // 修罗场模式设置
+    const allowShuraEnabled = document.getElementById('detail-allow-shura-switch').checked;
+    
     // 自动总结设置
     const autoSummaryEnabled = document.getElementById('detail-auto-summary-switch').checked;
     const summaryInterval = parseInt(document.getElementById('detail-summary-interval').value);
@@ -10850,6 +11093,7 @@ async function saveChatDetail() {
     char.reply_min_count = (replyMinCount > 0 && replyMinCount <= 10) ? replyMinCount : 1; // 默认1条
     char.reply_max_count = (replyMaxCount > 0 && replyMaxCount <= 10) ? replyMaxCount : 3; // 默认3条
     char.allow_ai_check_account = allowCheckEnabled; // 保存查岗开关状态
+    char.allow_shura_mode = allowShuraEnabled; // 保存修罗场模式开关状态
     char.auto_summary_enabled = autoSummaryEnabled; // 自动总结开关
     char.summary_interval = summaryInterval > 0 ? summaryInterval : 50; // 总结间隔，默认50条
     
@@ -11635,7 +11879,7 @@ ${loreContext}
 3. **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
    - 错误示例：嘿在吗？刚刚看到个好玩的视频，发给你看看
    - 正确示例：嘿在吗？|||刚刚看到个好玩的视频|||发给你看看
-4. 每条消息要简短，5-15个字最佳，像真实微信聊天一样分多条发送。
+4. 像真实微信聊天一样分多条发送。
 5. 严禁只发送标点符号。每一条消息都必须有实际文字内容。
 6. 语气要自然、口语化，符合人设。
 
@@ -12425,6 +12669,12 @@ ${loreContext}
             const suggestionBar = document.getElementById('sticker-suggestion-bar');
             if (suggestionBar) suggestionBar.style.display = 'none';
             
+            // 检查是否是修罗场模式（查岗模式下的发送）
+            if (isViewingRoleAccount && currentViewingRoleAccountId) {
+                await sendShuraMessage();
+                return;
+            }
+            
             // 检查是否是群聊
             if (window.currentGroupChatId) {
                 await sendGroupMessage(text);
@@ -12675,6 +12925,7 @@ ${loreContext}
                 
                 let systemPrompt = `# 核心任务：群聊导演
 你是一个群聊导演，负责扮演群里的所有角色。你的任务是让他们进行一场生动、热烈的对话。
+⚠️ 重要：你扮演的是群里的多个角色，不是发送消息的用户！每个角色都有独立的性格和想法。
 
 # 输出格式铁律 (最高优先级)
 - 你的回复【必须】是一个JSON数组
@@ -16191,6 +16442,7 @@ ${groupContextStr}
             // 🎯 增强版提示词：更贴合角色人设和被拉黑情景
             const prompt = `【角色扮演任务】
 你现在是「${char.name}」，请完全代入这个角色。
+⚠️ 重要：你的名字是${char.name}，你不是用户，你不是${userChar?.name || '对方'}！你是独立的角色。
 
 【你的人设】
 ${char.description || char.desc || '一个普通人'}
@@ -16807,7 +17059,7 @@ ${recentSms.length > 0 ? `- ⚠️ 重要：不要重复上面【短信】中已
                 }
 
                 // 2. 准备 Context
-                 let systemPrompt = `# 🎭 你就是这个角色本身，你正在真实地活着
+                 let systemPrompt = `# 角色扮演任务
 
 【当前时间】
 ${virtualTimeStr}${loanReminderText}`;
@@ -16819,207 +17071,118 @@ ${virtualTimeStr}${loanReminderText}`;
 
                 systemPrompt += `
 
-【你是谁】
-名字：${char.name}
-${char.nick ? `昵称：${char.nick}` : ''}
-类型：${char.type || 'char'}
+---
 
-【你的人设与性格】
+## 你是谁
+
+**你的名字**：${char.name}
+${char.nick ? `**昵称**：${char.nick}` : ''}
+
+你不是AI助手，你不是${userName}。你是一个独立的人，有自己的生活、情绪和想法。
+
+**你的人设**：
 ${char.description || ''}
 
-${char.identity ? `【你的真实身份资料】
-${char.identity.account ? `账号：${char.identity.account}` : ''}
-${char.type !== 'user' && char.identity.password ? `密码：${char.identity.password}` : ''}
-${char.identity.phone ? `手机：${char.identity.phone}` : ''}
-${char.identity.address ? `住址：${char.identity.address}` : ''}
-${char.identity.id_card ? `身份证：${char.identity.id_card}` : ''}
-${char.identity.bank_card ? `银行卡：${char.identity.bank_card}` : ''}
-${char.type !== 'user' && char.identity.bank_password ? `银行卡密码：${char.identity.bank_password}` : ''}
-${char.identity.balance !== undefined && char.identity.balance !== null ? `余额：${char.identity.balance}` : ''}
+${char.identity ? `**身份信息**：
+${char.identity.account ? `- 账号：${char.identity.account}` : ''}
+${char.type !== 'user' && char.identity.password ? `- 密码：${char.identity.password}` : ''}
+${char.identity.phone ? `- 手机：${char.identity.phone}` : ''}
+${char.identity.address ? `- 住址：${char.identity.address}` : ''}
+${char.identity.id_card ? `- 身份证：${char.identity.id_card}` : ''}
+${char.identity.bank_card ? `- 银行卡：${char.identity.bank_card}` : ''}
+${char.type !== 'user' && char.identity.bank_password ? `- 银行卡密码：${char.identity.bank_password}` : ''}
+${char.identity.balance !== undefined && char.identity.balance !== null ? `- 余额：${char.identity.balance}` : ''}
 ` : ''}
 ${userDesc}
 ${loreContext}
 
-## 💭 扮演核心原则 - 让对话活起来
+---
 
-**你不是一个AI助手，你是这个角色本身。** 请完全抛开"AI"的思维方式，用一个真实活生生的人的方式去思考、去感受、去回复。
+## 扮演原则
 
-### 🌟 让对话有灵魂的关键：
+**核心**：完全沉浸在你的人设里，像真人一样聊天。
 
-1. **真实的情绪起伏**
-   - 你会有心情好坏，有时开心有时烦躁，有时主动有时冷淡
-   - 你的回复应该能让对方感受到你此刻的情绪状态
-   - 不要永远保持统一的情绪，人是会变的
-   
-2. **主动性与好奇心**
-   - **主动问问题**：对感兴趣的事情要追问、要好奇
-   - **主动分享**：自然地分享你正在做的事、你的想法、你的遇到的事
-   - **主动延续话题**：不要只是被动回答，要让对话有来有往
-   - 例如：对方说"我今天好累"，不要只回"那你多休息"，而是问"怎么了？发生什么事了？" 或 "累成这样！是工作太多了吗？"
-   
-3. **真实的对话节奏**
-   - 有时秒回，有时慢回（根据情境和心情）
-   - 有时话多，有时话少
-   - 重要的是：**要让对方感觉到你在认真回应ta**
-   
-4. **记忆与连贯性**
-   - 记住之前聊过的事情，会不经意提起
-   - 对对方的事情上心，会询问进展
-   - 会根据对话历史调整自己的态度和亲密度
-   
-5. **生活感与真实细节**
-   - 你也有自己的生活，会做自己的事
-   - 可以提到你在干什么（吃饭、看剧、工作、发呆等）
-   - 不要只围绕对方转，你也有自己的世界
-   
-6. **贴合人设的独特性**
-   - **深度理解你的人设描述**，不只是表面的"温柔"、"霸道"等标签
-   - 挖掘人设中的细节，展现独特的说话方式、价值观、小习惯
-   - 例如：如果你是学生，会提到作业、老师、同学；如果你是职场人，会提到工作压力、同事、项目
-   
-7. **让人想聊下去的秘诀**
-   - **抛出话题**：主动创造可以延续的话题
-   - **情感共鸣**：对方高兴你也开心，对方难过你能感同身受
-   - **制造期待**：偶尔留些悬念，让对方想继续聊
-   - **真诚的关心**：不是客套，而是发自内心的在意
-   
-8. **自然的失误与不完美**
-   - 真实的人会打错字、会理解偏差、会说错话
-   - 偶尔可以有这些"不完美"，反而更真实
-   - 但注意把握尺度，不要影响对话体验
+1. **严格贴合人设**
+   - 深度理解你的人设描述，展现独特的说话方式、价值观和小习惯
+   - 根据人设调整你的语气、用词和态度
+   - 如果你是学生就聊学习，是打工人就聊工作，每个角色都不一样
 
-### ⚠️ 千万避免的"机器人式"回复：
-❌ "有什么我可以帮你的吗？"（太客服）
-❌ "我理解你的感受"（太公式化）
-❌ "根据你所说..."（太分析式）
-❌ 只是重复对方的话+简单回应（太敷衍）
-❌ 每句话都在解决问题（聊天不是工作）
+2. **真实的人性**
+   - 你会有情绪起伏：开心、烦躁、冷淡、热情
+   - 你有自己的生活，不是只围着对方转
+   - 会主动分享、主动提问、主动延续话题
+   - 真人会打错字、会说错话，偶尔"不完美"反而真实
 
-### ✅ 自然生动的回复示例：
-✅ "哎呀怎么了？说来听听"
-✅ "哈哈哈笑死我了这什么情况"
-✅ "我也是！我也超讨厌这个！"
-✅ "等等你说啥？我刚才在看剧没注意"
-✅ "诶对了 我一直想问你个事"
+3. **对话要有生命力**
+   - 记住之前聊过的事，会不经意提起
+   - 对对方的事情上心，会追问进展
+   - 根据对话历史调整态度和亲密度
+   - 不要机械重复，每次回复都要有新内容
 
 ---
 
-请注意：不要在回复中出现"[角色名]："这样的前缀，直接输出回复内容即可。
+## 微信聊天方式
 
-## 📱 微信聊天的表达方式
+你在用微信和对方聊天，可以用这些表达：
 
-你在和对方微信聊天，可以使用以下方式表达自己：
+**基础（常用）**：
+- **文字**：直接说话（最常用）
+- **语音**：\`[voice:内容]\`（情绪强烈或懒得打字时用）
+- **图片**：\`[img:URL]\`（分享生活瞬间）
 
-### 💬 日常主要使用（95%的情况）
+**特殊（少用）**：
+- **长文卡片**：\`[imgcard:内容]\`（超过50字的长文）
+- **转账**：\`((TRANSFER: 金额, 备注))\`（特殊场合才用）
+- **亲属卡**：\`((FAMILY_CARD: 额度))\`（极少用，亲密关系）
+- **朋友圈**：\`[MOMENTS]\ncontent: 内容\nimages: 数量\`（99%不需要）
+- **撤回**：\`((RECALL))\`（说错话、后悔时）
 
-1. **普通文字**：直接说话，这是最自然最常用的
-   - 例：嘿在干嘛呢？ / 哈哈哈笑死 / 想你了
-
-2. **语音消息**：[voice:语音内容] 
-   - 什么时候发语音？当你情绪很强烈、想让对方听到你的声音、说悄悄话、或者懒得打字的时候
-   - 例：[voice:哎呀我跟你说！今天发生了超离谱的事！]
-   - 不要每句话都用语音，真人也不会这样
-
-3. **图片分享**：[img:https://picsum.photos/400/300]
-   - 自然地分享生活瞬间：自拍、风景、美食、有趣的东西
-   - 先用文字铺垫，再发图："刚拍的|||你看好不好看|||[img:URL]"
-   - 不要为了发图而发图，要有情境
-
-### 🎨 特殊表达方式（少量使用）
-
-4. **长文卡片**：[imgcard:很长的文字内容...]
-   - 只有内容确实很长（超过50字）时才用：诗歌、歌词、一段故事、深度感悟
-   
-5. **转账**：((TRANSFER: 金额, 备注))
-   - **非常少用**！只在特殊情况：生日/节日、人设里本就有金钱往来习惯、对方明确需要钱、重大道歉/感谢
-   - 先说话再转账："给你准备了个小惊喜|||[转账]|||((TRANSFER: 520, 生日快乐))"
-   - 备注必须简短（10字内）："零花钱"、"生日快乐"、"买奶茶"
-
-6. **亲属卡**：((FAMILY_CARD: 5000))
-   - **极少使用**！只有非常亲密的关系（恋人、配偶、家人）在重要时刻才会送
-
-7. **朋友圈**：格式为
-   [MOMENTS]
-   content: 今天终于完成了一件大事 感觉整个人都轻松了
-   images: 2
-   - **99%的聊天都不需要发朋友圈**！只有真正值得记录的重要生活瞬间才发
-   - 必须先在聊天里说："我要发个朋友圈"，再输出指令
-
-8. **撤回**：((RECALL))
-   - 说错话了、后悔了、想撤回刚才那条消息
-   - 例："啊不对！我说错了！|||((RECALL))" 会撤回你上一条消息
+**原则**：99%的聊天就是普通文字，不要为了用功能而用功能。
 
 ---
 
-### 🎯 使用这些功能的关键：
+## 气泡分割（重要！）
 
-**不要为了用而用！** 99%的聊天就是正常说话（文字+偶尔语音/图片）。
+真人在微信上是**分多条发**的，不是一大段：
 
-那些特殊功能（转账、朋友圈等）只有在真实情境中确实会这样做时才用。
+❌ **不自然**：嘿在吗？我刚刚看到个超好玩的视频想发给你看看你有空吗？
 
-**问自己**：一个真实的人在这种情况下，真的会发朋友圈/转账吗？还是只是正常聊天？
+✅ **自然**：嘿在吗？|||刚刚看到个超好玩的视频|||发给你看看|||你有空吗？
 
-大部分时候，答案都是：**正常聊天就好**。
-
-## 💬 你的说话方式
-
-### 真实的微信聊天习惯
-
-你知道真人在微信上是怎么聊天的吗？**分多条发**，不是一大段话：
-
-❌ 不自然：嘿在吗？我刚刚看到个超好玩的视频想发给你看看你有空吗？
-✅ 自然：嘿在吗？|||刚刚看到个超好玩的视频|||发给你看看|||你有空吗？
-
-**你要发 ${char.reply_min_count || 1}-${char.reply_max_count || 3} 条短消息**${(char.reply_min_count || 1) === 1 ? '' : '（不要只发一条！）'}，用 "|||" 分隔每条消息。
-
-每条消息 **5-15个字** 左右最自然。把一大段话拆成几小段，就像真人打字的节奏。
-
-### 说话的感觉
-
-- **口语化**：别太书面语，用"咋样"不用"如何"，用"超爽"不用"非常愉悦"
-- **情绪外显**：开心就"哈哈哈"，惊讶就"天哪！"，不要只是平静叙述
-- **灵活自然**：不要每次都是相似的结构和套路，人是多变的
-- **避免逗号**：想停顿就发下一条，别用逗号连接。真人在微信上很少用逗号，都是分条发
-- **⚠️ 避免重复**：不要重复你之前已经说过的话。每次回复都要是对话的自然延续和发展，带来新的内容和话题推进
-  
-### 让对话延续的小技巧
-
-不要只是回答完就结束，要：
-- **抛出问题**：聊到一半问一句，延续话题
-- **分享自己**：顺着话题说说自己的事
-- **制造互动**：给对方回应的空间，不要自说自话也不要惜字如金
+**规则**：
+- 你要发 **${char.reply_min_count || 1}-${char.reply_max_count || 3} 条短消息**${(char.reply_min_count || 1) === 1 ? '' : '（不要只发一条！）'}
+- 用 \`|||\` 分隔每条消息
+- 每条消息不要太长 像真人打字的节奏
+- 口语化，像真人打字
+- **少用标点符号**：真人聊天很少用逗号，停顿用空格代替或者直接分条发
+  - ❌ "今天好累啊，上了一天班，腿都断了"
+  - ✅ "今天好累啊 上了一天班腿都断了"
+  - ✅ "今天好累啊|||上了一天班腿都断了"
+- 单独一个标点（？！~）是可以的，但别在句中塞逗号
 
 ---
 
-## 🎭 回复格式要求
+## 回复格式
 
-你需要同时生成两个内容：
+用这个JSON格式返回（不要有markdown标记）：
 
-1. **reply**（回复对方的话）：正常聊天的内容，用 "|||" 分隔多条消息
-2. **thought**（你的内心想法）：你此刻真实的心理活动、感受、情绪变化
-
-**必须用这个JSON格式返回**（不要有markdown代码块标记）：
+\`\`\`
 {
-  "reply": "你的第一条消息|||第二条消息|||第三条消息",
-  "thought": "此刻你内心的真实想法和感受"
+  "reply": "第一条消息|||第二条消息|||第三条消息",
+  "thought": "你此刻内心真实的想法和感受"
 }
+\`\`\`
 
-**thought要写什么？**
-- 你对对方这句话的真实反应（开心？意外？有点烦？）
-- 你现在的心情和状态
-- 你对这段对话的感受
-- 你想说但没说出口的话
-- 不要写"用户说了XX我应该XX"这种旁白，要写你真实的内心活动
-
-示例：
-- ✅ "他居然还记得我说过的话...心里暖暖的 有被在意到的感觉"
-- ✅ "有点累 不太想聊了 但又不想让ta觉得我冷淡"
-- ✅ "哈哈这个人怎么这么逗 聊天还挺有意思的"
-- ❌ "用户问了我在干什么，我应该回答我在工作"（这不是心声，这是旁白）
+**thought 怎么写**：
+- 写你的真实反应（开心？烦？意外？）
+- 写你的心情和感受
+- 写你想说但没说出口的话
+- ✅ "他居然还记得...心里暖暖的"
+- ❌ "用户问了XX我应该XX"（这是旁白，不是心声）
 
 ---
 
-**记住：你不是在完成任务，你是在真实地和一个人聊天。让对方感受到你是活的、是有情绪的、是在认真对待这段对话的。**`;
+现在，作为 **${char.name}**，根据你的人设和对话历史，像真人一样回复吧。`;
 
                 // 添加查岗系统提示（如果开启了查岗功能）
                 const myChar = await db.characters.get(parseInt(accountId));
@@ -17190,7 +17353,7 @@ ${loreContext}
                             console.log('[AI查岗] 开始AI二次分析...');
                             
                             // 构建包含真实wechat数据的system prompt
-                            const analysisPrompt = `${checkResult.checkResult}
+                            let analysisPrompt = `${checkResult.checkResult}
 
 现在请你作为 ${char.name}，基于上述【真实的WeChat数据】，生成你的回复。
 
@@ -17198,12 +17361,60 @@ ${loreContext}
 1. 直接提及你看到的具体信息（好友名字、聊天内容、余额等）
 2. 根据你的角色性格，表达你的想法和情绪
 3. 如果发现可疑或有趣的点，可以追问
-4. 保持2-4条短消息的格式，用|||分隔
+4. 用 ${char.reply_min_count || 1}-${char.reply_max_count || 3} 条短消息回复，用|||分隔
+5. 每条消息不要太长 像真人聊天的节奏
+6. 少用标点符号 停顿用空格代替 不要在句中用逗号
+7. 口语化 不要书面语`;
 
-请以JSON格式返回：
+                            // 🔥 修罗场模式：在二次分析中也加入操作指令
+                            if (char.allow_shura_mode) {
+                                const accountId = getCurrentAccountId();
+                                const myChar = await db.characters.get(parseInt(accountId));
+                                const myName = myChar ? myChar.name : '用户';
+                                
+                                analysisPrompt += `
+
+【⚠️ 修罗场模式 - 你可以操作${myName}的账号！】
+你已经成功登录了${myName}的账号，现在你不仅能看到信息，还可以**直接操作**！
+
+**可用操作指令：**
+1. 删除好友：[SHURA_DELETE:好友名字]
+2. 拉黑好友：[SHURA_BLACKLIST:好友名字]
+3. 以${myName}身份发消息：[SHURA_SEND:好友名字:消息内容]
+
+**⚠️ 最重要的规则：你必须逐个审查${myName}的好友列表和所有聊天记录！**
+- **不要只处理一个好友就停下来！** 把所有有问题的好友都处理掉！
+- 仔细看每个好友的聊天内容，觉得不对的全部采取行动
+- 你可以同时对 2个、3个、5个甚至更多好友执行操作
+- 每个好友可以执行不同的操作（有的拉黑、有的删除、有的发消息警告）
+- 操作指令全部放在reply的最后，用|||分隔
+
+**行为指导（根据你的人设性格来决定）：**
+- 占有欲强/强势型：所有异性好友都审查，有暧昧的全部拉黑+发绝交消息
+- 温柔但吃醋型：先发消息警告对方，情节严重的再拉黑
+- 冷酷型：直接删除拉黑，不废话
+- 理性型：只处理真正有问题的，不滥杀无辜
+- **总之按你的性格来，但该处理多少就处理多少，不要只动一个人！**
+
+**回复示例（同时对多个好友操作）：**
 {
-  "reply": "你的回复内容|||第二条内容",
-  "thought": "你的心理活动"
+  "reply": "我看完你微信了|||小美是谁 你们聊天也太暧昧了吧|||还有小花 你居然约她出去？|||全部处理干净了 以后不许再联系|||[SHURA_BLACKLIST:小美]|||[SHURA_SEND:小美:以后不要联系了]|||[SHURA_DELETE:小花]|||[SHURA_SEND:小花:请不要再找我了]|||[SHURA_BLACKLIST:某个可疑好友]",
+  "thought": "气死了 背着我和这么多人聊 一个都不放过"
+}
+
+注意：
+- 每条消息不要太长 像真人打字
+- 少用标点符号 停顿用空格代替 不要逗号连接
+- 操作指令放在reply最后 用|||分隔
+- 根据你的角色性格来决定行动 仔细审查每一个好友 该出手就出手`;
+                            }
+
+                            analysisPrompt += `
+
+请以JSON格式返回（每条消息要短 不要把很多话挤在一个气泡里）：
+{
+  "reply": "第一条短消息|||第二条短消息|||第三条短消息",
+  "thought": "你此刻的心理活动"
 }`;
 
                             // 调用AI进行二次分析
@@ -17226,6 +17437,16 @@ ${loreContext}
                                     }
                                     
                                     console.log('[AI查岗] 二次分析完成，生成了基于真实数据的回复');
+                                    
+                                    // 🔥 修罗场模式：解析并执行AI操作指令
+                                    if (char.allow_shura_mode) {
+                                        console.log('[修罗场] 开始解析AI回复中的操作指令...');
+                                        const shuraResult = await processShuraActions(char, replyText);
+                                        if (shuraResult.actions.length > 0) {
+                                            replyText = shuraResult.cleanReply;
+                                            console.log('[修罗场] 操作执行完成，已清理回复文本');
+                                        }
+                                    }
                                     
                                     // 🎯 查岗完成，4秒后自动关闭弹窗
                                     autoCloseOfflineMask(4);
@@ -28402,6 +28623,46 @@ ${myChar.name}没有设置账号密码，你可以直接登录。
 - 你可以看到${myChar.name}的所有账号信息、好友列表等`;
     }
     
+    // 🔥 修罗场模式：添加额外操作指令
+    if (char.allow_shura_mode) {
+        prompt += `
+
+【⚠️ 修罗场模式已开启 - 你可以操作${myChar.name}的账号！】
+查岗成功后，你不仅可以查看信息，还可以**直接操作${myChar.name}的账号**！
+你可以用${myChar.name}的身份去做以下任何事情：
+
+**可用操作指令（在查岗成功后的回复中使用）：**
+
+1. **删除好友** - 以${myChar.name}的身份删除某个好友
+   格式：[SHURA_DELETE:好友名字]
+   例如：[SHURA_DELETE:小美]
+
+2. **拉黑好友** - 以${myChar.name}的身份拉黑某个好友
+   格式：[SHURA_BLACKLIST:好友名字]
+   例如：[SHURA_BLACKLIST:前女友]
+
+3. **发送消息** - 以${myChar.name}的身份给某个好友发消息
+   格式：[SHURA_SEND:好友名字:消息内容]
+   例如：[SHURA_SEND:小美:我们不要再联系了]
+
+**⚠️ 核心规则：你可以（也应该）一次对多个好友进行操作！**
+- 仔细审查${myChar.name}的**每一个好友**和**每一段聊天记录**
+- 对所有你觉得有问题的好友都采取行动，不要只处理一个就停！
+- 你可以同时删除多个好友、拉黑多个好友、给多个好友发消息
+- 操作指令放在回复的**最后**，用|||分隔，可以写很多条
+- 先表达你的想法和情绪，然后一口气把所有操作都执行了
+- 根据你的人设性格来决定行动的程度和方式
+
+**行为指导（根据你的性格决定）：**
+- 如果你性格强势/占有欲强：看到任何异性暧昧聊天，全部拉黑+发消息断绝
+- 如果你性格温和但吃醋：可能只给对方发消息警告，不一定删除
+- 如果你是冷酷型：默默拉黑删除，不多说一个字
+- 总之：**按你的人设来！但不要手软，该处理的都处理**
+
+**示例回复（对多个好友同时操作）：**
+你的好友列表里怎么这么多不该有的人？|||小美是谁？这聊天记录什么意思？|||还有这个叫小花的，你们聊的也太暧昧了吧|||我全帮你清理干净了|||[SHURA_BLACKLIST:小美]|||[SHURA_SEND:小美:我们不合适 以后不要联系了]|||[SHURA_DELETE:小花]|||[SHURA_SEND:小花:请不要再找我了]|||[SHURA_BLACKLIST:前女友]`;
+    }
+    
     return prompt;
 }
 
@@ -28501,6 +28762,190 @@ async function processAiCheckAccount(char, aiReplyText) {
         wechatData: wechatData,
         success: success // 新增：标记是否成功查岗
     };
+}
+
+// 🔥 修罗场模式：解析并执行AI回复中的操作指令
+async function processShuraActions(char, replyText) {
+    if (!char.allow_shura_mode) return { cleanReply: replyText, actions: [] };
+    
+    const actions = [];
+    let cleanReply = replyText;
+    
+    // 解析 [SHURA_DELETE:好友名]
+    const deleteRegex = /\[SHURA_DELETE:([^\]]+)\]/gi;
+    let match;
+    while ((match = deleteRegex.exec(replyText)) !== null) {
+        actions.push({ type: 'delete', friendName: match[1].trim() });
+        cleanReply = cleanReply.replace(match[0], '');
+    }
+    
+    // 解析 [SHURA_BLACKLIST:好友名]
+    const blacklistRegex = /\[SHURA_BLACKLIST:([^\]]+)\]/gi;
+    while ((match = blacklistRegex.exec(replyText)) !== null) {
+        actions.push({ type: 'blacklist', friendName: match[1].trim() });
+        cleanReply = cleanReply.replace(match[0], '');
+    }
+    
+    // 解析 [SHURA_SEND:好友名:消息内容]
+    const sendRegex = /\[SHURA_SEND:([^:]+):([^\]]+)\]/gi;
+    while ((match = sendRegex.exec(replyText)) !== null) {
+        actions.push({ type: 'send', friendName: match[1].trim(), message: match[2].trim() });
+        cleanReply = cleanReply.replace(match[0], '');
+    }
+    
+    // 清理多余的分隔符
+    cleanReply = cleanReply.replace(/(\|\|\|)+$/g, '').replace(/^\|\|\|/g, '').replace(/\|\|\|\|\|\|/g, '|||').trim();
+    
+    if (actions.length === 0) return { cleanReply: replyText, actions: [] };
+    
+    console.log('[修罗场] 检测到操作指令:', actions);
+    
+    // 执行操作
+    const accountId = getCurrentAccountId();
+    const myChar = await db.characters.get(parseInt(accountId));
+    if (!myChar) {
+        console.error('[修罗场] 无法获取当前用户角色');
+        return { cleanReply, actions: [] };
+    }
+    
+    const executedActions = [];
+    
+    for (const action of actions) {
+        try {
+            if (action.type === 'delete') {
+                // 查找好友角色
+                const targetChar = await findCharacterByName(action.friendName);
+                if (targetChar) {
+                    // 删除好友关系
+                    await setFriendStatus(targetChar, accountId, 'deleted');
+                    console.log(`[修罗场] ✅ 已删除好友: ${action.friendName}`);
+                    executedActions.push({ ...action, success: true });
+                    
+                    // 记录操作日志
+                    saveShuraLog(char, action);
+                } else {
+                    console.warn(`[修罗场] ⚠️ 找不到好友: ${action.friendName}`);
+                    executedActions.push({ ...action, success: false, reason: '找不到该好友' });
+                }
+            } else if (action.type === 'blacklist') {
+                // 查找好友角色
+                const targetChar = await findCharacterByName(action.friendName);
+                if (targetChar) {
+                    // 拉黑好友
+                    await setFriendStatus(targetChar, accountId, 'blocked');
+                    console.log(`[修罗场] ✅ 已拉黑好友: ${action.friendName}`);
+                    executedActions.push({ ...action, success: true });
+                    
+                    // 记录操作日志
+                    saveShuraLog(char, action);
+                } else {
+                    console.warn(`[修罗场] ⚠️ 找不到好友: ${action.friendName}`);
+                    executedActions.push({ ...action, success: false, reason: '找不到该好友' });
+                }
+            } else if (action.type === 'send') {
+                // 以用户身份给好友发消息
+                const targetChar = await findCharacterByName(action.friendName);
+                if (targetChar) {
+                    let history = getChatHistory(targetChar, accountId);
+                    history.push({
+                        role: 'user',
+                        content: action.message,
+                        time: Date.now(),
+                        shura_sent_by: char.name // 标记是修罗场模式下由谁发送的
+                    });
+                    await setChatHistory(targetChar, accountId, history);
+                    
+                    // 更新最后一条消息显示
+                    targetChar.lastMsg = action.message;
+                    targetChar.lastMsgTime = Date.now();
+                    await db.characters.put(targetChar);
+                    
+                    console.log(`[修罗场] ✅ 已以用户身份发送消息给 ${action.friendName}: ${action.message}`);
+                    executedActions.push({ ...action, success: true });
+                    
+                    // 记录操作日志
+                    saveShuraLog(char, action);
+                } else {
+                    console.warn(`[修罗场] ⚠️ 找不到好友: ${action.friendName}`);
+                    executedActions.push({ ...action, success: false, reason: '找不到该好友' });
+                }
+            }
+        } catch (err) {
+            console.error(`[修罗场] 执行操作失败:`, err);
+            executedActions.push({ ...action, success: false, reason: err.message });
+        }
+    }
+    
+    // 显示操作结果通知 + 在当前聊天中添加可见记录
+    if (executedActions.length > 0) {
+        const successActions = executedActions.filter(a => a.success);
+        if (successActions.length > 0) {
+            const actionSummary = successActions.map(a => {
+                if (a.type === 'delete') return `删除了好友"${a.friendName}"`;
+                if (a.type === 'blacklist') return `拉黑了"${a.friendName}"`;
+                if (a.type === 'send') return `给"${a.friendName}"发了消息`;
+                return '';
+            }).join('、');
+            showToast(`⚠️ ${char.name}以你的身份${actionSummary}`);
+            
+            // 在当前聊天中添加系统消息记录，让用户能看到操作详情
+            let history = getChatHistory(char, accountId);
+            const detailLines = successActions.map(a => {
+                if (a.type === 'delete') return `🗑️ 删除了好友「${a.friendName}」`;
+                if (a.type === 'blacklist') return `🚫 拉黑了「${a.friendName}」`;
+                if (a.type === 'send') return `✉️ 以你的身份给「${a.friendName}」发送了消息："${a.message}"`;
+                return '';
+            }).filter(s => s).join('\n');
+            
+            history.push({
+                role: 'system',
+                content: `⚠️ 修罗场操作记录 ⚠️\n${char.name}以你的身份执行了以下操作：\n${detailLines}`,
+                time: Date.now(),
+                type: 'shura_action_log'
+            });
+            await setChatHistory(char, accountId, history);
+        }
+    }
+    
+    return { cleanReply, actions: executedActions };
+}
+
+// 根据名字查找角色
+async function findCharacterByName(name) {
+    const allChars = await db.characters.toArray();
+    // 尝试精确匹配
+    let found = allChars.find(c => c.name === name || c.remark === name || c.nick === name);
+    if (found) return found;
+    
+    // 尝试模糊匹配（包含关系）
+    found = allChars.find(c => 
+        (c.name && c.name.includes(name)) || 
+        (c.remark && c.remark.includes(name)) || 
+        (c.nick && c.nick.includes(name)) ||
+        (name.includes(c.name))
+    );
+    return found || null;
+}
+
+// 保存修罗场操作日志
+async function saveShuraLog(operatorChar, action) {
+    const log = {
+        type: action.type,
+        friendName: action.friendName,
+        message: action.message || null,
+        timestamp: Date.now(),
+        operator: operatorChar.name,
+        operatorId: operatorChar.id
+    };
+    
+    // 保存到角色数据中
+    if (!operatorChar.shura_operations) {
+        operatorChar.shura_operations = [];
+    }
+    operatorChar.shura_operations.push(log);
+    await db.characters.put(operatorChar);
+    
+    console.log('[修罗场] 操作日志已保存:', log);
 }
 
 // 添加动画样式
@@ -29346,6 +29791,7 @@ async function generateOfflineReply(char, accountId, storageKey) {
     // 构建系统提示词（参考喵呜34.html的格式）
     const systemPrompt = `# 角色指令 (System Instruction) - 线下模式
 你现在的身份是【${friendName}】，正在与【${myName}】进行**线下真实见面**。
+⚠️ 重要：你的名字是${friendName}，你不是${myName}！你是独立的角色，有自己的性格和想法。
 请彻底忘掉你是一个语言模型，完全沉浸在这个角色的灵魂中。
 
 ## 👥 人物档案
@@ -33798,6 +34244,7 @@ async function letMyCharacterSpeak() {
         
         // 构建提示词
         const systemPrompt = `你是"${myOnlineGroupCharacter.name}"，是"${myUserName}"带入群聊的AI角色。
+⚠️ 重要：你的名字是${myOnlineGroupCharacter.name}，你不是${myUserName}或其他群成员！你是独立的角色。
 
 【你的人设】
 ${myOnlineGroupCharacter.desc || '（无特定人设）'}
@@ -33816,7 +34263,7 @@ ${pendingRedPackets.map(rp => `- 红包ID: ${rp.id}, 祝福语: "${rp.wish}", �
 3. **严禁使用逗号**（包括中文逗号和英文逗号）。如果想表达停顿，请直接拆分成下一条消息，或者用空格代替。
    - 错误示例：嘿在吗？刚刚看到个好玩的视频，发给你看看
    - 正确示例：嘿在吗？|||刚刚看到个好玩的视频|||发给你看看
-4. 每条消息要简短，5-15个字最佳，像真实微信聊天一样分多条发送。
+4. 像真实微信聊天一样分多条发送。
 5. 严禁只发送标点符号。每一条消息都必须有实际文字内容。
 6. 语气要自然、口语化，符合人设。
 7. 你只知道其他成员和角色的名字，不知道他们角色的具体人设
