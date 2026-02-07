@@ -105,7 +105,7 @@
                     </div>
                 </div>
 
-                <div class="app-icon" id="icon-photo" onclick="showMusicAppPage()" style="display:none;">
+                <div class="app-icon" id="icon-photo" onclick="showMusicAppPage()">
                     <div class="icon"></div>
                     <div class="name">网易云</div>
                 </div>
@@ -4116,16 +4116,20 @@
         <div class="wyy-app-wrapper">
             <!-- 主页面 -->
             <div class="wyy-page wyy-main-page active" id="wyyMainPage">
-                <!-- 顶部返回按钮 -->
-                <button class="wyy-main-back-btn" onclick="closeMusicApp()" style="position: fixed; top: 20px; left: 20px; z-index: 200; font-size: 18px; background: rgba(0,0,0,0.1); border: none; width: 40px; height: 40px; border-radius: 50%; color: #333; cursor: pointer; display: flex; align-items: center; justify-content: center;">
-                    <i class="fa fa-chevron-left"></i>
-                </button>
+                <!-- 顶栏 -->
+                <div class="wyy-top-bar">
+                    <button class="wyy-top-bar-back" onclick="closeMusicApp()">
+                        <i class="fa fa-chevron-left"></i>
+                    </button>
+                    <div class="wyy-top-bar-title">网易云音乐</div>
+                    <div class="wyy-top-bar-right"></div>
+                </div>
                 <!-- 顶部个人信息 -->
                 <div class="wyy-user-header">
                     <div class="wyy-avatar-wrapper">
                         <div class="wyy-avatar" id="wyyAvatarDisplay"></div>
                     </div>
-                    <div class="wyy-nickname">他的命就这样落到了我的怀里 <span class="wyy-vip-tag">VIP叁</span></div>
+                    <div class="wyy-nickname">user <span class="wyy-vip-tag">VIP叁</span></div>
                     <div class="wyy-user-stats">
                         <div class="wyy-stat-item" data-type="follow">
                             <div class="wyy-stat-value">29</div>
@@ -4204,10 +4208,14 @@
             <!-- 播放详情页面 -->
             <div class="wyy-page wyy-player-page" id="wyyPlayerPage">
                 <div class="wyy-player-header">
-                    <button class="wyy-back-btn" id="wyyBackBtn"><i class="fa fa-chevron-down"></i></button>
-                    <button class="wyy-together-listen-btn" id="wyyTogetherListenBtn" title="一起听">
-                        <i class="fa fa-users"></i>
-                    </button>
+                    <!-- 顶栏 -->
+                    <div class="wyy-player-top-bar">
+                        <button class="wyy-player-top-bar-back" id="wyyBackBtn"><i class="fa fa-chevron-down"></i></button>
+                        <div class="wyy-player-top-bar-title" style="text-align:center;">正在播放</div>
+                        <button class="wyy-player-top-bar-right" id="wyyTogetherListenBtn" title="一起听">
+                            <i class="fa fa-headphones"></i>
+                        </button>
+                    </div>
                     <div class="wyy-song-info-large">
                         <div class="wyy-song-name-large" id="wyyPlayerSongName">怎么唱情歌</div>
                         <div class="wyy-singer-name-large" id="wyyPlayerSingerName">刘惜君</div>

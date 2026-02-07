@@ -3131,6 +3131,21 @@ async function uninstallApp(appId, desktopIconId) {
 // 初始化已安装应用的桌面图标显示
 async function initInstalledApps() {
     try {
+        // 🔥 默认预装应用：网易云音乐（桌面默认显示，确保数据库中也标记为已安装）
+        const defaultApps = [
+            { appId: 'netease-music', desktopIconId: 'icon-photo', showFunction: 'showMusicAppPage' }
+        ];
+        for (const defApp of defaultApps) {
+            const existing = await installedAppsDb.apps.get(defApp.appId);
+            if (!existing) {
+                await installedAppsDb.apps.put({
+                    appId: defApp.appId,
+                    installed: true,
+                    installDate: new Date()
+                });
+            }
+        }
+        
         // 从 IndexedDB 加载
         const installedApps = await installedAppsDb.apps.toArray();
         installedApps.forEach(app => {
@@ -7523,10 +7538,11 @@ ${loreContext}
             listDiv.style.width = '100%';
             listDiv.style.background = '#fff';
             
-            // 添加"新的好友"入口
+            // 添加"新的好友"入口（同时检查 toCharId 和 toAccountId）
             const allRequests = await db.friend_requests.toArray();
             const pendingRequests = allRequests.filter(req => 
-                req.toCharId === parseInt(accountId) && req.status === 'pending'
+                req.status === 'pending' && 
+                (req.toCharId === parseInt(accountId) || req.toAccountId === accountId)
             );
             const newFriendItem = document.createElement('div');
             newFriendItem.style.display = 'flex';
@@ -9594,9 +9610,9 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                     continue;
                 }
                 
-                // 处理本地好友申请
-                const isReceived = req.toCharId === parseInt(accountId);
-                const relatedCharId = isReceived ? req.fromCharId : req.toCharId;
+                // 处理本地好友申请（兼容 toCharId 和 toAccountId）
+                const isReceived = (req.toCharId === parseInt(accountId)) || (req.toAccountId === accountId);
+                const relatedCharId = isReceived ? req.fromCharId : (req.toCharId || parseInt(req.toAccountId));
                 const relatedChar = await db.characters.get(relatedCharId);
                 if (!relatedChar) continue;
                 
@@ -9994,20 +10010,25 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
                 return;
             }
             
-            // 检查是否已经发送过申请
-            const existingRequest = await db.friend_requests
-                .where({fromCharId: parseInt(accountId), toCharId: charId, status: 'pending'})
-                .first();
+            // 检查是否已经发送过申请（使用toArray+filter避免索引字段不匹配问题）
+            const allPendingRequests = await db.friend_requests
+                .where('status').equals('pending')
+                .toArray();
+            const existingRequest = allPendingRequests.find(req => 
+                req.fromCharId === parseInt(accountId) && 
+                (req.toCharId === charId || req.toAccountId === String(charId))
+            );
             
             if (existingRequest) {
                 alert('已发送过好友申请，请等待对方处理');
                 return;
             }
             
-            // 创建好友申请记录
+            // 创建好友申请记录（同时保存 toCharId 和 toAccountId 确保兼容性）
             const requestId = await db.friend_requests.add({
                 fromCharId: parseInt(accountId),
                 toCharId: charId,
+                toAccountId: String(charId),
                 message: message || '请求添加你为好友',
                 status: 'pending',
                 time: Date.now()
@@ -10081,22 +10102,9 @@ User(${userChar.name}) 向你发送了好友申请，附言：“${reason || '�
             }
         }
         
-        // AI判断是否接受好友申请
+        // AI判断是否接受好友申请（使用统一的callAI函数）
         async function aiDecideAcceptFriendRequest(char, accountId, requestMessage) {
             try {
-                // 从数据库获取API配置（和正常聊天一样）
-                const urlData = await db.dexiData.get('aiBaseUrl');
-                const keyData = await db.dexiData.get('aiApiKey');
-                const modelData = await db.dexiData.get('aiCurrentModel');
-                
-                const apiUrl = urlData?.value || 'https://api.openai.com';
-                const apiKey = keyData?.value ? keyData.value.trim() : '';
-                const model = modelData?.value || 'gpt-4';
-                
-                if (!apiKey) {
-                    throw new Error('未配置API密钥');
-                }
-                
                 const myChar = await db.characters.get(parseInt(accountId));
                 const myName = myChar?.name || '用户';
                 
@@ -10121,33 +10129,16 @@ ${history.length > 0 ? `你们之前的聊天记录：\n${recentMessages}` : '�
 
 请只回复"接受"或"拒绝"，不要有任何其他内容。`;
 
-                const response = await fetch(`${apiUrl}/v1/chat/completions`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${apiKey}`
-                    },
-                    body: JSON.stringify({
-                        model: model,
-                        messages: [
-                            { role: 'system', content: '你是一个专业的角色扮演助手。' },
-                            { role: 'user', content: prompt }
-                        ],
-                        temperature: 0.7,
-                        max_tokens: 50
-                    })
-                });
+                // 🔥 使用统一的callAI函数，避免URL拼接错误和格式不一致问题
+                const answer = await callAI([
+                    { role: 'system', content: '你是一个专业的角色扮演助手。请只回复"接受"或"拒绝"。' },
+                    { role: 'user', content: prompt }
+                ]);
                 
-                if (!response.ok) {
-                    throw new Error(`API错误: ${response.status}`);
-                }
+                const trimmedAnswer = (answer || '').trim();
+                console.log('[AI决定] ' + char.name + ' 的回答:', trimmedAnswer);
                 
-                const data = await response.json();
-                const answer = data.choices[0].message.content.trim();
-                
-                console.log('[AI决定] ' + char.name + ' 的回答:', answer);
-                
-                return answer.includes('接受') || answer.includes('同意');
+                return trimmedAnswer.includes('接受') || trimmedAnswer.includes('同意');
             } catch (error) {
                 console.error('[AI决定] 错误:', error);
                 throw error;
@@ -10239,7 +10230,7 @@ ${history.length > 0 ? `你们之前的聊天记录：\n${recentMessages}` : '�
             }
         }
         
-        // 快进检测
+        // 快进检测（删除好友后）
         async function fastForwardCheck(charId) {
             // 检查API密钥（从数据库获取，和正常聊天一样）
             const apiKeyData = await db.dexiData.get('aiApiKey');
@@ -10254,13 +10245,53 @@ ${history.length > 0 ? `你们之前的聊天记录：\n${recentMessages}` : '�
                 return;
             }
             
-            const minutes = prompt('快进多少分钟？', '60');
-            if (minutes === null) return;
+            const timeInput = prompt('快进多久？\n格式：数字 + 单位\n例如：60分钟、2小时、1天', '60分钟');
+            if (timeInput === null) return;
             
-            const minutesNum = parseInt(minutes);
-            if (isNaN(minutesNum) || minutesNum <= 0) {
-                alert('请输入有效的分钟数');
+            // 解析输入（支持多种格式）
+            const match = timeInput.match(/^(\d+)\s*(分钟|小时|天)$/);
+            if (!match) {
+                // 兼容旧格式（纯数字默认为分钟）
+                const minutesNum = parseInt(timeInput);
+                if (isNaN(minutesNum) || minutesNum <= 0) {
+                    alert('格式错误！请输入如：60分钟、2小时、1天');
+                    return;
+                }
+                // 🔥 更新虚拟时间偏移
+                const char = await db.characters.get(charId);
+                if (char) {
+                    if (!char.timeOffset) char.timeOffset = 0;
+                    char.timeOffset += minutesNum * 60 * 1000;
+                    await db.characters.put(char);
+                }
+                await checkCharacterSendFriendRequest(charId, minutesNum);
                 return;
+            }
+            
+            const amount = parseInt(match[1]);
+            const unit = match[2];
+            
+            // 计算分钟数
+            let minutesNum = 0;
+            if (unit === '分钟') {
+                minutesNum = amount;
+            } else if (unit === '小时') {
+                minutesNum = amount * 60;
+            } else if (unit === '天') {
+                minutesNum = amount * 24 * 60;
+            }
+            
+            if (minutesNum <= 0) {
+                alert('时间必须大于0');
+                return;
+            }
+            
+            // 🔥 更新虚拟时间偏移
+            const char = await db.characters.get(charId);
+            if (char) {
+                if (!char.timeOffset) char.timeOffset = 0;
+                char.timeOffset += minutesNum * 60 * 1000;
+                await db.characters.put(char);
             }
             
             await checkCharacterSendFriendRequest(charId, minutesNum);
@@ -10564,6 +10595,7 @@ ${recentMessages || '（无记录）'}
             if (!char) return;
             
             const accountId = getCurrentAccountId();
+            if (!accountId) return;
             const myChar = await db.characters.get(parseInt(accountId));
             if (!myChar) return;
             
@@ -10577,23 +10609,37 @@ ${recentMessages || '（无记录）'}
                 return `${role}: ${msg.content}`;
             }).join('\n');
             
-            const prompt = `你是${char.name}。
+            // 格式化时间显示
+            let elapsedText = '';
+            if (elapsedMinutes < 60) {
+                elapsedText = elapsedMinutes + '分钟';
+            } else if (elapsedMinutes < 1440) {
+                elapsedText = Math.round(elapsedMinutes / 60) + '小时';
+            } else {
+                elapsedText = Math.round(elapsedMinutes / 1440) + '天';
+            }
+            
+            const systemPrompt = `你是一个角色扮演助手。你需要代入角色${char.name}，判断是否会主动发送好友申请。
+⚠️ 重要：你的名字是${char.name}，你不是${myChar.name}！你是独立的角色。`;
 
-你的人设：
-${char.description || '（无详细人设）'}
+            const userPrompt = `【你的人设】
+${char.description || char.desc || '（无详细人设）'}
 
-你和${myChar.name}之前是好友，但${myChar.name}删除了你。你们之前的聊天记录：
+【对方信息】
+名字：${myChar.name}
+${myChar.description ? `简介：${myChar.description.substring(0, 200)}` : ''}
 
+【你们之前的聊天记录】
 ${chatContext || '（没有聊天记录）'}
 
-现在时间已经过去了${elapsedMinutes}分钟。
+【当前情境】
+你和${myChar.name}之前是好友，但${myChar.name}删除了你。
+现在已经过去了${elapsedText}。
 
 请根据你的性格、和${myChar.name}的关系、以及你们的聊天历史，决定你是否要主动发送好友申请给${myChar.name}。
 
-如果你决定发送好友申请，请以你的视角写出你想对${myChar.name}说的话（可以是1-3条消息，每条消息用换行分隔）。
-如果你决定不发送，请只回复"[不发送]"。
-
-注意：请直接以角色身份说话，不要有任何格式标记或解释。`;
+如果你决定发送好友申请，请以你的身份写出申请附带的消息（1-3条，每条用换行分隔）。直接写消息内容，不要有格式标记或解释。
+如果你决定不发送，请只回复"[不发送]"。`;
             
             // 显示加载提示
             const loadingDiv = document.createElement('div');
@@ -10602,7 +10648,7 @@ ${chatContext || '（没有聊天记录）'}
                 <div style="background:#fff; padding:30px 40px; border-radius:16px; text-align:center; box-shadow:0 10px 40px rgba(0,0,0,0.3);">
                     <div style="width:50px; height:50px; border:4px solid #f3f3f3; border-top:4px solid var(--ins-pink); border-radius:50%; margin:0 auto 20px; animation:spin 1s linear infinite;"></div>
                     <div style="font-size:18px; font-weight:600; color:#333; margin-bottom:8px;">正在检测中...</div>
-                    <div style="font-size:14px; color:#999;">${char.name} 正在决定是否发送好友申请</div>
+                    <div style="font-size:14px; color:#999;">${char.name} 正在决定是否发送好友申请（快进${elapsedText}）</div>
                 </div>
             `;
             document.body.appendChild(loadingDiv);
@@ -10621,45 +10667,70 @@ ${chatContext || '（没有聊天记录）'}
             }
             
             try {
+                // 🔥 使用 system + user 消息格式，与其他AI调用保持一致
                 const response = await callAI([
-                    { role: 'user', content: prompt }
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt }
                 ]);
                 
-                document.body.removeChild(loadingDiv);
+                if (document.body.contains(loadingDiv)) {
+                    document.body.removeChild(loadingDiv);
+                }
                 
                 // 解析AI回复
-                const answer = response.trim();
+                const answer = (response || '').trim();
                 
-                if (answer === '[不发送]' || answer.includes('[不发送]')) {
+                if (!answer || answer === '[不发送]' || answer.includes('[不发送]') || answer.includes('不发送')) {
                     // 角色决定不发送
                     alert(`${char.name} 决定暂时不发送好友申请`);
                     
-                    // 更新最后检测时间
-                    if (!char.wait_friend_settings) char.wait_friend_settings = {};
-                    if (char.wait_friend_settings[accountId]) {
-                        char.wait_friend_settings[accountId].lastCheckTime = Date.now();
-                        if (char.wait_friend_settings[accountId].enabled) {
-                            char.wait_friend_settings[accountId].nextCheckTime = 
-                                Date.now() + char.wait_friend_settings[accountId].interval * 60 * 1000;
+                    // 重新获取角色数据（避免使用过期数据）
+                    const freshChar = await db.characters.get(charId);
+                    if (freshChar) {
+                        if (!freshChar.wait_friend_settings) freshChar.wait_friend_settings = {};
+                        if (!freshChar.wait_friend_settings[accountId]) {
+                            freshChar.wait_friend_settings[accountId] = {
+                                enabled: false,
+                                interval: 60,
+                                lastCheckTime: Date.now(),
+                                nextCheckTime: null
+                            };
                         }
-                        await db.characters.put(char);
+                        freshChar.wait_friend_settings[accountId].lastCheckTime = Date.now();
+                        if (freshChar.wait_friend_settings[accountId].enabled) {
+                            freshChar.wait_friend_settings[accountId].nextCheckTime = 
+                                Date.now() + freshChar.wait_friend_settings[accountId].interval * 60 * 1000;
+                        }
+                        await db.characters.put(freshChar);
                     }
                 } else {
                     // 角色决定发送好友申请，将多条消息拆分
-                    const messages = answer.split('\n').filter(msg => msg.trim().length > 0);
+                    // 清理AI可能附加的格式标记
+                    let cleanAnswer = answer
+                        .replace(/^[\s\S]*?\[不发送\][\s\S]*$/gi, '')
+                        .replace(/^(好的|作为|以下是|我决定).*[:：]\s*/gim, '')
+                        .trim();
+                    
+                    if (!cleanAnswer) cleanAnswer = answer; // 如果清理后为空，用原始回复
+                    
+                    const messages = cleanAnswer.split('\n').filter(msg => {
+                        const trimmed = msg.trim();
+                        return trimmed.length > 0 && !trimmed.startsWith('[') && !trimmed.startsWith('（');
+                    });
                     
                     if (messages.length === 0) {
-                        alert(`${char.name} 的回复为空，未发送申请`);
+                        alert(`${char.name} 的回复无法解析，未发送申请`);
                         return;
                     }
                     
-                    // 将所有消息合并，或者只取第一条作为申请消息
+                    // 将所有消息合并作为申请消息
                     const requestMessage = messages.join('\n');
                     
                     // 创建好友申请（反向：从角色发给用户）
                     await db.friend_requests.add({
                         fromCharId: charId,
                         toCharId: parseInt(accountId),
+                        toAccountId: accountId,
                         message: requestMessage,
                         status: 'pending',
                         time: Date.now()
@@ -10672,15 +10743,24 @@ ${chatContext || '（没有聊天记录）'}
                     
                     alert(`${char.name} 发送了好友申请！\n\n${preview}\n\n请前往"新的好友"页面查看。`);
                     
-                    // 更新最后检测时间
-                    if (!char.wait_friend_settings) char.wait_friend_settings = {};
-                    if (char.wait_friend_settings[accountId]) {
-                        char.wait_friend_settings[accountId].lastCheckTime = Date.now();
-                        if (char.wait_friend_settings[accountId].enabled) {
-                            char.wait_friend_settings[accountId].nextCheckTime = 
-                                Date.now() + char.wait_friend_settings[accountId].interval * 60 * 1000;
+                    // 重新获取角色数据
+                    const freshChar = await db.characters.get(charId);
+                    if (freshChar) {
+                        if (!freshChar.wait_friend_settings) freshChar.wait_friend_settings = {};
+                        if (!freshChar.wait_friend_settings[accountId]) {
+                            freshChar.wait_friend_settings[accountId] = {
+                                enabled: false,
+                                interval: 60,
+                                lastCheckTime: Date.now(),
+                                nextCheckTime: null
+                            };
                         }
-                        await db.characters.put(char);
+                        freshChar.wait_friend_settings[accountId].lastCheckTime = Date.now();
+                        if (freshChar.wait_friend_settings[accountId].enabled) {
+                            freshChar.wait_friend_settings[accountId].nextCheckTime = 
+                                Date.now() + freshChar.wait_friend_settings[accountId].interval * 60 * 1000;
+                        }
+                        await db.characters.put(freshChar);
                     }
                     
                     // 刷新通讯录红点
@@ -10692,13 +10772,15 @@ ${chatContext || '（没有聊天记录）'}
                 
                 // 刷新界面
                 if (currentChatCharId === charId) {
-                    await renderChatBody(char);
+                    const refreshedChar = await db.characters.get(charId);
+                    if (refreshedChar) await renderChatBody(refreshedChar);
                 }
                 
             } catch (error) {
                 if (document.body.contains(loadingDiv)) {
                     document.body.removeChild(loadingDiv);
                 }
+                console.error('[FastForwardCheck] AI调用失败:', error);
                 alert('AI调用失败：' + error.message);
             }
         }
@@ -16442,7 +16524,7 @@ ${groupContextStr}
             // 🎯 增强版提示词：更贴合角色人设和被拉黑情景
             const prompt = `【角色扮演任务】
 你现在是「${char.name}」，请完全代入这个角色。
-⚠️ 重要：你的名字是${char.name}，你不是用户，你不是${userChar?.name || '对方'}！你是独立的角色。
+⚠️ 重要：你的名字是${char.name}，你不是用户，你不是${myChar?.name || '对方'}！你是独立的角色。
 
 【你的人设】
 ${char.description || char.desc || '一个普通人'}
@@ -17183,6 +17265,17 @@ ${loreContext}
 ---
 
 现在，作为 **${char.name}**，根据你的人设和对话历史，像真人一样回复吧。`;
+
+                // 添加一起听状态（如果正在和当前角色一起听）
+                const togetherListenInfo = wyyGetTogetherListenInfo();
+                if (togetherListenInfo && togetherListenInfo.role === char.name) {
+                    systemPrompt += `\n\n【当前状态：一起听音乐】
+你正在和${userName || '对方'}一起听音乐（网易云音乐"一起听"功能）。
+当前播放：「${togetherListenInfo.songName}」 - ${togetherListenInfo.singerName}
+${togetherListenInfo.isPlaying ? '正在播放中...' : '已暂停'}
+
+提示：你可以在聊天中自然地提到你们正在一起听的这首歌，比如评价歌曲、分享感受、聊聊歌词含义，或者表达和对方一起听歌的心情。不要生硬地说"我们在一起听歌"，而是像真人一样自然地带入。不是每次都必须提，偶尔提一下就好。`;
+                }
 
                 // 添加查岗系统提示（如果开启了查岗功能）
                 const myChar = await db.characters.get(parseInt(accountId));
@@ -26260,49 +26353,65 @@ if (wyyTogetherListenBtn) {
     });
 }
 
-// 显示角色选择器
-function wyyShowTogetherListenRoleSelector() {
+// 显示角色选择器（从数据库加载角色，不包括联机好友）
+async function wyyShowTogetherListenRoleSelector() {
     if (!wyyTogetherListenRoleList) return;
     
-    const friends = getFriendList();
-    
-    if (friends.length === 0) {
-        wyyTogetherListenRoleList.innerHTML = '<div style="text-align: center; padding: 20px; color: #999;">还没有好友，请先添加好友</div>';
-    } else {
-        let html = '';
-        friends.forEach(friend => {
-            // 处理friend可能是对象或字符串的情况
-            const friendName = typeof friend === 'string' ? friend : (friend.name || friend.remark || '未知');
-            const friendDisplayName = typeof friend === 'string' ? friend : (friend.remark || friend.name || '未知');
-            const isActive = wyyTogetherListenRole === friendName;
-            const firstChar = String(friendDisplayName).charAt(0);
-            
-            html += `
-                <div class="wyy-playlist-selector-item ${isActive ? 'active' : ''}" data-role="${friendName}" style="padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; display: flex; align-items: center; gap: 12px; transition: background 0.2s;">
-                    <div style="width: 40px; height: 40px; border-radius: 50%; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #666;">${firstChar}</div>
-                    <div style="flex: 1;">
-                        <div style="font-weight: 500; color: #333; margin-bottom: 2px;">${friendDisplayName}</div>
-                        ${isActive ? '<div style="font-size: 12px; color: #ff6b6b;">正在一起听</div>' : ''}
-                    </div>
-                    ${isActive ? '<i class="fa fa-check-circle" style="color: #ff6b6b;"></i>' : '<i class="fa fa-chevron-right" style="color: #ccc;"></i>'}
-                </div>
-            `;
+    try {
+        const accountId = getCurrentAccountId();
+        const allChars = await db.characters.toArray();
+        // 筛选：非user类型、是好友状态的角色
+        const friends = allChars.filter(char => {
+            if (char.type === 'user') return false;
+            if (!accountId) return char.wechat_status === 'friend';
+            const status = getFriendStatus(char, accountId);
+            return status === 'friend';
         });
-        wyyTogetherListenRoleList.innerHTML = html;
         
-        // 添加点击事件
-        document.querySelectorAll('.wyy-playlist-selector-item[data-role]').forEach(item => {
-            item.addEventListener('click', function() {
-                const role = this.getAttribute('data-role');
-                if (wyyTogetherListenRole === role) {
-                    // 如果已经是一起听的角色，则结束一起听
-                    wyyStopTogetherListen();
-                } else {
-                    // 开始和该角色一起听
-                    wyyStartTogetherListen(role);
-                }
+        if (friends.length === 0) {
+            wyyTogetherListenRoleList.innerHTML = '<div style="text-align: center; padding: 20px; color: #999;">还没有好友，请先添加角色好友</div>';
+        } else {
+            let html = '';
+            friends.forEach(char => {
+                const charName = char.name || '未知';
+                const displayName = char.nick || char.name || '未知';
+                const isActive = wyyTogetherListenRole === charName;
+                const avatarUrl = char.avatar || '';
+                const firstChar = String(displayName).charAt(0);
+                
+                const avatarHtml = avatarUrl 
+                    ? `<div style="width: 42px; height: 42px; border-radius: 50%; background: url('${avatarUrl}') center/cover no-repeat; flex-shrink: 0;"></div>`
+                    : `<div style="width: 42px; height: 42px; border-radius: 50%; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #666; flex-shrink: 0;">${firstChar}</div>`;
+                
+                html += `
+                    <div class="wyy-together-listen-item ${isActive ? 'active' : ''}" data-role="${charName}" data-char-id="${char.id}" style="padding: 12px 16px; border-bottom: 1px solid #f0f0f0; cursor: pointer; display: flex; align-items: center; gap: 12px; transition: background 0.2s;">
+                        ${avatarHtml}
+                        <div style="flex: 1; min-width: 0;">
+                            <div style="font-weight: 500; color: #333; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${displayName}</div>
+                            ${isActive ? '<div style="font-size: 12px; color: #ff6b6b;">♪ 正在一起听</div>' : ''}
+                        </div>
+                        ${isActive ? '<i class="fa fa-check-circle" style="color: #ff6b6b; font-size: 18px;"></i>' : '<i class="fa fa-chevron-right" style="color: #ccc;"></i>'}
+                    </div>
+                `;
             });
-        });
+            wyyTogetherListenRoleList.innerHTML = html;
+            
+            // 添加点击事件
+            document.querySelectorAll('.wyy-together-listen-item[data-role]').forEach(item => {
+                item.addEventListener('click', function() {
+                    const role = this.getAttribute('data-role');
+                    const charId = this.getAttribute('data-char-id');
+                    if (wyyTogetherListenRole === role) {
+                        wyyStopTogetherListen();
+                    } else {
+                        wyyStartTogetherListen(role, charId);
+                    }
+                });
+            });
+        }
+    } catch (error) {
+        console.error('[一起听] 加载角色列表失败:', error);
+        wyyTogetherListenRoleList.innerHTML = '<div style="text-align: center; padding: 20px; color: #999;">加载失败，请重试</div>';
     }
     
     // 更新结束按钮显示
@@ -26318,28 +26427,38 @@ function wyyShowTogetherListenRoleSelector() {
 }
 
 // 开始一起听
-function wyyStartTogetherListen(role) {
+let wyyTogetherListenCharId = null; // 当前一起听角色的ID
+function wyyStartTogetherListen(role, charId) {
     // 确保role是字符串
     wyyTogetherListenRole = String(role);
+    wyyTogetherListenCharId = charId ? parseInt(charId) : null;
     if (wyyTogetherListenBtn) wyyTogetherListenBtn.classList.add('active');
     if (wyyTogetherListenModal) wyyTogetherListenModal.style.display = 'none';
     
-    // 不再发送消息到对话框，只作为角色回复的参考
-    // 开始定时更新一起听状态（虽然不再更新卡片，但保持状态）
+    // 更新播放页顶栏显示
+    wyyUpdateTogetherListenDisplay();
+    
+    // 状态会通过 systemPrompt 传递给角色
     wyyStartTogetherListenUpdate();
     
-    alert(`已开始和 ${wyyTogetherListenRole} 一起听`);
+    showToast(`正在和 ${wyyTogetherListenRole} 一起听 ♪`);
 }
 
 // 结束一起听
 function wyyStopTogetherListen() {
-    // 不再发送消息到对话框
+    const prevRole = wyyTogetherListenRole;
     wyyTogetherListenRole = null;
+    wyyTogetherListenCharId = null;
     if (wyyTogetherListenBtn) wyyTogetherListenBtn.classList.remove('active');
     if (wyyTogetherListenModal) wyyTogetherListenModal.style.display = 'none';
     
+    // 更新播放页顶栏显示
+    wyyUpdateTogetherListenDisplay();
+    
     // 停止定时更新
     wyyStopTogetherListenUpdate();
+    
+    if (prevRole) showToast(`已结束和 ${prevRole} 一起听`);
 }
 
 // 开始定时更新一起听状态（不再更新卡片，只保持状态）
@@ -26355,6 +26474,40 @@ function wyyStopTogetherListenUpdate() {
         clearInterval(wyyTogetherListenInterval);
         wyyTogetherListenInterval = null;
     }
+}
+
+// 更新播放页一起听状态显示
+function wyyUpdateTogetherListenDisplay() {
+    const titleEl = document.querySelector('.wyy-player-top-bar-title');
+    if (!titleEl) return;
+    
+    if (wyyTogetherListenRole) {
+        titleEl.innerHTML = `<div style="font-size:14px; line-height:1.2;">正在播放</div><div style="font-size:11px; color:rgba(255,255,255,0.6); line-height:1.2;">与 ${wyyTogetherListenRole} 一起听 ♪</div>`;
+    } else {
+        titleEl.textContent = '正在播放';
+    }
+}
+
+// 获取当前一起听的状态信息（供system prompt使用）
+function wyyGetTogetherListenInfo() {
+    if (!wyyTogetherListenRole) return null;
+    
+    let songName = '未知歌曲';
+    let singerName = '未知歌手';
+    
+    if (wyyPlaylist.length > 0 && wyyCurrentSongIndex < wyyPlaylist.length) {
+        const currentSong = wyyPlaylist[wyyCurrentSongIndex];
+        songName = currentSong.name || currentSong.title || '未知歌曲';
+        singerName = currentSong.singer || currentSong.artist || '未知歌手';
+    }
+    
+    return {
+        role: wyyTogetherListenRole,
+        charId: wyyTogetherListenCharId,
+        songName: songName,
+        singerName: singerName,
+        isPlaying: wyyAudio && !wyyAudio.paused
+    };
 }
 
 // 从聊天切换歌曲（全局函数，供HTML onclick使用）
@@ -35063,9 +35216,11 @@ async function openEmeiStore(storeId) {
 function backToEmeiMain() {
     const mainView = document.getElementById('emei-main-view');
     const storeView = document.getElementById('emei-store-detail-view');
+    const checkoutView = document.getElementById('emei-checkout-view');
     
-    if (mainView) mainView.style.display = 'flex';
+    if (mainView) mainView.style.display = 'block';
     if (storeView) storeView.style.display = 'none';
+    if (checkoutView) checkoutView.style.display = 'none';
     emeiData.cart = [];
 }
 

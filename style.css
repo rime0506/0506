@@ -6891,7 +6891,8 @@
     flex-direction: column;
 }
 .wyy-player-header {
-    padding: 20px 20px 30px;
+    padding: 0 20px 30px;
+    padding-top: 88px;
     color: white;
     position: relative;
     width: 100%;
@@ -6901,6 +6902,58 @@
     flex-direction: column;
     justify-content: space-between;
 }
+
+/* 播放页顶栏 */
+.wyy-player-top-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 88px;
+    padding-top: 44px;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-left: 16px;
+    padding-right: 16px;
+    z-index: 100;
+    box-sizing: border-box;
+}
+.wyy-player-top-bar-back {
+    background: none;
+    border: none;
+    font-size: 20px;
+    color: white;
+    cursor: pointer;
+    padding: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+}
+.wyy-player-top-bar-title {
+    font-size: 17px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.9);
+}
+.wyy-player-top-bar-right {
+    background: none;
+    border: none;
+    font-size: 18px;
+    color: rgba(255,255,255,0.8);
+    cursor: pointer;
+    padding: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+}
+
 .wyy-back-btn {
     position: absolute;
     top: 20px;
@@ -6913,7 +6966,7 @@
     color: white;
     font-size: 18px;
     cursor: pointer;
-    display: flex;
+    display: none; /* 已移到顶栏 */
     align-items: center;
     justify-content: center;
     z-index: 10;
@@ -6930,7 +6983,7 @@
     color: white;
     font-size: 18px;
     cursor: pointer;
-    display: flex;
+    display: none; /* 已移到顶栏 */
     align-items: center;
     justify-content: center;
     z-index: 10;
@@ -6945,7 +6998,7 @@
 }
 .wyy-song-info-large {
     text-align: center;
-    margin-top: 80px;
+    margin-top: 10px;
     padding: 0 20px;
     flex-shrink: 0;
 }
@@ -7095,8 +7148,53 @@
     width: 100%;
     min-height: 100%;
     padding-bottom: 70px; /* Space for play bar */
+    padding-top: 88px; /* Space for top bar */
     overflow-x: hidden;
 }
+
+/* 网易云主页面顶栏 */
+.wyy-top-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 88px;
+    padding-top: 44px;
+    background: rgba(255,255,255,0.95);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-left: 16px;
+    padding-right: 16px;
+    z-index: 100;
+    border-bottom: 0.5px solid rgba(0,0,0,0.1);
+    box-sizing: border-box;
+}
+.wyy-top-bar-back {
+    background: none;
+    border: none;
+    font-size: 20px;
+    color: #333;
+    cursor: pointer;
+    padding: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+}
+.wyy-top-bar-title {
+    font-size: 17px;
+    font-weight: 600;
+    color: #333;
+}
+.wyy-top-bar-right {
+    width: 36px;
+    height: 36px;
+}
+
 .wyy-user-header {
     width: 100%;
     max-width: 100%;
@@ -7107,7 +7205,7 @@
 }
 .wyy-avatar-wrapper {
     text-align: center;
-    margin: 10px 0 15px;
+    margin: 15px 0 15px;
     position: relative;
 }
 .wyy-avatar {
