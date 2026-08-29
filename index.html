@@ -3062,6 +3062,11 @@
                         <span class="slider"></span>
                     </label>
                 </div>
+                <div style="padding:14px 16px; border-bottom:1px solid #f2f2f7;">
+                    <div style="font-size:13px; font-weight:600; color:#333; margin-bottom:8px;">先部署你自己的 iMessage 连接器</div>
+                    <a href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Frime0506%2F0506&amp;root-directory=photon-imessage-connector&amp;project-name=photon-imessage-connector&amp;repository-name=photon-imessage-connector&amp;env=SPECTRUM_PROJECT_ID%2CSPECTRUM_PROJECT_SECRET%2CCONNECTOR_ACCESS_KEY%2CALLOWED_ORIGIN&amp;envDescription=%E8%AF%B7%E5%A1%AB%E5%86%99%20Photon%20%E9%A1%B9%E7%9B%AE%20ID%E3%80%81%E9%A1%B9%E7%9B%AE%20Secret%E3%80%81%E8%87%AA%E5%AE%9A%E4%B9%89%E8%BF%9E%E6%8E%A5%E5%99%A8%E8%AE%BF%E9%97%AE%E5%AF%86%E9%92%A5%EF%BC%8C%E4%BB%A5%E5%8F%8A%E5%85%81%E8%AE%B8%E8%B0%83%E7%94%A8%E8%BF%9E%E6%8E%A5%E5%99%A8%E7%9A%84%E7%BD%91%E7%AB%99%E6%9D%A5%E6%BA%90%E3%80%82&amp;envLink=https%3A%2F%2Fgithub.com%2Frime0506%2F0506%2Ftree%2Fmain%2Fphoton-imessage-connector" target="_blank" rel="noopener noreferrer" style="display:block; width:100%; box-sizing:border-box; border-radius:9px; padding:11px 12px; background:#111; color:#fff; text-decoration:none; text-align:center; font-size:13px; font-weight:600;">一键部署连接器到 Vercel</a>
+                    <div style="font-size:11px; color:#999; line-height:1.6; margin-top:8px;">这一步部署的是连接器，不是 Photon。Vercel 会自动选择仓库中的 <code>photon-imessage-connector</code>，并让你填写 Photon 项目凭据和连接器密钥。</div>
+                </div>
                 <div class="detail-item" style="flex-direction:column; align-items:stretch; gap:8px;">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
                         <div>连接器地址</div>
@@ -3088,9 +3093,9 @@
                     <details>
                         <summary style="cursor:pointer; color:#666; font-size:12px; margin-bottom:6px;">怎么获得连接器地址？</summary>
                         <div>1. 前往 <a href="https://app.photon.codes" target="_blank" rel="noopener noreferrer" style="color:#ff8fa3;">Photon</a> 创建项目和角色号码。</div>
-                        <div>2. 将项目中的 photon-imessage-connector 模板部署到自己的 Vercel。</div>
+                        <div>2. 点击上方“一键部署连接器到 Vercel”。</div>
                         <div>3. 在 Vercel 填写 SPECTRUM_PROJECT_ID、SPECTRUM_PROJECT_SECRET、CONNECTOR_ACCESS_KEY 和 ALLOWED_ORIGIN。</div>
-                        <div>4. 部署完成后，把生成的 https://xxx.vercel.app 地址粘贴到上方。</div>
+                        <div>4. 部署完成后，把生成的 https://xxx.vercel.app 地址粘贴到“连接器地址”。</div>
                     </details>
                     <div style="margin-top:6px;">Photon Project Secret 只填写在你自己的连接器环境变量中，不要填写到这里。</div>
                 </div>

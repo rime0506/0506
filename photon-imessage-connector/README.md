@@ -4,8 +4,12 @@
 
 ## 部署
 
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Frime0506%2F0506&root-directory=photon-imessage-connector&project-name=photon-imessage-connector&repository-name=photon-imessage-connector&env=SPECTRUM_PROJECT_ID%2CSPECTRUM_PROJECT_SECRET%2CCONNECTOR_ACCESS_KEY%2CALLOWED_ORIGIN&envDescription=%E8%AF%B7%E5%A1%AB%E5%86%99%20Photon%20%E9%A1%B9%E7%9B%AE%20ID%E3%80%81%E9%A1%B9%E7%9B%AE%20Secret%E3%80%81%E8%87%AA%E5%AE%9A%E4%B9%89%E8%BF%9E%E6%8E%A5%E5%99%A8%E8%AE%BF%E9%97%AE%E5%AF%86%E9%92%A5%EF%BC%8C%E4%BB%A5%E5%8F%8A%E5%85%81%E8%AE%B8%E8%B0%83%E7%94%A8%E8%BF%9E%E6%8E%A5%E5%99%A8%E7%9A%84%E7%BD%91%E7%AB%99%E6%9D%A5%E6%BA%90%E3%80%82&envLink=https%3A%2F%2Fgithub.com%2Frime0506%2F0506%2Ftree%2Fmain%2Fphoton-imessage-connector)
+
+上面的按钮部署的是本目录中的 iMessage 连接器，不是 Photon 本身。Vercel 会自动把 Root Directory 设置成 `photon-imessage-connector`，并在部署前要求用户填写所需环境变量。
+
 1. 在 `https://app.photon.codes` 创建 Spectrum Cloud 项目并准备角色对应的专用 iMessage Line。
-2. 把本目录作为一个独立 Git 仓库，或在 Vercel 导入主仓库后将 Root Directory 设置为 `photon-imessage-connector`。
+2. 点击上方 `Deploy with Vercel`；也可以手动导入主仓库并把 Root Directory 设置为 `photon-imessage-connector`。
 3. 在 Vercel 添加环境变量：
 
    - `SPECTRUM_PROJECT_ID`
