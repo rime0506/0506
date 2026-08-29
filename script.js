@@ -21697,6 +21697,40 @@ function normalizeIMessageConnectorUrl(value) {
     return url;
 }
 
+async function copyTextForIMessageSetup(value, successMessage) {
+    const text = String(value || '');
+    if (!text) return false;
+    try {
+        await navigator.clipboard.writeText(text);
+    } catch (_) {
+        const helper = document.createElement('textarea');
+        helper.value = text;
+        helper.style.position = 'fixed';
+        helper.style.opacity = '0';
+        document.body.appendChild(helper);
+        helper.select();
+        document.execCommand('copy');
+        helper.remove();
+    }
+    showToast(successMessage);
+    return true;
+}
+
+async function generateIMessageAccessKey() {
+    const input = document.getElementById('detail-imessage-access-key');
+    if (!input) return;
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    const key = `imsg_${Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('')}`;
+    input.value = key;
+    await copyTextForIMessageSetup(key, '访问密钥已生成并复制，请粘贴到 Vercel 的 CONNECTOR_ACCESS_KEY');
+}
+
+async function copyIMessageAllowedOrigin() {
+    const origin = window.location.protocol === 'file:' ? '*' : window.location.origin;
+    await copyTextForIMessageSetup(origin, `ALLOWED_ORIGIN 已复制：${origin}`);
+}
+
 function getCharacterIMessageConfig(char, accountId) {
     if (!char) return {};
     const key = String(accountId || '__legacy__');

@@ -12,10 +12,12 @@
 2. 点击上方 `Deploy with Vercel`；也可以手动导入主仓库并把 Root Directory 设置为 `photon-imessage-connector`。
 3. 在 Vercel 添加环境变量：
 
-   - `SPECTRUM_PROJECT_ID`
-   - `SPECTRUM_PROJECT_SECRET`
-   - `CONNECTOR_ACCESS_KEY`：自行生成的长随机字符串
-   - `ALLOWED_ORIGIN`：网站来源，例如 `https://example.com`；本地测试可暂时设置 `*`
+   - `SPECTRUM_PROJECT_ID`：Photon 控制台 → 当前项目 → Settings → Project ID。
+   - `SPECTRUM_PROJECT_SECRET`：同一 Settings 页面中的 Project Secret / Secret Key。不要填写 Photon 登录密码。
+   - `CONNECTOR_ACCESS_KEY`：在网站 Photon iMessage 设置中点击“生成并复制”；Vercel 和网站必须使用同一个值。
+   - `ALLOWED_ORIGIN`：网站地址中协议和域名部分，例如网站是 `https://rime0506.github.io/0506/`，这里填写 `https://rime0506.github.io`，不要带最后的路径。本地 `file://` 测试可暂时设置 `*`。
+
+任何用户都可以通过部署按钮把公开模板复制到自己的 GitHub/GitLab/Bitbucket 并部署到自己的 Vercel，不需要拥有或修改原仓库。
 
 4. 部署后复制 Vercel 项目地址，例如 `https://my-photon-connector.vercel.app`。
 5. 在网站角色聊天详情的 iMessage 区域填写连接器地址、访问密钥、角色发送号码和收件地址。
