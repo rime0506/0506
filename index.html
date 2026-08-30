@@ -3116,6 +3116,7 @@
                         </div>
                     </div>
                     <div style="font-size:11px; color:#999; line-height:1.5;">连续消息会合并后只调用一次 AI；回复条数沿用该角色在网站 WeChat 中设置的“回复消息条数范围”，并逐条发送。Sandbox/共享模式下，同一个接收者建议只开启一个角色。</div>
+                    <div style="font-size:11px; color:#999; line-height:1.5;">只删除手机或 LoopMessage 中的记录无法通知本网站。如需让 AI 忘记某一条，请在下方“iMessage 聊天记录”中单独删除。</div>
                     <div style="padding:10px 11px; border-radius:9px; background:#f7f7fa; border:1px solid #ececf1;">
                         <div style="display:flex; align-items:center; gap:7px;">
                             <span id="detail-imessage-runtime-dot" style="width:8px; height:8px; border-radius:50%; background:#8e8e93; flex:0 0 auto;"></span>
@@ -3129,6 +3130,19 @@
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:12px 16px;">
                     <button type="button" id="detail-imessage-test-send" onclick="sendIMessageTest()" style="border:none; border-radius:8px; padding:11px 8px; background:#f2f2f7; color:#333; font-size:13px; cursor:pointer;">发送测试文字</button>
                     <button type="button" id="detail-imessage-ai-send" onclick="generateAndSendCharacterIMessage()" style="border:none; border-radius:8px; padding:11px 8px; background:#ffb6c1; color:#fff; font-size:13px; cursor:pointer;">AI生成并发送</button>
+                </div>
+                <div class="detail-item" style="flex-direction:column; align-items:stretch; gap:8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <div>iMessage 聊天记录</div>
+                            <div style="font-size:11px; color:#999; margin-top:3px;">这里显示网站已保存并会提供给 AI 的 iMessage 上下文</div>
+                        </div>
+                        <button type="button" onclick="renderIMessageHistoryList()" style="border:none; border-radius:7px; padding:6px 9px; background:#f2f2f7; color:#555; font-size:11px; cursor:pointer;">刷新</button>
+                    </div>
+                    <div id="detail-imessage-history-list" style="max-height:280px; overflow-y:auto; display:flex; flex-direction:column; gap:7px;">
+                        <div style="padding:16px; text-align:center; color:#aaa; font-size:12px;">暂无 iMessage 聊天记录</div>
+                    </div>
+                    <div style="font-size:10px; color:#999; line-height:1.5;">逐条删除只会忘记选中的记录，不会清空 WeChat 或其他 iMessage。尚未处理的入站消息也会同步从队列移除。</div>
                 </div>
                 <div style="padding:0 16px 14px; font-size:11px; color:#999; line-height:1.6;">
                     <details>
@@ -8663,7 +8677,7 @@
     <script src="xianyu.js"></script>
     <!-- 小屋功能 JS（独立文件） -->
     <script src="cabin.js"></script>
-    <script src="script.js?v=7.1" defer></script>
+    <script src="script.js?v=7.2" defer></script>
     
 
 </body>

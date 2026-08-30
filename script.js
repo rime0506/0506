@@ -21301,6 +21301,7 @@ ${chatContext || '（没有聊天记录）'}
             document.getElementById('detail-imessage-debounce').value = Math.max(1, Math.min(60, Number(imessageConfig.debounceSeconds) || 6));
             setIMessageStatus(isLoopMessageConnector && connectorConfig.lastStatus === 'connected' ? '已连接' : '未测试', isLoopMessageConnector && connectorConfig.lastStatus === 'connected' ? 'success' : 'neutral');
             renderLoopMessageAutoReplyStatus();
+            await renderIMessageHistoryList();
             
             // 3.5. 回显外语翻译模式设置
             document.getElementById('detail-foreign-lang-switch').checked = !!char.foreign_lang_mode;
@@ -21982,6 +21983,81 @@ async function appendSentIMessageToChat(char, text, result, clientMessageId, acc
         const freshChar = await db.characters.get(char.id);
         if (freshChar) await renderChatBody(freshChar);
     }
+    if (currentChatCharId === char.id) await renderIMessageHistoryList();
+}
+
+function escapeIMessageHistoryHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, char => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[char]));
+}
+
+function getIMessageHistoryMessageKey(message) {
+    if (message?.providerWebhookId) return `webhook:${message.providerWebhookId}`;
+    if (message?.clientMessageId) return `client:${message.clientMessageId}`;
+    if (message?.providerMessageId) return `provider:${message.providerMessageId}`;
+    return `fallback:${Number(message?.time) || 0}:${message?.role || ''}:${String(message?.content || '').slice(0, 120)}`;
+}
+
+async function renderIMessageHistoryList() {
+    const list = document.getElementById('detail-imessage-history-list');
+    if (!list) return;
+    const charId = currentChatCharId;
+    const char = charId ? await db.characters.get(charId) : null;
+    if (!char) {
+        list.innerHTML = '<div style="padding:16px; text-align:center; color:#aaa; font-size:12px;">当前角色不存在</div>';
+        return;
+    }
+    const accountId = getCurrentAccountId();
+    const allMessages = getChatHistory(char, accountId)
+        .map((message, historyIndex) => ({ message, historyIndex }))
+        .filter(item => item.message?.channel === 'imessage')
+        .reverse();
+    if (!allMessages.length) {
+        list.innerHTML = '<div style="padding:16px; text-align:center; color:#aaa; font-size:12px;">暂无 iMessage 聊天记录</div>';
+        return;
+    }
+
+    const visibleMessages = allMessages.slice(0, 200);
+    const roleName = escapeIMessageHistoryHtml(char.nick || char.name || '角色');
+    list.innerHTML = visibleMessages.map(({ message }) => {
+        const incoming = message.role === 'user';
+        const label = incoming ? '用户 → 角色' : `${roleName} → 用户`;
+        const time = Number(message.time) ? new Date(message.time).toLocaleString('zh-CN', { hour12: false }) : '时间未知';
+        const encodedKey = encodeURIComponent(getIMessageHistoryMessageKey(message));
+        const content = escapeIMessageHistoryHtml(String(message.content || '').replace(/<[^>]*>/g, '').slice(0, 1000));
+        return `<div style="padding:9px 10px; border:1px solid #ececf1; border-radius:9px; background:${incoming ? '#fff' : '#fff5f7'};">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">
+                <span style="flex:1; min-width:0; font-size:10px; color:${incoming ? '#666' : '#d85d75'};">${label} · ${escapeIMessageHistoryHtml(time)}</span>
+                <button type="button" onclick="deleteIMessageHistoryMessage('${encodedKey}')" style="border:none; background:none; color:#ff3b30; padding:2px 3px; font-size:11px; cursor:pointer;">删除</button>
+            </div>
+            <div style="font-size:12px; color:#333; line-height:1.5; white-space:pre-wrap; word-break:break-word;">${content || '[空消息]'}</div>
+        </div>`;
+    }).join('') + (allMessages.length > 200 ? `<div style="padding:6px; text-align:center; color:#aaa; font-size:10px;">共有 ${allMessages.length} 条，仅显示最近 200 条</div>` : '');
+}
+
+async function deleteIMessageHistoryMessage(encodedKey) {
+    const key = decodeURIComponent(String(encodedKey || ''));
+    const charId = currentChatCharId;
+    const char = charId ? await db.characters.get(charId) : null;
+    if (!char) return;
+    const accountId = getCurrentAccountId();
+    const history = [...getChatHistory(char, accountId)];
+    const index = history.findIndex(message => message?.channel === 'imessage' && getIMessageHistoryMessageKey(message) === key);
+    if (index < 0) {
+        showToast('⚠️ 这条 iMessage 已经不存在');
+        await renderIMessageHistoryList();
+        return;
+    }
+    if (!confirm('删除这一条 iMessage，并让 AI 忘记它吗？')) return;
+
+    const deletedMessages = history.splice(index, 1);
+    await setChatHistory(char, accountId, history, { isDelete: true });
+    await forgetDeletedIMessageMessages(deletedMessages);
+    const freshChar = await db.characters.get(charId);
+    if (freshChar && typeof renderChatBody === 'function') await renderChatBody(freshChar, true);
+    await renderIMessageHistoryList();
+    showToast('✅ 已删除这一条 iMessage，AI 不会再读取它');
 }
 
 async function sendCharacterIMessageText(char, text) {
@@ -22074,10 +22150,13 @@ function waitBeforeNextIMessage(delayMs = 650) {
     return new Promise(resolve => setTimeout(resolve, delayMs));
 }
 
-async function sendCharacterIMessageSegmentsWithConfig(char, segments, config, accountId = getCurrentAccountId(), sourceWebhookIds = [], startIndex = 0, onProgress = null) {
+async function sendCharacterIMessageSegmentsWithConfig(char, segments, config, accountId = getCurrentAccountId(), sourceWebhookIds = [], startIndex = 0, onProgress = null, shouldContinue = null) {
     const messages = Array.isArray(segments) ? segments.filter(Boolean) : [];
     if (!messages.length) throw new Error('没有可发送的消息内容');
     for (let index = startIndex; index < messages.length; index += 1) {
+        if (typeof shouldContinue === 'function' && !shouldContinue()) {
+            throw Object.assign(new Error('这批 iMessage 回复已取消'), { code: 'IMESSAGE_BATCH_CANCELLED' });
+        }
         const isLast = index === messages.length - 1;
         await sendCharacterIMessageTextWithConfig(char, messages[index], config, accountId, isLast ? sourceWebhookIds : []);
         if (typeof onProgress === 'function') onProgress(index + 1, messages.length);
@@ -22148,6 +22227,8 @@ window.sendIMessageTest = sendIMessageTest;
 window.generateAndSendCharacterIMessage = generateAndSendCharacterIMessage;
 window.copyIMessageWebhookUrl = copyIMessageWebhookUrl;
 window.copyIMessageWebhookAuth = copyIMessageWebhookAuth;
+window.renderIMessageHistoryList = renderIMessageHistoryList;
+window.deleteIMessageHistoryMessage = deleteIMessageHistoryMessage;
 
 // ==================== LoopMessage 入站自动回复（网页在线模式） ====================
 const loopMessagePendingConversations = new Map();
@@ -22287,6 +22368,7 @@ async function appendInboundIMessageToChat(char, event, accountId) {
         const updated = await db.characters.get(char.id);
         if (updated) await renderChatBody(updated);
     }
+    if (currentChatCharId === char.id) await renderIMessageHistoryList();
     return true;
 }
 
@@ -22306,6 +22388,49 @@ async function acknowledgeLoopMessageEvents(connectorConfig, webhookIds) {
         method: 'POST',
         body: JSON.stringify({ webhookIds: ids })
     });
+}
+
+async function forgetDeletedIMessageMessages(messages) {
+    const webhookIds = [...new Set((messages || [])
+        .filter(message => message?.channel === 'imessage' && message?.providerWebhookId)
+        .map(message => String(message.providerWebhookId))
+        .filter(Boolean))];
+    if (!webhookIds.length) return;
+    const deletedIds = new Set(webhookIds);
+
+    for (const [key, entry] of loopMessagePendingConversations.entries()) {
+        const pendingMatch = webhookIds.some(id => entry.events.has(id));
+        const activeMatch = entry.activeBatch?.webhookIds?.some(id => deletedIds.has(id));
+        if (!pendingMatch && !activeMatch) continue;
+
+        webhookIds.forEach(id => entry.events.delete(id));
+        entry.version += 1;
+        entry.attempts = 0;
+        entry.stopped = false;
+        if (activeMatch) entry.activeBatch.cancelled = true;
+        if (entry.timer) {
+            clearTimeout(entry.timer);
+            entry.timer = null;
+        }
+        if (!entry.generating) {
+            if (!entry.events.size) {
+                loopMessagePendingConversations.delete(key);
+            } else {
+                entry.activeBatch = null;
+                scheduleLoopMessageConversation(entry);
+            }
+        }
+    }
+
+    try {
+        const connectorConfig = await getStoredLoopMessageConnectorConfig();
+        if (!connectorConfig) throw new Error('连接器设置不存在');
+        await acknowledgeLoopMessageEvents(connectorConfig, webhookIds);
+        setLoopMessageAutoReplyRuntimeStatus(currentChatCharId, '已忘记删除的 iMessage', 'success', `已从本地上下文和入站队列移除 ${webhookIds.length} 条消息。`);
+    } catch (error) {
+        setLoopMessageAutoReplyRuntimeStatus(currentChatCharId, '本地已删除，但队列清理失败', 'error', `${error.message || '未知错误'}。消息可能在下次轮询时再次出现。`);
+        showToast(`⚠️ iMessage 已从本地删除，但队列清理失败：${error.message || '未知错误'}`);
+    }
 }
 
 function scheduleLoopMessageConversation(entry, minimumDelay = 150) {
@@ -22377,7 +22502,8 @@ async function processLoopMessageConversation(key) {
             (sentCount, messageCount) => {
                 activeBatch.nextIndex = sentCount;
                 setLoopMessageAutoReplyRuntimeStatus(entry.charId, `正在发送 iMessage · ${sentCount}/${messageCount}`, 'sending', sentCount === messageCount ? '全部消息已发出，正在确认入站事件。' : '正在发送下一条…');
-            }
+            },
+            () => !activeBatch.cancelled
         );
         try {
             await acknowledgeLoopMessageEvents(connectorConfig, activeBatch.webhookIds);
@@ -22391,6 +22517,12 @@ async function processLoopMessageConversation(key) {
         console.log(`[LoopMessage Inbox] 已自动回复角色「${char.nick || char.name || char.id}」`);
         setLoopMessageAutoReplyRuntimeStatus(entry.charId, `已发送 ${sentCount} 条回复`, 'success', `${formatLoopMessageRuntimeTime()} 已全部通过 LoopMessage 发出。`);
     } catch (error) {
+        if (error?.code === 'IMESSAGE_BATCH_CANCELLED') {
+            entry.activeBatch = null;
+            entry.attempts = 0;
+            setLoopMessageAutoReplyRuntimeStatus(entry.charId, entry.events.size ? '已忘记删除的消息 · 准备重新生成' : '已忘记删除的消息', 'listening', entry.events.size ? '只会使用剩余的聊天记录重新回复。' : '这条消息不会再进入 AI 上下文。');
+            return;
+        }
         entry.attempts = Number(entry.attempts || 0) + 1;
         console.error('[LoopMessage Inbox] 自动回复失败:', error);
         if (entry.attempts >= 3) {
@@ -30611,10 +30743,12 @@ name字段只能用这些名字 ${validMemberNames.join(' ')}
                 return;
             }
             
+            const deletedMessages = [history[activeMsgIndex]].filter(Boolean);
             history.splice(activeMsgIndex, 1);
             
             // 🔧 传入 isDelete 标记，让 setChatHistory 跳过竞态保护，防止被DB旧数据恢复
             await setChatHistory(char, accountId, history, { isDelete: true });
+            await forgetDeletedIMessageMessages(deletedMessages);
             
             // 🔧 只删除DOM元素，不重新渲染整个界面 - 使用data-index属性查找
             const chatBody = document.getElementById('chat-body');
@@ -30834,10 +30968,12 @@ name字段只能用这些名字 ${validMemberNames.join(' ')}
                 exitSelectionMode();
                 return;
             }
+            const deletedMessages = history.filter((_, idx) => validIndices.has(idx));
             const newHistory = history.filter((_, idx) => !validIndices.has(idx));
             
             // 🔧 传入 isDelete 标记，让 setChatHistory 跳过竞态保护，防止被DB旧数据恢复
             await setChatHistory(char, accountId, newHistory, { isDelete: true });
+            await forgetDeletedIMessageMessages(deletedMessages);
             
             // 🔧 只删除DOM元素，不重新渲染整个界面 - 使用data-index属性查找
             const chatBody = document.getElementById('chat-body');
