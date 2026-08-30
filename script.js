@@ -21286,16 +21286,18 @@ ${chatContext || '（没有聊天记录）'}
             document.getElementById('detail-auto-chat-switch').checked = !!char.auto_reply_enabled;
             document.getElementById('detail-auto-chat-interval').value = char.auto_reply_interval || '';
 
-            // 3.1 回显 Photon iMessage 设置。连接器配置属于当前浏览器，角色只保存号码绑定。
+            // 3.1 回显 LoopMessage iMessage 设置。连接器配置属于当前浏览器，角色保存发送模式和 Sender ID。
             const imessageConfig = getCharacterIMessageConfig(char, _detailAid);
             const connectorRecord = await db.dexiData.get('imessageConnectorConfig');
             const connectorConfig = connectorRecord?.value || {};
-            document.getElementById('detail-imessage-switch').checked = !!imessageConfig.enabled;
-            document.getElementById('detail-imessage-connector-url').value = connectorConfig.url || '';
-            document.getElementById('detail-imessage-access-key').value = connectorConfig.accessKey || '';
-            document.getElementById('detail-imessage-sender').value = imessageConfig.senderPhone || '';
+            const isLoopMessageConnector = connectorConfig.provider === 'loopmessage';
+            document.getElementById('detail-imessage-switch').checked = isLoopMessageConnector && !!imessageConfig.enabled;
+            document.getElementById('detail-imessage-connector-url').value = isLoopMessageConnector ? (connectorConfig.url || '') : '';
+            document.getElementById('detail-imessage-access-key').value = isLoopMessageConnector ? (connectorConfig.accessKey || '') : '';
+            document.getElementById('detail-imessage-mode').value = imessageConfig.mode || 'sandbox';
+            document.getElementById('detail-imessage-sender').value = imessageConfig.senderId || '';
             document.getElementById('detail-imessage-recipient').value = imessageConfig.recipient || '';
-            setIMessageStatus(connectorConfig.lastStatus === 'connected' ? '已连接' : '未测试', connectorConfig.lastStatus === 'connected' ? 'success' : 'neutral');
+            setIMessageStatus(isLoopMessageConnector && connectorConfig.lastStatus === 'connected' ? '已连接' : '未测试', isLoopMessageConnector && connectorConfig.lastStatus === 'connected' ? 'success' : 'neutral');
             
             // 3.5. 回显外语翻译模式设置
             document.getElementById('detail-foreign-lang-switch').checked = !!char.foreign_lang_mode;
@@ -21486,7 +21488,8 @@ async function saveChatDetail() {
     const imessageEnabled = !!document.getElementById('detail-imessage-switch')?.checked;
     const imessageConnectorUrl = normalizeIMessageConnectorUrl(document.getElementById('detail-imessage-connector-url')?.value);
     const imessageAccessKey = document.getElementById('detail-imessage-access-key')?.value.trim() || '';
-    const imessageSenderPhone = document.getElementById('detail-imessage-sender')?.value.trim() || '';
+    const imessageMode = document.getElementById('detail-imessage-mode')?.value || 'sandbox';
+    const imessageSenderId = document.getElementById('detail-imessage-sender')?.value.trim() || '';
     const imessageRecipient = document.getElementById('detail-imessage-recipient')?.value.trim() || '';
     // 上下文条数设置
     const contextCount = parseInt(document.getElementById('detail-context-count').value);
@@ -21540,20 +21543,24 @@ async function saveChatDetail() {
 
     const existingIMessageByUser = { ...(char.imessage_by_user || {}) };
     const imessageAccountKey = String(accountId || '__legacy__');
+    const previousIMessageBinding = { ...(existingIMessageByUser[imessageAccountKey] || {}) };
+    delete previousIMessageBinding.senderPhone;
     existingIMessageByUser[imessageAccountKey] = {
-        ...(existingIMessageByUser[imessageAccountKey] || {}),
+        ...previousIMessageBinding,
         enabled: imessageEnabled,
-        senderPhone: imessageSenderPhone,
+        mode: imessageMode,
+        senderId: imessageSenderId,
         recipient: imessageRecipient,
         updatedAt: Date.now()
     };
 
     const existingConnectorRecord = await db.dexiData.get('imessageConnectorConfig');
     const existingConnector = existingConnectorRecord?.value || {};
-    const connectorUnchanged = existingConnector.url === imessageConnectorUrl && existingConnector.accessKey === imessageAccessKey;
+    const connectorUnchanged = existingConnector.provider === 'loopmessage' && existingConnector.url === imessageConnectorUrl && existingConnector.accessKey === imessageAccessKey;
     await db.dexiData.put({
         key: 'imessageConnectorConfig',
         value: {
+            provider: 'loopmessage',
             url: imessageConnectorUrl,
             accessKey: imessageAccessKey,
             lastStatus: imessageConnectorUrl && imessageAccessKey
@@ -21689,7 +21696,7 @@ async function saveChatDetailWithToast() {
     }
 }
 
-// ==================== Photon iMessage（用户自带连接器） ====================
+// ==================== LoopMessage iMessage（用户自带连接器） ====================
 function normalizeIMessageConnectorUrl(value) {
     let url = String(value || '').trim().replace(/\/+$/, '');
     if (!url) return '';
@@ -21755,7 +21762,8 @@ function getIMessageFormConfig() {
         connectorUrl: normalizeIMessageConnectorUrl(document.getElementById('detail-imessage-connector-url')?.value),
         accessKey: document.getElementById('detail-imessage-access-key')?.value.trim() || '',
         enabled: !!document.getElementById('detail-imessage-switch')?.checked,
-        senderPhone: document.getElementById('detail-imessage-sender')?.value.trim() || '',
+        mode: document.getElementById('detail-imessage-mode')?.value || 'sandbox',
+        senderId: document.getElementById('detail-imessage-sender')?.value.trim() || '',
         recipient: document.getElementById('detail-imessage-recipient')?.value.trim() || ''
     };
 }
@@ -21770,10 +21778,10 @@ function validateIMessageFormConfig(config, options = {}) {
     }
     if (!config.accessKey) throw new Error('请填写连接器访问密钥');
     if (options.requireBinding) {
-        if (!config.enabled) throw new Error('请先开启这个角色的 Photon iMessage');
-        if (!/^\+[1-9]\d{6,14}$/.test(config.senderPhone)) {
-            throw new Error('角色发送号码必须包含国际区号，例如 +12025550123');
-        }
+        if (!config.enabled) throw new Error('请先开启这个角色的 LoopMessage iMessage');
+        if (!['sandbox', 'shared', 'dedicated'].includes(config.mode)) throw new Error('请选择有效的 LoopMessage 发送方式');
+        if (config.mode === 'dedicated' && !config.senderId) throw new Error('专用 Sender 模式必须填写这个角色的 LoopMessage Sender ID');
+        if (config.senderId.length > 200) throw new Error('LoopMessage Sender ID 格式不正确');
         const isPhone = /^\+[1-9]\d{6,14}$/.test(config.recipient);
         const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.recipient);
         if (!isPhone && !isEmail) throw new Error('收件者必须是国际格式手机号或 Apple ID 邮箱');
@@ -21784,10 +21792,13 @@ async function persistIMessageFormConfig(char, config, status) {
     const accountId = getCurrentAccountId();
     const key = String(accountId || '__legacy__');
     const currentMap = { ...(char.imessage_by_user || {}) };
+    const previousBinding = { ...(currentMap[key] || {}) };
+    delete previousBinding.senderPhone;
     currentMap[key] = {
-        ...(currentMap[key] || {}),
+        ...previousBinding,
         enabled: !!config.enabled,
-        senderPhone: config.senderPhone,
+        mode: config.mode || 'sandbox',
+        senderId: config.senderId || '',
         recipient: config.recipient,
         updatedAt: Date.now()
     };
@@ -21797,6 +21808,7 @@ async function persistIMessageFormConfig(char, config, status) {
         db.dexiData.put({
             key: 'imessageConnectorConfig',
             value: {
+                provider: 'loopmessage',
                 url: config.connectorUrl,
                 accessKey: config.accessKey,
                 lastStatus: status || 'configured',
@@ -21810,16 +21822,16 @@ async function persistIMessageFormConfig(char, config, status) {
 async function assertIMessageSenderNotBoundElsewhere(char, config) {
     const accountId = getCurrentAccountId();
     const key = String(accountId || '__legacy__');
-    const sender = String(config.senderPhone || '').trim();
+    const sender = String(config.senderId || '').trim();
     if (!sender) return;
     const allChars = await db.characters.toArray();
     const conflict = allChars.find(item => {
         if (String(item.id) === String(char.id)) return false;
         const binding = item.imessage_by_user?.[key];
-        return binding?.enabled && String(binding.senderPhone || '').trim() === sender;
+        return binding?.enabled && String(binding.senderId || '').trim() === sender;
     });
     if (conflict) {
-        throw new Error(`这个 Photon 号码已经绑定到角色「${conflict.nick || conflict.name || conflict.id}」`);
+        throw new Error(`这个 LoopMessage Sender ID 已经绑定到角色「${conflict.nick || conflict.name || conflict.id}」`);
     }
 }
 
@@ -21862,7 +21874,7 @@ async function testIMessageConnector() {
         validateIMessageFormConfig(config);
         const result = await callIMessageConnector('/api/health', config, { method: 'GET' });
         await persistIMessageFormConfig(char, config, 'connected');
-        setIMessageStatus(result.photonConnected ? 'Photon 已连接' : '连接器可用', 'success');
+        setIMessageStatus(result.loopMessageConnected ? 'LoopMessage 已连接' : '连接器可用', 'success');
         showToast('✅ iMessage 连接器连接成功');
     } catch (error) {
         setIMessageStatus('连接失败', 'error');
@@ -21881,7 +21893,7 @@ async function appendSentIMessageToChat(char, text, result, clientMessageId) {
         channel: 'imessage',
         deliveryStatus: 'sent',
         providerMessageId: result.messageId || null,
-        providerSpaceId: result.spaceId || null,
+        providerSpaceId: result.conversationId || null,
         clientMessageId
     });
     await setChatHistory(char, accountId, history);
@@ -21906,7 +21918,7 @@ async function sendCharacterIMessageText(char, text) {
     const result = await callIMessageConnector('/api/send', config, {
         method: 'POST',
         body: JSON.stringify({
-            senderPhone: config.senderPhone,
+            senderId: config.senderId || undefined,
             recipient: config.recipient,
             text: cleanText,
             clientMessageId
@@ -21932,7 +21944,7 @@ async function runIMessageSendAction(buttonId, task) {
     } catch (error) {
         setIMessageStatus('发送失败', 'error');
         showToast('❌ ' + (error.message || 'iMessage 发送失败'));
-        console.error('[Photon iMessage] 发送失败:', error);
+        console.error('[LoopMessage iMessage] 发送失败:', error);
     } finally {
         if (button) {
             button.disabled = false;

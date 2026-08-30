@@ -25,9 +25,9 @@ export function handleOptions(req, res) {
 }
 
 export function requireAccess(req, res) {
-  const expected = process.env.CONNECTOR_ACCESS_KEY;
+  const expected = String(process.env.CONNECTOR_ACCESS_KEY || '');
   if (!expected) {
-    res.status(503).json({ success: false, code: 'CONNECTOR_NOT_CONFIGURED', error: '连接器尚未设置访问密钥' });
+    res.status(503).json({ success: false, code: 'CONNECTOR_NOT_CONFIGURED', error: '连接器尚未设置 CONNECTOR_ACCESS_KEY' });
     return false;
   }
   const authorization = String(req.headers.authorization || '');
@@ -43,7 +43,11 @@ export function parseJsonBody(req) {
   if (Buffer.byteLength(raw, 'utf8') > MAX_BODY_BYTES) {
     throw Object.assign(new Error('请求内容过大'), { code: 'BODY_TOO_LARGE', status: 413 });
   }
-  return typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+  try {
+    return typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+  } catch (_) {
+    throw Object.assign(new Error('请求内容不是有效的 JSON'), { code: 'INVALID_JSON', status: 400 });
+  }
 }
 
 export function normalizeAddress(value) {
@@ -53,32 +57,27 @@ export function normalizeAddress(value) {
   return '';
 }
 
-export function normalizeSenderPhone(value) {
-  const phone = String(value || '').trim();
-  return /^\+[1-9]\d{6,14}$/.test(phone) ? phone : '';
-}
-
 export function serializeError(error) {
-  const raw = String(error?.message || error || '未知错误');
-  const lower = raw.toLowerCase();
-  let code = error?.code || 'PHOTON_SEND_FAILED';
-  let message = 'Photon 发送失败，请检查项目、号码和收件地址';
+  const detail = String(error?.message || error || '未知错误').slice(0, 300);
+  const lower = detail.toLowerCase();
+  let code = String(error?.code || 'LOOPMESSAGE_REQUEST_FAILED');
+  let message = 'LoopMessage 请求失败，请检查账号、Sender 和接收者';
 
-  if (code === 'PHOTON_NOT_CONFIGURED' || lower.includes('缺少 spectrum')) {
-    message = '连接器缺少 Photon Project ID 或 Project Secret';
-  } else if (lower.includes('auth') || lower.includes('credential') || lower.includes('token')) {
-    code = 'PHOTON_AUTH_FAILED';
-    message = 'Photon 项目凭据无效或已过期';
-  } else if (lower.includes('quota') || lower.includes('rate')) {
-    code = 'PHOTON_RATE_LIMITED';
-    message = 'Photon 发送频率或额度已达到限制';
-  } else if (lower.includes('phone') || lower.includes('line')) {
-    code = 'PHOTON_LINE_UNAVAILABLE';
-    message = '该 Photon 发送号码不可用或不属于当前项目';
-  } else if (lower.includes('address') || lower.includes('recipient') || lower.includes('user')) {
+  if (code === 'LOOPMESSAGE_NOT_CONFIGURED') {
+    message = '连接器缺少 LOOPMESSAGE_API_KEY';
+  } else if (error?.status === 401 || error?.status === 403 || lower.includes('unauthorized') || lower.includes('api key')) {
+    code = 'LOOPMESSAGE_AUTH_FAILED';
+    message = 'LoopMessage Organization API Key 无效或没有权限';
+  } else if (error?.status === 429 || lower.includes('rate') || lower.includes('quota')) {
+    code = 'LOOPMESSAGE_RATE_LIMITED';
+    message = 'LoopMessage 发送频率或额度已达到限制';
+  } else if (lower.includes('sender')) {
+    code = 'LOOPMESSAGE_SENDER_UNAVAILABLE';
+    message = 'LoopMessage Sender ID 不可用，或当前会话不允许发送';
+  } else if (lower.includes('contact') || lower.includes('recipient')) {
     code = 'RECIPIENT_UNAVAILABLE';
-    message = '收件手机号或 Apple ID 邮箱不可用';
+    message = '接收者不可用，Sandbox/共享模式可能需要用户先发起会话';
   }
 
-  return { code, message, detail: raw.slice(0, 300) };
+  return { code, message, detail };
 }

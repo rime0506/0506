@@ -3050,12 +3050,12 @@
                 </div>
             </div>
 
-            <!-- Photon iMessage 设置 -->
+            <!-- LoopMessage iMessage 设置 -->
             <div class="detail-group" id="detail-imessage-group">
                 <div class="detail-item">
                     <div style="display:flex; flex-direction:column; gap:4px;">
-                        <div>Photon iMessage</div>
-                        <div style="font-size:12px; color:#999; line-height:1.4;">使用你自己部署的连接器，一角色绑定一个号码</div>
+                        <div>LoopMessage iMessage</div>
+                        <div style="font-size:12px; color:#999; line-height:1.4;">使用你自己的 LoopMessage 账号和 Vercel 连接器</div>
                     </div>
                     <label class="ios-switch">
                         <input type="checkbox" id="detail-imessage-switch">
@@ -3064,8 +3064,8 @@
                 </div>
                 <div style="padding:14px 16px; border-bottom:1px solid #f2f2f7;">
                     <div style="font-size:13px; font-weight:600; color:#333; margin-bottom:8px;">先部署你自己的 iMessage 连接器</div>
-                    <a href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Frime0506%2F0506&amp;root-directory=photon-imessage-connector&amp;project-name=photon-imessage-connector&amp;repository-name=photon-imessage-connector&amp;env=SPECTRUM_PROJECT_ID%2CSPECTRUM_PROJECT_SECRET%2CCONNECTOR_ACCESS_KEY%2CALLOWED_ORIGIN&amp;envDescription=%E8%AF%B7%E5%A1%AB%E5%86%99%20Photon%20%E9%A1%B9%E7%9B%AE%20ID%E3%80%81%E9%A1%B9%E7%9B%AE%20Secret%E3%80%81%E8%87%AA%E5%AE%9A%E4%B9%89%E8%BF%9E%E6%8E%A5%E5%99%A8%E8%AE%BF%E9%97%AE%E5%AF%86%E9%92%A5%EF%BC%8C%E4%BB%A5%E5%8F%8A%E5%85%81%E8%AE%B8%E8%B0%83%E7%94%A8%E8%BF%9E%E6%8E%A5%E5%99%A8%E7%9A%84%E7%BD%91%E7%AB%99%E6%9D%A5%E6%BA%90%E3%80%82&amp;envLink=https%3A%2F%2Fgithub.com%2Frime0506%2F0506%2Ftree%2Fmain%2Fphoton-imessage-connector" target="_blank" rel="noopener noreferrer" style="display:block; width:100%; box-sizing:border-box; border-radius:9px; padding:11px 12px; background:#111; color:#fff; text-decoration:none; text-align:center; font-size:13px; font-weight:600;">一键部署连接器到 Vercel</a>
-                    <div style="font-size:11px; color:#999; line-height:1.6; margin-top:8px;">这一步部署的是连接器，不是 Photon。任何人都能用自己的 GitHub 和 Vercel 账号部署，不需要拥有本仓库。</div>
+                    <a href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Frime0506%2F0506&amp;root-directory=loopmessage-connector&amp;project-name=loopmessage-connector&amp;repository-name=loopmessage-connector&amp;env=LOOPMESSAGE_API_KEY%2CCONNECTOR_ACCESS_KEY%2CALLOWED_ORIGIN&amp;envDescription=%E8%AF%B7%E5%A1%AB%E5%86%99%20LoopMessage%20Organization%20API%20Key%E3%80%81%E7%BD%91%E7%AB%99%E7%94%9F%E6%88%90%E7%9A%84%E8%BF%9E%E6%8E%A5%E5%99%A8%E8%AE%BF%E9%97%AE%E5%AF%86%E9%92%A5%EF%BC%8C%E4%BB%A5%E5%8F%8A%E5%85%81%E8%AE%B8%E8%B0%83%E7%94%A8%E8%BF%9E%E6%8E%A5%E5%99%A8%E7%9A%84%E7%BD%91%E7%AB%99%E6%9D%A5%E6%BA%90%E3%80%82&amp;envLink=https%3A%2F%2Fgithub.com%2Frime0506%2F0506%2Ftree%2Fmain%2Floopmessage-connector" target="_blank" rel="noopener noreferrer" style="display:block; width:100%; box-sizing:border-box; border-radius:9px; padding:11px 12px; background:#111; color:#fff; text-decoration:none; text-align:center; font-size:13px; font-weight:600;">一键部署连接器到 Vercel</a>
+                    <div style="font-size:11px; color:#999; line-height:1.6; margin-top:8px;">任何用户都能用自己的 GitHub、Vercel 和 LoopMessage 账号部署，不需要拥有本仓库。</div>
                 </div>
                 <div class="detail-item" style="flex-direction:column; align-items:stretch; gap:8px;">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -3074,15 +3074,20 @@
                     </div>
                     <input type="url" id="detail-imessage-connector-url" placeholder="https://你的项目.vercel.app" style="width:100%; border:1px solid #e5e5ea; border-radius:8px; padding:10px; font-size:13px; outline:none; box-sizing:border-box;">
                     <div style="display:flex; gap:8px;">
-                        <input type="password" id="detail-imessage-access-key" placeholder="连接器访问密钥（不是 Photon Secret）" autocomplete="off" style="flex:1; min-width:0; border:1px solid #e5e5ea; border-radius:8px; padding:10px; font-size:13px; outline:none; box-sizing:border-box;">
+                        <input type="password" id="detail-imessage-access-key" placeholder="连接器访问密钥（不是 LoopMessage API Key）" autocomplete="off" style="flex:1; min-width:0; border:1px solid #e5e5ea; border-radius:8px; padding:10px; font-size:13px; outline:none; box-sizing:border-box;">
                         <button type="button" onclick="generateIMessageAccessKey()" style="flex:0 0 auto; border:none; border-radius:8px; padding:0 12px; background:#f2f2f7; color:#333; font-size:12px; cursor:pointer;">生成并复制</button>
                     </div>
                     <button type="button" onclick="testIMessageConnector()" style="border:none; border-radius:8px; padding:10px 12px; background:#f2f2f7; color:#333; font-size:13px; cursor:pointer;">测试连接</button>
                 </div>
                 <div class="detail-item" style="flex-direction:column; align-items:stretch; gap:8px;">
-                    <div>这个角色的 Photon 发送号码</div>
-                    <input type="tel" id="detail-imessage-sender" placeholder="例如 +12025550123" style="width:100%; border:1px solid #e5e5ea; border-radius:8px; padding:10px; font-size:13px; outline:none; box-sizing:border-box;">
-                    <div style="font-size:11px; color:#999; line-height:1.5;">必须填写 Photon 项目中属于该角色的专用 Line，包含国际区号。</div>
+                    <div>发送方式</div>
+                    <select id="detail-imessage-mode" style="width:100%; border:1px solid #e5e5ea; border-radius:8px; padding:10px; font-size:13px; outline:none; box-sizing:border-box; background:#fff;">
+                        <option value="sandbox">Sandbox 免费测试</option>
+                        <option value="shared">共享 Sender</option>
+                        <option value="dedicated">专用 Sender（一角色一号码）</option>
+                    </select>
+                    <input type="text" id="detail-imessage-sender" placeholder="LoopMessage Sender ID（可选）" style="width:100%; border:1px solid #e5e5ea; border-radius:8px; padding:10px; font-size:13px; outline:none; box-sizing:border-box;">
+                    <div style="font-size:11px; color:#999; line-height:1.5;">Sandbox 或已建立会话的共享 Sender 可留空；专用 Sender 必须填写该角色对应的 Sender ID。</div>
                 </div>
                 <div class="detail-item" style="flex-direction:column; align-items:stretch; gap:8px;">
                     <div>接收者 iMessage</div>
@@ -3095,18 +3100,18 @@
                 <div style="padding:0 16px 14px; font-size:11px; color:#999; line-height:1.6;">
                     <details>
                         <summary style="cursor:pointer; color:#666; font-size:12px; margin-bottom:6px;">怎么获得连接器地址？</summary>
-                        <div>1. 前往 <a href="https://app.photon.codes" target="_blank" rel="noopener noreferrer" style="color:#ff8fa3;">Photon</a> 创建项目和角色号码。</div>
+                        <div>1. 登录 <a href="https://app.loopmessage.com" target="_blank" rel="noopener noreferrer" style="color:#ff8fa3;">LoopMessage</a>，进入 Organization → API → Settings，复制 Organization API Key。</div>
                         <div>2. 点击上方“一键部署连接器到 Vercel”。</div>
-                        <div>3. 在 Vercel 按下面说明填写四项环境变量：</div>
+                        <div>3. 在 Vercel 填写三项环境变量：</div>
                         <div style="margin:5px 0 5px 10px;">
-                            <div><b>SPECTRUM_PROJECT_ID</b>：Photon 项目 Settings 中的 Project ID。</div>
-                            <div><b>SPECTRUM_PROJECT_SECRET</b>：同一页面的 Project Secret / Secret Key。</div>
+                            <div><b>LOOPMESSAGE_API_KEY</b>：刚复制的 Organization API Key。</div>
                             <div><b>CONNECTOR_ACCESS_KEY</b>：点击上方“生成并复制”，Vercel 和本页面填写同一个值。</div>
                             <div><b>ALLOWED_ORIGIN</b>：当前网站来源 <button type="button" onclick="copyIMessageAllowedOrigin()" style="border:none; background:none; padding:0; color:#ff8fa3; cursor:pointer; font-size:11px;">点此复制</button>；本地 file:// 测试可暂填 *。</div>
                         </div>
                         <div>4. 部署完成后，把生成的 https://xxx.vercel.app 地址粘贴到“连接器地址”。</div>
+                        <div>5. Sandbox 需要先在 LoopMessage 添加接收者，并让接收者先给 Sandbox 号码发一条消息；专用模式还要把角色对应的 Sender ID 填到上方。</div>
                     </details>
-                    <div style="margin-top:6px;">Photon Project Secret 只填写在你自己的连接器环境变量中，不要填写到这里。</div>
+                    <div style="margin-top:6px;">LoopMessage API Key 只填写在你自己的 Vercel 环境变量中，不要填写到网页。</div>
                 </div>
             </div>
 
@@ -8618,7 +8623,7 @@
     <script src="xianyu.js"></script>
     <!-- 小屋功能 JS（独立文件） -->
     <script src="cabin.js"></script>
-    <script src="script.js?v=6.4" defer></script>
+    <script src="script.js?v=6.5" defer></script>
     
 
 </body>
