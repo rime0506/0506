@@ -21730,7 +21730,36 @@ async function generateIMessageAccessKey() {
     crypto.getRandomValues(bytes);
     const key = `imsg_${Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('')}`;
     input.value = key;
-    await copyTextForIMessageSetup(key, '访问密钥已生成并复制，请粘贴到 Vercel 的 CONNECTOR_ACCESS_KEY');
+    const saved = await persistIMessageConnectorDraft();
+    await copyTextForIMessageSetup(key, saved
+        ? '访问密钥已生成、自动保存并复制，请粘贴到 Vercel 的 CONNECTOR_ACCESS_KEY'
+        : '访问密钥已生成并复制，请粘贴到 Vercel；完成设置前不要刷新页面');
+}
+
+async function persistIMessageConnectorDraft() {
+    const connectorUrl = normalizeIMessageConnectorUrl(document.getElementById('detail-imessage-connector-url')?.value);
+    const accessKey = document.getElementById('detail-imessage-access-key')?.value.trim() || '';
+    try {
+        const existingRecord = await db.dexiData.get('imessageConnectorConfig');
+        const existing = existingRecord?.value || {};
+        const unchanged = existing.provider === 'loopmessage' && existing.url === connectorUrl && existing.accessKey === accessKey;
+        await db.dexiData.put({
+            key: 'imessageConnectorConfig',
+            value: {
+                provider: 'loopmessage',
+                url: connectorUrl,
+                accessKey,
+                lastStatus: connectorUrl && accessKey
+                    ? (unchanged && existing.lastStatus === 'connected' ? 'connected' : 'configured')
+                    : 'disconnected',
+                updatedAt: Date.now()
+            }
+        });
+        return true;
+    } catch (error) {
+        console.error('[LoopMessage iMessage] 自动保存连接器设置失败:', error);
+        return false;
+    }
 }
 
 async function copyIMessageAllowedOrigin() {

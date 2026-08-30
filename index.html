@@ -3072,9 +3072,9 @@
                         <div>连接器地址</div>
                         <div id="detail-imessage-status" style="font-size:12px; color:#999;">未测试</div>
                     </div>
-                    <input type="url" id="detail-imessage-connector-url" placeholder="https://你的项目.vercel.app" style="width:100%; border:1px solid #e5e5ea; border-radius:8px; padding:10px; font-size:13px; outline:none; box-sizing:border-box;">
+                    <input type="url" id="detail-imessage-connector-url" placeholder="https://你的项目.vercel.app" onchange="persistIMessageConnectorDraft()" style="width:100%; border:1px solid #e5e5ea; border-radius:8px; padding:10px; font-size:13px; outline:none; box-sizing:border-box;">
                     <div style="display:flex; gap:8px;">
-                        <input type="password" id="detail-imessage-access-key" placeholder="连接器访问密钥（不是 LoopMessage API Key）" autocomplete="off" style="flex:1; min-width:0; border:1px solid #e5e5ea; border-radius:8px; padding:10px; font-size:13px; outline:none; box-sizing:border-box;">
+                        <input type="password" id="detail-imessage-access-key" placeholder="连接器访问密钥（不是 LoopMessage API Key）" autocomplete="off" onchange="persistIMessageConnectorDraft()" style="flex:1; min-width:0; border:1px solid #e5e5ea; border-radius:8px; padding:10px; font-size:13px; outline:none; box-sizing:border-box;">
                         <button type="button" onclick="generateIMessageAccessKey()" style="flex:0 0 auto; border:none; border-radius:8px; padding:0 12px; background:#f2f2f7; color:#333; font-size:12px; cursor:pointer;">生成并复制</button>
                     </div>
                     <button type="button" onclick="testIMessageConnector()" style="border:none; border-radius:8px; padding:10px 12px; background:#f2f2f7; color:#333; font-size:13px; cursor:pointer;">测试连接</button>
@@ -8623,7 +8623,7 @@
     <script src="xianyu.js"></script>
     <!-- 小屋功能 JS（独立文件） -->
     <script src="cabin.js"></script>
-    <script src="script.js?v=6.5" defer></script>
+    <script src="script.js?v=6.6" defer></script>
     
 
 </body>
