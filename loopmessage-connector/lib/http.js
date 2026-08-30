@@ -52,8 +52,10 @@ export function parseJsonBody(req) {
 
 export function normalizeAddress(value) {
   const address = String(value || '').trim();
-  if (/^\+[1-9]\d{6,14}$/.test(address)) return address;
   if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) return address.toLowerCase();
+  const compactPhone = address.replace(/[\s\-().]/g, '');
+  if (/^\+[1-9]\d{6,14}$/.test(compactPhone)) return compactPhone;
+  if (/^[1-9]\d{6,14}$/.test(compactPhone)) return `+${compactPhone}`;
   return '';
 }
 

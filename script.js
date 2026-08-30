@@ -21793,8 +21793,17 @@ function getIMessageFormConfig() {
         enabled: !!document.getElementById('detail-imessage-switch')?.checked,
         mode: document.getElementById('detail-imessage-mode')?.value || 'sandbox',
         senderId: document.getElementById('detail-imessage-sender')?.value.trim() || '',
-        recipient: document.getElementById('detail-imessage-recipient')?.value.trim() || ''
+        recipient: normalizeIMessageRecipient(document.getElementById('detail-imessage-recipient')?.value)
     };
+}
+
+function normalizeIMessageRecipient(value) {
+    const address = String(value || '').trim();
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) return address.toLowerCase();
+    const compactPhone = address.replace(/[\s\-().]/g, '');
+    if (/^\+[1-9]\d{6,14}$/.test(compactPhone)) return compactPhone;
+    if (/^[1-9]\d{6,14}$/.test(compactPhone)) return `+${compactPhone}`;
+    return address;
 }
 
 function validateIMessageFormConfig(config, options = {}) {
@@ -21936,6 +21945,8 @@ async function appendSentIMessageToChat(char, text, result, clientMessageId) {
 async function sendCharacterIMessageText(char, text) {
     const config = getIMessageFormConfig();
     validateIMessageFormConfig(config, { requireBinding: true });
+    const recipientInput = document.getElementById('detail-imessage-recipient');
+    if (recipientInput) recipientInput.value = config.recipient;
     await assertIMessageSenderNotBoundElsewhere(char, config);
     await persistIMessageFormConfig(char, config, 'connected');
 
