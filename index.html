@@ -3104,7 +3104,7 @@
                             <div style="font-size:11px; color:#999; margin-top:3px;">网页保持打开时，调用当前网站的 AI API 回复</div>
                         </div>
                         <label class="ios-switch">
-                            <input type="checkbox" id="detail-imessage-auto-reply">
+                            <input type="checkbox" id="detail-imessage-auto-reply" onchange="renderLoopMessageAutoReplyStatus(true)">
                             <span class="slider"></span>
                         </label>
                     </div>
@@ -3116,6 +3116,15 @@
                         </div>
                     </div>
                     <div style="font-size:11px; color:#999; line-height:1.5;">连续消息会合并后只调用一次 AI。Sandbox/共享模式下，同一个接收者建议只开启一个角色。</div>
+                    <div style="padding:10px 11px; border-radius:9px; background:#f7f7fa; border:1px solid #ececf1;">
+                        <div style="display:flex; align-items:center; gap:7px;">
+                            <span id="detail-imessage-runtime-dot" style="width:8px; height:8px; border-radius:50%; background:#8e8e93; flex:0 0 auto;"></span>
+                            <span id="detail-imessage-runtime-status" style="flex:1; min-width:0; font-size:12px; color:#666;">尚未开启自动回复</span>
+                            <button type="button" onclick="checkLoopMessageAutoReplyNow()" style="border:none; border-radius:7px; padding:5px 8px; background:#fff; color:#555; box-shadow:0 0 0 1px #ddd; font-size:11px; cursor:pointer;">立即检查</button>
+                        </div>
+                        <div id="detail-imessage-runtime-detail" style="font-size:10px; color:#999; line-height:1.5; margin:6px 0 0 15px;">网页必须保持打开，并点击右上角保存设置。</div>
+                    </div>
+                    <div style="font-size:11px; color:#999; line-height:1.5;">如果一直显示“监听中”，请确认已在 <a href="https://app.loopmessage.com" target="_blank" rel="noopener noreferrer" style="color:#ff8fa3;">LoopMessage</a> 创建 <b>message_inbound</b> Webhook；地址和验证头可在下方说明中复制。</div>
                 </div>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:12px 16px;">
                     <button type="button" id="detail-imessage-test-send" onclick="sendIMessageTest()" style="border:none; border-radius:8px; padding:11px 8px; background:#f2f2f7; color:#333; font-size:13px; cursor:pointer;">发送测试文字</button>
@@ -8654,7 +8663,7 @@
     <script src="xianyu.js"></script>
     <!-- 小屋功能 JS（独立文件） -->
     <script src="cabin.js"></script>
-    <script src="script.js?v=6.9" defer></script>
+    <script src="script.js?v=7.0" defer></script>
     
 
 </body>
