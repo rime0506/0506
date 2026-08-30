@@ -21286,20 +21286,18 @@ ${chatContext || '（没有聊天记录）'}
             document.getElementById('detail-auto-chat-switch').checked = !!char.auto_reply_enabled;
             document.getElementById('detail-auto-chat-interval').value = char.auto_reply_interval || '';
 
-            // 3.1 回显 LoopMessage iMessage 设置。连接器配置属于当前浏览器，角色保存发送模式和 Sender ID。
-            const imessageConfig = getCharacterIMessageConfig(char, _detailAid);
-            const connectorRecord = await db.dexiData.get('imessageConnectorConfig');
-            const connectorConfig = connectorRecord?.value || {};
-            const isLoopMessageConnector = connectorConfig.provider === 'loopmessage';
+            // 3.1 回显 LoopMessage iMessage 设置。所有字段均按角色和当前用户账号独立保存。
+            const imessageConfig = await getCharacterIMessageConfigWithLegacyMigration(char, _detailAid);
+            const isLoopMessageConnector = !!(imessageConfig.connectorUrl && imessageConfig.accessKey);
             document.getElementById('detail-imessage-switch').checked = isLoopMessageConnector && !!imessageConfig.enabled;
-            document.getElementById('detail-imessage-connector-url').value = isLoopMessageConnector ? (connectorConfig.url || '') : '';
-            document.getElementById('detail-imessage-access-key').value = isLoopMessageConnector ? (connectorConfig.accessKey || '') : '';
+            document.getElementById('detail-imessage-connector-url').value = imessageConfig.connectorUrl || '';
+            document.getElementById('detail-imessage-access-key').value = imessageConfig.accessKey || '';
             document.getElementById('detail-imessage-mode').value = imessageConfig.mode || 'sandbox';
             document.getElementById('detail-imessage-sender').value = imessageConfig.senderId || '';
             document.getElementById('detail-imessage-recipient').value = imessageConfig.recipient || '';
             document.getElementById('detail-imessage-auto-reply').checked = !!imessageConfig.autoReplyEnabled;
             document.getElementById('detail-imessage-debounce').value = Math.max(1, Math.min(60, Number(imessageConfig.debounceSeconds) || 6));
-            setIMessageStatus(isLoopMessageConnector && connectorConfig.lastStatus === 'connected' ? '已连接' : '未测试', isLoopMessageConnector && connectorConfig.lastStatus === 'connected' ? 'success' : 'neutral');
+            setIMessageStatus(isLoopMessageConnector && imessageConfig.lastStatus === 'connected' ? '已连接' : '未测试', isLoopMessageConnector && imessageConfig.lastStatus === 'connected' ? 'success' : 'neutral');
             renderLoopMessageAutoReplyStatus();
             await renderIMessageHistoryPage();
             
@@ -21554,6 +21552,14 @@ async function saveChatDetail() {
     delete previousIMessageBinding.senderPhone;
     existingIMessageByUser[imessageAccountKey] = {
         ...previousIMessageBinding,
+        connectorStorageVersion: 2,
+        connectorUrl: imessageConnectorUrl,
+        accessKey: imessageAccessKey,
+        lastStatus: imessageConnectorUrl && imessageAccessKey
+            ? (previousIMessageBinding.connectorUrl === imessageConnectorUrl
+                && previousIMessageBinding.accessKey === imessageAccessKey
+                && previousIMessageBinding.lastStatus === 'connected' ? 'connected' : 'configured')
+            : 'disconnected',
         enabled: imessageEnabled,
         mode: imessageMode,
         senderId: imessageSenderId,
@@ -21563,22 +21569,6 @@ async function saveChatDetail() {
         updatedAt: Date.now()
     };
 
-    const existingConnectorRecord = await db.dexiData.get('imessageConnectorConfig');
-    const existingConnector = existingConnectorRecord?.value || {};
-    const connectorUnchanged = existingConnector.provider === 'loopmessage' && existingConnector.url === imessageConnectorUrl && existingConnector.accessKey === imessageAccessKey;
-    await db.dexiData.put({
-        key: 'imessageConnectorConfig',
-        value: {
-            provider: 'loopmessage',
-            url: imessageConnectorUrl,
-            accessKey: imessageAccessKey,
-            lastStatus: imessageConnectorUrl && imessageAccessKey
-                ? (connectorUnchanged && existingConnector.lastStatus === 'connected' ? 'connected' : 'configured')
-                : 'disconnected',
-            updatedAt: Date.now()
-        }
-    });
-    
     // 保存自定义气泡CSS（严格过滤JS）；按当前聊天会话写入，与 chat_history_by_user 的 key 一致
     const bubbleCSS = sanitizeCSS(document.getElementById('detail-bubble-css').value);
     const bubbleThreadKey = getPrivateChatThreadKey();
@@ -21756,21 +21746,27 @@ async function persistIMessageConnectorDraft() {
     const connectorUrl = normalizeIMessageConnectorUrl(document.getElementById('detail-imessage-connector-url')?.value);
     const accessKey = document.getElementById('detail-imessage-access-key')?.value.trim() || '';
     try {
-        const existingRecord = await db.dexiData.get('imessageConnectorConfig');
-        const existing = existingRecord?.value || {};
-        const unchanged = existing.provider === 'loopmessage' && existing.url === connectorUrl && existing.accessKey === accessKey;
-        await db.dexiData.put({
-            key: 'imessageConnectorConfig',
-            value: {
-                provider: 'loopmessage',
-                url: connectorUrl,
-                accessKey,
-                lastStatus: connectorUrl && accessKey
-                    ? (unchanged && existing.lastStatus === 'connected' ? 'connected' : 'configured')
-                    : 'disconnected',
-                updatedAt: Date.now()
-            }
-        });
+        const charId = currentChatCharId;
+        if (!charId) return false;
+        const char = await db.characters.get(charId);
+        if (!char) return false;
+        const accountId = getCurrentAccountId();
+        const key = String(accountId || '__legacy__');
+        const currentMap = { ...(char.imessage_by_user || {}) };
+        const existing = { ...(currentMap[key] || {}) };
+        const unchanged = existing.connectorUrl === connectorUrl && existing.accessKey === accessKey;
+        currentMap[key] = {
+            ...existing,
+            connectorStorageVersion: 2,
+            connectorUrl,
+            accessKey,
+            lastStatus: connectorUrl && accessKey
+                ? (unchanged && existing.lastStatus === 'connected' ? 'connected' : 'configured')
+                : 'disconnected',
+            updatedAt: Date.now()
+        };
+        char.imessage_by_user = currentMap;
+        await db.characters.update(charId, { imessage_by_user: currentMap });
         return true;
     } catch (error) {
         console.error('[LoopMessage iMessage] 自动保存连接器设置失败:', error);
@@ -21805,6 +21801,50 @@ function getCharacterIMessageConfig(char, accountId) {
     if (!char) return {};
     const key = String(accountId || '__legacy__');
     return char.imessage_by_user?.[key] || {};
+}
+
+function hasExistingIMessageRoleBinding(binding) {
+    return !!(binding?.enabled
+        || binding?.autoReplyEnabled
+        || binding?.senderId
+        || binding?.recipient);
+}
+
+async function getCharacterIMessageConfigWithLegacyMigration(char, accountId) {
+    if (!char) return {};
+    const key = String(accountId || '__legacy__');
+    const binding = { ...getCharacterIMessageConfig(char, accountId) };
+    if (binding.connectorStorageVersion === 2
+        || (binding.connectorUrl && binding.accessKey)
+        || !hasExistingIMessageRoleBinding(binding)) return binding;
+
+    // 兼容旧版本：旧连接器曾保存在浏览器全局。只迁移已经配置过 iMessage 的角色，
+    // 不把旧连接器自动复制给从未启用过的新角色。
+    try {
+        const legacyRecord = await db.dexiData.get('imessageConnectorConfig');
+        const legacy = legacyRecord?.value || {};
+        const connectorUrl = normalizeIMessageConnectorUrl(legacy.url);
+        const accessKey = String(legacy.accessKey || '').trim();
+        if (legacy.provider !== 'loopmessage' || !connectorUrl || !accessKey) return binding;
+
+        const currentMap = { ...(char.imessage_by_user || {}) };
+        const migrated = {
+            ...binding,
+            connectorStorageVersion: 2,
+            connectorUrl,
+            accessKey,
+            lastStatus: legacy.lastStatus || 'configured',
+            connectorMigratedAt: Date.now()
+        };
+        currentMap[key] = migrated;
+        char.imessage_by_user = currentMap;
+        await db.characters.update(char.id, { imessage_by_user: currentMap });
+        console.log(`[LoopMessage iMessage] 已把旧版全局连接器迁移到角色 ${char.id}`);
+        return migrated;
+    } catch (error) {
+        console.warn('[LoopMessage iMessage] 旧连接器迁移失败:', error);
+        return binding;
+    }
 }
 
 function setIMessageStatus(text, tone = 'neutral') {
@@ -21870,6 +21910,10 @@ async function persistIMessageFormConfig(char, config, status) {
     delete previousBinding.senderPhone;
     currentMap[key] = {
         ...previousBinding,
+        connectorStorageVersion: 2,
+        connectorUrl: config.connectorUrl,
+        accessKey: config.accessKey,
+        lastStatus: status || 'configured',
         enabled: !!config.enabled,
         mode: config.mode || 'sandbox',
         senderId: config.senderId || '',
@@ -21880,19 +21924,7 @@ async function persistIMessageFormConfig(char, config, status) {
     };
     char.imessage_by_user = currentMap;
 
-    await Promise.all([
-        db.dexiData.put({
-            key: 'imessageConnectorConfig',
-            value: {
-                provider: 'loopmessage',
-                url: config.connectorUrl,
-                accessKey: config.accessKey,
-                lastStatus: status || 'configured',
-                updatedAt: Date.now()
-            }
-        }),
-        db.characters.update(char.id, { imessage_by_user: currentMap })
-    ]);
+    await db.characters.update(char.id, { imessage_by_user: currentMap });
 }
 
 async function assertIMessageSenderNotBoundElsewhere(char, config) {
@@ -21904,7 +21936,10 @@ async function assertIMessageSenderNotBoundElsewhere(char, config) {
     const conflict = allChars.find(item => {
         if (String(item.id) === String(char.id)) return false;
         const binding = item.imessage_by_user?.[key];
-        return binding?.enabled && String(binding.senderId || '').trim() === sender;
+        return binding?.enabled
+            && normalizeIMessageConnectorUrl(binding.connectorUrl) === config.connectorUrl
+            && String(binding.accessKey || '').trim() === config.accessKey
+            && String(binding.senderId || '').trim() === sender;
     });
     if (conflict) {
         throw new Error(`这个 LoopMessage Sender ID 已经绑定到角色「${conflict.nick || conflict.name || conflict.id}」`);
@@ -22534,20 +22569,20 @@ function formatLoopMessageRuntimeTime(value = Date.now()) {
     return new Date(value).toLocaleTimeString('zh-CN', { hour12: false });
 }
 
-async function getStoredLoopMessageConnectorConfig() {
-    const record = await db.dexiData.get('imessageConnectorConfig');
-    const value = record?.value || {};
-    if (value.provider !== 'loopmessage') return null;
-    const connectorUrl = normalizeIMessageConnectorUrl(value.url);
-    const accessKey = String(value.accessKey || '').trim();
+async function getStoredLoopMessageConnectorConfig(char, accountId) {
+    if (!char) return null;
+    const binding = await getCharacterIMessageConfigWithLegacyMigration(char, accountId);
+    const connectorUrl = normalizeIMessageConnectorUrl(binding.connectorUrl);
+    const accessKey = String(binding.accessKey || '').trim();
     if (!connectorUrl || !accessKey) return null;
     return { connectorUrl, accessKey };
 }
 
-function getIMessageRuntimeConfig(char, accountId, connectorConfig) {
+function getIMessageRuntimeConfig(char, accountId, connectorConfig = null) {
     const binding = getCharacterIMessageConfig(char, accountId);
     return {
-        ...connectorConfig,
+        connectorUrl: normalizeIMessageConnectorUrl(connectorConfig?.connectorUrl || binding.connectorUrl),
+        accessKey: String(connectorConfig?.accessKey || binding.accessKey || '').trim(),
         enabled: !!binding.enabled,
         mode: binding.mode || 'sandbox',
         senderId: String(binding.senderId || '').trim(),
@@ -22561,7 +22596,7 @@ async function sendBlockedContactRealIMessage(char, accountId, messages) {
     const visibleMessages = (messages || []).map(sanitizeIMessageVisibleText).filter(Boolean);
     if (!visibleMessages.length) return 0;
 
-    const connectorConfig = await getStoredLoopMessageConnectorConfig();
+    const connectorConfig = await getStoredLoopMessageConnectorConfig(char, accountId);
     if (!connectorConfig) throw new Error('角色已开启真实 iMessage，但连接器地址或访问密钥没有保存');
     const config = getIMessageRuntimeConfig(char, accountId, connectorConfig);
     validateIMessageFormConfig(config, { requireBinding: true });
@@ -22573,10 +22608,10 @@ async function sendBlockedContactRealIMessage(char, accountId, messages) {
     return visibleMessages.length;
 }
 
-async function findCharacterForLoopMessageInbound(event, accountId, connectorConfig) {
+async function findCharacterForLoopMessageInbound(event, accountId, connectorConfig, connectorCharacters = null) {
     const contact = normalizeIMessageRecipient(event.contact);
     const sender = String(event.sender || '').trim();
-    const characters = await db.characters.toArray();
+    const characters = Array.isArray(connectorCharacters) ? connectorCharacters : await db.characters.toArray();
     const matches = characters.map(char => ({
         char,
         config: getIMessageRuntimeConfig(char, accountId, connectorConfig),
@@ -22672,7 +22707,9 @@ async function forgetDeletedIMessageMessages(messages) {
     }
 
     try {
-        const connectorConfig = await getStoredLoopMessageConnectorConfig();
+        const accountId = getCurrentAccountId();
+        const char = currentChatCharId ? await db.characters.get(currentChatCharId) : null;
+        const connectorConfig = await getStoredLoopMessageConnectorConfig(char, accountId);
         if (!connectorConfig) throw new Error('连接器设置不存在');
         await acknowledgeLoopMessageEvents(connectorConfig, webhookIds);
         setLoopMessageAutoReplyRuntimeStatus(currentChatCharId, '已忘记删除的 iMessage', 'success', `已从本地上下文和入站队列移除 ${webhookIds.length} 条消息。`);
@@ -22704,8 +22741,8 @@ async function processLoopMessageConversation(key) {
     entry.timer = null;
     entry.generating = true;
     try {
-        const connectorConfig = await getStoredLoopMessageConnectorConfig();
         const char = await db.characters.get(entry.charId);
+        const connectorConfig = await getStoredLoopMessageConnectorConfig(char, entry.accountId);
         if (!connectorConfig || !char) throw new Error('连接器或角色配置已经不存在');
         const config = getIMessageRuntimeConfig(char, entry.accountId, connectorConfig);
         if (!config.enabled || !config.autoReplyEnabled) throw new Error('这个角色的 iMessage 自动回复已关闭');
@@ -22823,8 +22860,6 @@ async function pollLoopMessageInbox() {
     let activeCharacters = [];
     try {
         const accountId = getCurrentAccountId();
-        const connectorConfig = await getStoredLoopMessageConnectorConfig();
-        if (!connectorConfig) return;
         const characters = await db.characters.toArray();
         activeCharacters = characters.filter(char => {
             const binding = getCharacterIMessageConfig(char, accountId);
@@ -22832,35 +22867,62 @@ async function pollLoopMessageInbox() {
         });
         if (!activeCharacters.length) return;
 
-        const payload = await callIMessageConnector('/api/inbox?limit=100', connectorConfig, { method: 'GET' });
-        const events = Array.isArray(payload.events) ? payload.events : [];
-        activeCharacters.forEach(char => {
-            const previousState = loopMessageAutoReplyStates.get(String(char.id));
-            if (!previousState || previousState.text === '入站监听失败') {
-                setLoopMessageAutoReplyRuntimeStatus(char.id, '已开启 · 正在监听新消息', 'listening', `最近检查：${formatLoopMessageRuntimeTime()}。网页保持打开即可。`);
-            }
-        });
-        const acknowledgeNow = [];
-        for (const event of events) {
-            if (!event?.webhookId) continue;
-            const route = await findCharacterForLoopMessageInbound(event, accountId, connectorConfig);
-            if (!route) {
-                const contact = normalizeIMessageRecipient(event.contact) || '未知接收者';
-                activeCharacters.forEach(char => setLoopMessageAutoReplyRuntimeStatus(char.id, '收到消息，但没有匹配到角色', 'error', `入站联系人：${contact}。请检查角色填写的“接收者 iMessage”和 Sender ID。`));
+        // 每个角色可以使用完全不同的连接器。相同地址和密钥的角色合并轮询，
+        // 不同连接器分别读取，避免角色 B 的设置覆盖或读取角色 A 的队列。
+        const connectorGroups = new Map();
+        for (const char of activeCharacters) {
+            const connectorConfig = await getStoredLoopMessageConnectorConfig(char, accountId);
+            if (!connectorConfig) {
+                setLoopMessageAutoReplyRuntimeStatus(char.id, '入站监听失败', 'error', '这个角色还没有填写自己的连接器地址和访问密钥。');
                 continue;
             }
-            if (await wasLoopMessageBatchAlreadyReplied(route.char, accountId, event.webhookId)) {
-                acknowledgeNow.push(event.webhookId);
-                continue;
-            }
-            if (event.messageType !== 'text' || !String(event.text || '').trim()) {
-                console.log('[LoopMessage Inbox] 当前只自动回复文字消息，已忽略:', event.messageType);
-                acknowledgeNow.push(event.webhookId);
-                continue;
-            }
-            await queueLoopMessageInboundForReply(route, event, accountId);
+            const groupKey = `${connectorConfig.connectorUrl}\n${connectorConfig.accessKey}`;
+            if (!connectorGroups.has(groupKey)) connectorGroups.set(groupKey, { connectorConfig, characters: [] });
+            connectorGroups.get(groupKey).characters.push(char);
         }
-        if (acknowledgeNow.length) await acknowledgeLoopMessageEvents(connectorConfig, acknowledgeNow);
+        if (!connectorGroups.size) return;
+
+        let successfulGroups = 0;
+        const groupErrors = [];
+        for (const group of connectorGroups.values()) {
+            try {
+                const payload = await callIMessageConnector('/api/inbox?limit=100', group.connectorConfig, { method: 'GET' });
+                const events = Array.isArray(payload.events) ? payload.events : [];
+                group.characters.forEach(char => {
+                    const previousState = loopMessageAutoReplyStates.get(String(char.id));
+                    if (!previousState || previousState.text === '入站监听失败') {
+                        setLoopMessageAutoReplyRuntimeStatus(char.id, '已开启 · 正在监听新消息', 'listening', `最近检查：${formatLoopMessageRuntimeTime()}。网页保持打开即可。`);
+                    }
+                });
+                const acknowledgeNow = [];
+                for (const event of events) {
+                    if (!event?.webhookId) continue;
+                    const route = await findCharacterForLoopMessageInbound(event, accountId, group.connectorConfig, group.characters);
+                    if (!route) {
+                        const contact = normalizeIMessageRecipient(event.contact) || '未知接收者';
+                        group.characters.forEach(char => setLoopMessageAutoReplyRuntimeStatus(char.id, '收到消息，但没有匹配到角色', 'error', `入站联系人：${contact}。请检查这个角色填写的“接收者 iMessage”和 Sender ID。`));
+                        continue;
+                    }
+                    if (await wasLoopMessageBatchAlreadyReplied(route.char, accountId, event.webhookId)) {
+                        acknowledgeNow.push(event.webhookId);
+                        continue;
+                    }
+                    if (event.messageType !== 'text' || !String(event.text || '').trim()) {
+                        console.log('[LoopMessage Inbox] 当前只自动回复文字消息，已忽略:', event.messageType);
+                        acknowledgeNow.push(event.webhookId);
+                        continue;
+                    }
+                    await queueLoopMessageInboundForReply(route, event, accountId);
+                }
+                if (acknowledgeNow.length) await acknowledgeLoopMessageEvents(group.connectorConfig, acknowledgeNow);
+                successfulGroups += 1;
+            } catch (groupError) {
+                groupErrors.push(groupError);
+                const detail = groupError.message || '未知错误';
+                group.characters.forEach(char => setLoopMessageAutoReplyRuntimeStatus(char.id, '入站监听失败', 'error', `${detail}；这是当前角色自己的连接器。`));
+            }
+        }
+        if (!successfulGroups && groupErrors.length) throw groupErrors[0];
         loopMessageInboxErrorCount = 0;
         loopMessageInboxNextPollAt = 0;
     } catch (error) {
@@ -22885,10 +22947,10 @@ async function checkLoopMessageAutoReplyNow() {
     setLoopMessageAutoReplyRuntimeStatus(charId, '正在检查自动回复链路…', 'waiting', '正在检查角色设置、连接器、Upstash 入站队列和待处理消息。');
     try {
         const accountId = getCurrentAccountId();
-        const connectorConfig = await getStoredLoopMessageConnectorConfig();
         const char = await db.characters.get(charId);
-        if (!connectorConfig) throw new Error('连接器地址或访问密钥还没有保存');
         if (!char) throw new Error('找不到当前角色');
+        const connectorConfig = await getStoredLoopMessageConnectorConfig(char, accountId);
+        if (!connectorConfig) throw new Error('这个角色的连接器地址或访问密钥还没有保存');
         const config = getIMessageRuntimeConfig(char, accountId, connectorConfig);
         validateIMessageFormConfig(config, { requireBinding: true });
         if (!config.autoReplyEnabled) throw new Error('“收到 iMessage 后自动回复”尚未开启或尚未保存');
