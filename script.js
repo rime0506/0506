@@ -21962,30 +21962,6 @@ async function testIMessageConnector() {
     }
 }
 
-async function appendSentIMessageToChat(char, text, result, clientMessageId, accountId = getCurrentAccountId(), sourceWebhookIds = []) {
-    const freshChar = await db.characters.get(char.id) || char;
-    const history = [...getChatHistory(freshChar, accountId)];
-    history.push({
-        role: 'char',
-        content: text,
-        time: Date.now(),
-        read: true,
-        channel: 'imessage',
-        deliveryStatus: 'sent',
-        providerMessageId: result.messageId || null,
-        providerSpaceId: result.conversationId || null,
-        clientMessageId,
-        sourceWebhookIds: Array.isArray(sourceWebhookIds) ? sourceWebhookIds : []
-    });
-    await setChatHistory(freshChar, accountId, history);
-
-    if (currentChatCharId === char.id && typeof renderChatBody === 'function') {
-        const freshChar = await db.characters.get(char.id);
-        if (freshChar) await renderChatBody(freshChar);
-    }
-    if (currentChatCharId === char.id) await renderIMessageHistoryList();
-}
-
 function escapeIMessageHistoryHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, char => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -21999,19 +21975,104 @@ function getIMessageHistoryMessageKey(message) {
     return `fallback:${Number(message?.time) || 0}:${message?.role || ''}:${String(message?.content || '').slice(0, 120)}`;
 }
 
+function getStoredIMessageHistory(char, accountId) {
+    const accountKey = String(accountId || '__legacy__');
+    return char?.imessage_history_by_user?.[accountKey] || [];
+}
+
+const iMessageHistoryWriteQueues = new Map();
+
+async function setStoredIMessageHistory(char, accountId, history) {
+    const accountKey = String(accountId || '__legacy__');
+    const queueKey = `${char.id}:${accountKey}`;
+    const previous = iMessageHistoryWriteQueues.get(queueKey) || Promise.resolve();
+    const current = previous.catch(() => {}).then(async () => {
+        const freshChar = await db.characters.get(char.id) || char;
+        const historyMap = { ...(freshChar.imessage_history_by_user || {}) };
+        historyMap[accountKey] = Array.isArray(history) ? history : [];
+        await db.characters.update(char.id, { imessage_history_by_user: historyMap });
+    });
+    iMessageHistoryWriteQueues.set(queueKey, current);
+    try {
+        await current;
+    } finally {
+        if (iMessageHistoryWriteQueues.get(queueKey) === current) iMessageHistoryWriteQueues.delete(queueKey);
+    }
+}
+
+async function migrateLegacyIMessageHistoryForCharacter(char, accountId) {
+    const freshChar = await db.characters.get(char.id) || char;
+    const wechatHistory = [...getChatHistory(freshChar, accountId)];
+    const legacyMessages = wechatHistory.filter(message => message?.channel === 'imessage');
+    if (!legacyMessages.length) return freshChar;
+
+    const existing = [...getStoredIMessageHistory(freshChar, accountId)];
+    const known = new Set(existing.map(getIMessageHistoryMessageKey));
+    legacyMessages.forEach(message => {
+        const key = getIMessageHistoryMessageKey(message);
+        if (!known.has(key)) {
+            existing.push(message);
+            known.add(key);
+        }
+    });
+    existing.sort((a, b) => Number(a.time || 0) - Number(b.time || 0));
+    await setStoredIMessageHistory(freshChar, accountId, existing);
+    await setChatHistory(freshChar, accountId, wechatHistory.filter(message => message?.channel !== 'imessage'), { isDelete: true });
+    return await db.characters.get(char.id) || freshChar;
+}
+
+async function migrateAllLegacyIMessageHistories() {
+    try {
+        const accountId = getCurrentAccountId();
+        const characters = await db.characters.toArray();
+        let currentChatMigrated = false;
+        for (const char of characters) {
+            const hasLegacyIMessage = getChatHistory(char, accountId).some(message => message?.channel === 'imessage');
+            if (!hasLegacyIMessage) continue;
+            await migrateLegacyIMessageHistoryForCharacter(char, accountId);
+            if (String(currentChatCharId) === String(char.id)) currentChatMigrated = true;
+        }
+        if (currentChatMigrated && typeof renderChatBody === 'function') {
+            const freshChar = await db.characters.get(currentChatCharId);
+            if (freshChar) await renderChatBody(freshChar, true);
+        }
+    } catch (error) {
+        console.warn('[LoopMessage iMessage] 旧记录迁移失败，将在下次打开设置时重试:', error);
+    }
+}
+
+async function appendSentIMessageToChat(char, text, result, clientMessageId, accountId = getCurrentAccountId(), sourceWebhookIds = []) {
+    const freshChar = await migrateLegacyIMessageHistoryForCharacter(char, accountId);
+    const history = [...getStoredIMessageHistory(freshChar, accountId)];
+    history.push({
+        role: 'char',
+        content: text,
+        time: Date.now(),
+        read: true,
+        channel: 'imessage',
+        deliveryStatus: 'sent',
+        providerMessageId: result.messageId || null,
+        providerSpaceId: result.conversationId || null,
+        clientMessageId,
+        sourceWebhookIds: Array.isArray(sourceWebhookIds) ? sourceWebhookIds : []
+    });
+    await setStoredIMessageHistory(freshChar, accountId, history);
+    if (currentChatCharId === char.id) await renderIMessageHistoryList();
+}
+
 async function renderIMessageHistoryList() {
     const list = document.getElementById('detail-imessage-history-list');
     if (!list) return;
     const charId = currentChatCharId;
-    const char = charId ? await db.characters.get(charId) : null;
+    let char = charId ? await db.characters.get(charId) : null;
     if (!char) {
         list.innerHTML = '<div style="padding:16px; text-align:center; color:#aaa; font-size:12px;">当前角色不存在</div>';
         return;
     }
     const accountId = getCurrentAccountId();
-    const allMessages = getChatHistory(char, accountId)
-        .map((message, historyIndex) => ({ message, historyIndex }))
-        .filter(item => item.message?.channel === 'imessage')
+    char = await migrateLegacyIMessageHistoryForCharacter(char, accountId);
+    const allMessages = getStoredIMessageHistory(char, accountId)
+        .map(message => ({ message }))
         .reverse();
     if (!allMessages.length) {
         list.innerHTML = '<div style="padding:16px; text-align:center; color:#aaa; font-size:12px;">暂无 iMessage 聊天记录</div>';
@@ -22039,11 +22100,12 @@ async function renderIMessageHistoryList() {
 async function deleteIMessageHistoryMessage(encodedKey) {
     const key = decodeURIComponent(String(encodedKey || ''));
     const charId = currentChatCharId;
-    const char = charId ? await db.characters.get(charId) : null;
+    let char = charId ? await db.characters.get(charId) : null;
     if (!char) return;
     const accountId = getCurrentAccountId();
-    const history = [...getChatHistory(char, accountId)];
-    const index = history.findIndex(message => message?.channel === 'imessage' && getIMessageHistoryMessageKey(message) === key);
+    char = await migrateLegacyIMessageHistoryForCharacter(char, accountId);
+    const history = [...getStoredIMessageHistory(char, accountId)];
+    const index = history.findIndex(message => getIMessageHistoryMessageKey(message) === key);
     if (index < 0) {
         showToast('⚠️ 这条 iMessage 已经不存在');
         await renderIMessageHistoryList();
@@ -22052,10 +22114,8 @@ async function deleteIMessageHistoryMessage(encodedKey) {
     if (!confirm('删除这一条 iMessage，并让 AI 忘记它吗？')) return;
 
     const deletedMessages = history.splice(index, 1);
-    await setChatHistory(char, accountId, history, { isDelete: true });
+    await setStoredIMessageHistory(char, accountId, history);
     await forgetDeletedIMessageMessages(deletedMessages);
-    const freshChar = await db.characters.get(charId);
-    if (freshChar && typeof renderChatBody === 'function') await renderChatBody(freshChar, true);
     await renderIMessageHistoryList();
     showToast('✅ 已删除这一条 iMessage，AI 不会再读取它');
 }
@@ -22209,7 +22269,8 @@ async function generateAndSendCharacterIMessage() {
         await persistIMessageFormConfig(char, config, 'connected');
         const accountId = getCurrentAccountId();
         const userChar = accountId ? await db.characters.get(parseInt(accountId)) : null;
-        const history = getChatHistory(char, accountId).slice(-12).map(message => {
+        const historyChar = await migrateLegacyIMessageHistoryForCharacter(char, accountId);
+        const history = getStoredIMessageHistory(historyChar, accountId).slice(-12).map(message => {
             const speaker = message.role === 'user' ? (userChar?.name || '用户') : (char.nick || char.name || '角色');
             return `${speaker}：${String(message.content || '').replace(/<[^>]*>/g, '').slice(0, 300)}`;
         }).join('\n');
@@ -22349,8 +22410,8 @@ async function findCharacterForLoopMessageInbound(event, accountId, connectorCon
 }
 
 async function appendInboundIMessageToChat(char, event, accountId) {
-    const freshChar = await db.characters.get(char.id) || char;
-    const history = [...getChatHistory(freshChar, accountId)];
+    const freshChar = await migrateLegacyIMessageHistoryForCharacter(char, accountId);
+    const history = [...getStoredIMessageHistory(freshChar, accountId)];
     if (history.some(message => message.providerWebhookId === event.webhookId)) return false;
     history.push({
         role: 'user',
@@ -22363,18 +22424,14 @@ async function appendInboundIMessageToChat(char, event, accountId) {
         providerWebhookId: event.webhookId,
         providerSenderId: event.sender || null
     });
-    await setChatHistory(freshChar, accountId, history);
-    if (currentChatCharId === char.id && typeof renderChatBody === 'function') {
-        const updated = await db.characters.get(char.id);
-        if (updated) await renderChatBody(updated);
-    }
+    await setStoredIMessageHistory(freshChar, accountId, history);
     if (currentChatCharId === char.id) await renderIMessageHistoryList();
     return true;
 }
 
 async function wasLoopMessageBatchAlreadyReplied(char, accountId, webhookId) {
-    const freshChar = await db.characters.get(char.id) || char;
-    return getChatHistory(freshChar, accountId).some(message =>
+    const freshChar = await migrateLegacyIMessageHistoryForCharacter(char, accountId);
+    return getStoredIMessageHistory(freshChar, accountId).some(message =>
         message.role === 'char'
         && Array.isArray(message.sourceWebhookIds)
         && message.sourceWebhookIds.includes(webhookId)
@@ -22442,10 +22499,10 @@ function scheduleLoopMessageConversation(entry, minimumDelay = 150) {
 }
 
 async function buildLoopMessageAutoReply(char, accountId, batchEvents) {
-    const freshChar = await db.characters.get(char.id) || char;
+    const freshChar = await migrateLegacyIMessageHistoryForCharacter(char, accountId);
     const userChar = accountId ? await db.characters.get(parseInt(accountId)) : null;
     const contextCount = Math.max(8, Math.min(40, Number(freshChar.context_message_count) || 20));
-    const history = getChatHistory(freshChar, accountId).slice(-contextCount).map(message => {
+    const history = getStoredIMessageHistory(freshChar, accountId).slice(-contextCount).map(message => {
         const speaker = message.role === 'user' ? (userChar?.name || '用户') : (freshChar.nick || freshChar.name || '角色');
         return `${speaker}：${String(message.content || '').replace(/<[^>]*>/g, '').slice(0, 500)}`;
     }).join('\n');
@@ -22684,6 +22741,7 @@ function startLoopMessageInboxPolling() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => migrateAllLegacyIMessageHistories(), 1500);
     setTimeout(startLoopMessageInboxPolling, 2500);
 });
 window.pollLoopMessageInboxNow = pollLoopMessageInbox;
