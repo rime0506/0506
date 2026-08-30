@@ -21297,6 +21297,8 @@ ${chatContext || '（没有聊天记录）'}
             document.getElementById('detail-imessage-mode').value = imessageConfig.mode || 'sandbox';
             document.getElementById('detail-imessage-sender').value = imessageConfig.senderId || '';
             document.getElementById('detail-imessage-recipient').value = imessageConfig.recipient || '';
+            document.getElementById('detail-imessage-auto-reply').checked = !!imessageConfig.autoReplyEnabled;
+            document.getElementById('detail-imessage-debounce').value = Math.max(1, Math.min(60, Number(imessageConfig.debounceSeconds) || 6));
             setIMessageStatus(isLoopMessageConnector && connectorConfig.lastStatus === 'connected' ? '已连接' : '未测试', isLoopMessageConnector && connectorConfig.lastStatus === 'connected' ? 'success' : 'neutral');
             
             // 3.5. 回显外语翻译模式设置
@@ -21490,7 +21492,9 @@ async function saveChatDetail() {
     const imessageAccessKey = document.getElementById('detail-imessage-access-key')?.value.trim() || '';
     const imessageMode = document.getElementById('detail-imessage-mode')?.value || 'sandbox';
     const imessageSenderId = document.getElementById('detail-imessage-sender')?.value.trim() || '';
-    const imessageRecipient = document.getElementById('detail-imessage-recipient')?.value.trim() || '';
+    const imessageRecipient = normalizeIMessageRecipient(document.getElementById('detail-imessage-recipient')?.value);
+    const imessageAutoReplyEnabled = !!document.getElementById('detail-imessage-auto-reply')?.checked;
+    const imessageDebounceSeconds = Math.max(1, Math.min(60, parseInt(document.getElementById('detail-imessage-debounce')?.value, 10) || 6));
     // 上下文条数设置
     const contextCount = parseInt(document.getElementById('detail-context-count').value);
     
@@ -21551,6 +21555,8 @@ async function saveChatDetail() {
         mode: imessageMode,
         senderId: imessageSenderId,
         recipient: imessageRecipient,
+        autoReplyEnabled: imessageAutoReplyEnabled,
+        debounceSeconds: imessageDebounceSeconds,
         updatedAt: Date.now()
     };
 
@@ -21767,6 +21773,24 @@ async function copyIMessageAllowedOrigin() {
     await copyTextForIMessageSetup(origin, `ALLOWED_ORIGIN 已复制：${origin}`);
 }
 
+async function copyIMessageWebhookUrl() {
+    const connectorUrl = normalizeIMessageConnectorUrl(document.getElementById('detail-imessage-connector-url')?.value);
+    if (!connectorUrl) {
+        showToast('请先填写连接器地址');
+        return;
+    }
+    await copyTextForIMessageSetup(`${connectorUrl}/api/webhook`, 'Webhook 地址已复制');
+}
+
+async function copyIMessageWebhookAuth() {
+    const accessKey = document.getElementById('detail-imessage-access-key')?.value.trim() || '';
+    if (!accessKey) {
+        showToast('请先填写连接器访问密钥');
+        return;
+    }
+    await copyTextForIMessageSetup(`Bearer ${accessKey}`, 'Authorization 验证头内容已复制');
+}
+
 function getCharacterIMessageConfig(char, accountId) {
     if (!char) return {};
     const key = String(accountId || '__legacy__');
@@ -21793,7 +21817,9 @@ function getIMessageFormConfig() {
         enabled: !!document.getElementById('detail-imessage-switch')?.checked,
         mode: document.getElementById('detail-imessage-mode')?.value || 'sandbox',
         senderId: document.getElementById('detail-imessage-sender')?.value.trim() || '',
-        recipient: normalizeIMessageRecipient(document.getElementById('detail-imessage-recipient')?.value)
+        recipient: normalizeIMessageRecipient(document.getElementById('detail-imessage-recipient')?.value),
+        autoReplyEnabled: !!document.getElementById('detail-imessage-auto-reply')?.checked,
+        debounceSeconds: Math.max(1, Math.min(60, parseInt(document.getElementById('detail-imessage-debounce')?.value, 10) || 6))
     };
 }
 
@@ -21838,6 +21864,8 @@ async function persistIMessageFormConfig(char, config, status) {
         mode: config.mode || 'sandbox',
         senderId: config.senderId || '',
         recipient: config.recipient,
+        autoReplyEnabled: !!config.autoReplyEnabled,
+        debounceSeconds: Math.max(1, Math.min(60, Number(config.debounceSeconds) || 6)),
         updatedAt: Date.now()
     };
     char.imessage_by_user = currentMap;
@@ -21912,16 +21940,20 @@ async function testIMessageConnector() {
         validateIMessageFormConfig(config);
         const result = await callIMessageConnector('/api/health', config, { method: 'GET' });
         await persistIMessageFormConfig(char, config, 'connected');
-        setIMessageStatus(result.loopMessageConnected ? 'LoopMessage 已连接' : '连接器可用', 'success');
-        showToast('✅ iMessage 连接器连接成功');
+        if (result.inboxConnected) {
+            setIMessageStatus('发送和自动回复均可用', 'success');
+            showToast('✅ iMessage 发送和入站队列连接成功');
+        } else {
+            setIMessageStatus('只能发送，入站队列未连接', 'loading');
+            showToast('⚠️ 发送可用；自动回复还需配置 Upstash Redis');
+        }
     } catch (error) {
         setIMessageStatus('连接失败', 'error');
         showToast('❌ ' + (error.message || '连接失败'));
     }
 }
 
-async function appendSentIMessageToChat(char, text, result, clientMessageId) {
-    const accountId = getCurrentAccountId();
+async function appendSentIMessageToChat(char, text, result, clientMessageId, accountId = getCurrentAccountId(), sourceWebhookIds = []) {
     const history = [...getChatHistory(char, accountId)];
     history.push({
         role: 'char',
@@ -21932,7 +21964,8 @@ async function appendSentIMessageToChat(char, text, result, clientMessageId) {
         deliveryStatus: 'sent',
         providerMessageId: result.messageId || null,
         providerSpaceId: result.conversationId || null,
-        clientMessageId
+        clientMessageId,
+        sourceWebhookIds: Array.isArray(sourceWebhookIds) ? sourceWebhookIds : []
     });
     await setChatHistory(char, accountId, history);
 
@@ -21950,6 +21983,12 @@ async function sendCharacterIMessageText(char, text) {
     await assertIMessageSenderNotBoundElsewhere(char, config);
     await persistIMessageFormConfig(char, config, 'connected');
 
+    return await sendCharacterIMessageTextWithConfig(char, text, config, getCurrentAccountId());
+}
+
+async function sendCharacterIMessageTextWithConfig(char, text, config, accountId = getCurrentAccountId(), sourceWebhookIds = []) {
+    validateIMessageFormConfig(config, { requireBinding: true });
+
     const cleanText = String(text || '').replace(/\s*\|\|\|\s*/g, ' ').trim();
     if (!cleanText) throw new Error('没有可发送的消息内容');
     if (cleanText.length > 2000) throw new Error('iMessage 文字不能超过 2000 个字符');
@@ -21964,7 +22003,7 @@ async function sendCharacterIMessageText(char, text) {
             clientMessageId
         })
     });
-    await appendSentIMessageToChat(char, cleanText, result, clientMessageId);
+    await appendSentIMessageToChat(char, cleanText, result, clientMessageId, accountId, sourceWebhookIds);
     return result;
 }
 
@@ -22028,6 +22067,269 @@ async function generateAndSendCharacterIMessage() {
 window.testIMessageConnector = testIMessageConnector;
 window.sendIMessageTest = sendIMessageTest;
 window.generateAndSendCharacterIMessage = generateAndSendCharacterIMessage;
+window.copyIMessageWebhookUrl = copyIMessageWebhookUrl;
+window.copyIMessageWebhookAuth = copyIMessageWebhookAuth;
+
+// ==================== LoopMessage 入站自动回复（网页在线模式） ====================
+const loopMessagePendingConversations = new Map();
+let loopMessageInboxPollInFlight = false;
+let loopMessageInboxPollTimer = null;
+let loopMessageInboxNextPollAt = 0;
+let loopMessageInboxErrorCount = 0;
+
+async function getStoredLoopMessageConnectorConfig() {
+    const record = await db.dexiData.get('imessageConnectorConfig');
+    const value = record?.value || {};
+    if (value.provider !== 'loopmessage') return null;
+    const connectorUrl = normalizeIMessageConnectorUrl(value.url);
+    const accessKey = String(value.accessKey || '').trim();
+    if (!connectorUrl || !accessKey) return null;
+    return { connectorUrl, accessKey };
+}
+
+function getIMessageRuntimeConfig(char, accountId, connectorConfig) {
+    const binding = getCharacterIMessageConfig(char, accountId);
+    return {
+        ...connectorConfig,
+        enabled: !!binding.enabled,
+        mode: binding.mode || 'sandbox',
+        senderId: String(binding.senderId || '').trim(),
+        recipient: normalizeIMessageRecipient(binding.recipient),
+        autoReplyEnabled: !!binding.autoReplyEnabled,
+        debounceSeconds: Math.max(1, Math.min(60, Number(binding.debounceSeconds) || 6))
+    };
+}
+
+async function findCharacterForLoopMessageInbound(event, accountId, connectorConfig) {
+    const contact = normalizeIMessageRecipient(event.contact);
+    const sender = String(event.sender || '').trim();
+    const characters = await db.characters.toArray();
+    const matches = characters.map(char => ({
+        char,
+        config: getIMessageRuntimeConfig(char, accountId, connectorConfig),
+        binding: getCharacterIMessageConfig(char, accountId)
+    })).filter(item => {
+        if (!item.config.enabled || !item.config.autoReplyEnabled) return false;
+        if (item.config.recipient !== contact) return false;
+        if (item.config.mode === 'dedicated') {
+            return !!sender && item.config.senderId === sender;
+        }
+        return true;
+    });
+    matches.sort((a, b) => {
+        const aDedicated = a.config.mode === 'dedicated' && a.config.senderId === sender ? 1 : 0;
+        const bDedicated = b.config.mode === 'dedicated' && b.config.senderId === sender ? 1 : 0;
+        if (aDedicated !== bDedicated) return bDedicated - aDedicated;
+        return Number(b.binding.updatedAt || 0) - Number(a.binding.updatedAt || 0);
+    });
+    if (matches.length > 1 && matches[0].config.mode !== 'dedicated') {
+        console.warn('[LoopMessage Inbox] 同一个 Sandbox/共享接收者绑定了多个自动回复角色，使用最近保存的角色:', contact);
+    }
+    return matches[0] || null;
+}
+
+async function appendInboundIMessageToChat(char, event, accountId) {
+    const freshChar = await db.characters.get(char.id) || char;
+    const history = [...getChatHistory(freshChar, accountId)];
+    if (history.some(message => message.providerWebhookId === event.webhookId)) return false;
+    history.push({
+        role: 'user',
+        content: String(event.text || '').trim(),
+        time: Number(event.receivedAt) || Date.now(),
+        read: currentChatCharId === char.id,
+        channel: 'imessage',
+        messageType: event.messageType || 'text',
+        providerMessageId: event.messageId || null,
+        providerWebhookId: event.webhookId,
+        providerSenderId: event.sender || null
+    });
+    await setChatHistory(freshChar, accountId, history);
+    if (currentChatCharId === char.id && typeof renderChatBody === 'function') {
+        const updated = await db.characters.get(char.id);
+        if (updated) await renderChatBody(updated);
+    }
+    return true;
+}
+
+async function wasLoopMessageBatchAlreadyReplied(char, accountId, webhookId) {
+    const freshChar = await db.characters.get(char.id) || char;
+    return getChatHistory(freshChar, accountId).some(message =>
+        message.role === 'char'
+        && Array.isArray(message.sourceWebhookIds)
+        && message.sourceWebhookIds.includes(webhookId)
+    );
+}
+
+async function acknowledgeLoopMessageEvents(connectorConfig, webhookIds) {
+    const ids = [...new Set(webhookIds.filter(Boolean))];
+    if (!ids.length) return;
+    await callIMessageConnector('/api/inbox', connectorConfig, {
+        method: 'POST',
+        body: JSON.stringify({ webhookIds: ids })
+    });
+}
+
+function scheduleLoopMessageConversation(entry, minimumDelay = 150) {
+    if (entry.timer) clearTimeout(entry.timer);
+    if (entry.generating || entry.stopped) return;
+    const quietMs = entry.debounceSeconds * 1000;
+    const remaining = Math.max(minimumDelay, quietMs - (Date.now() - entry.lastEventAt));
+    entry.timer = setTimeout(() => processLoopMessageConversation(entry.key), remaining);
+}
+
+async function buildLoopMessageAutoReply(char, accountId, batchEvents) {
+    const freshChar = await db.characters.get(char.id) || char;
+    const userChar = accountId ? await db.characters.get(parseInt(accountId)) : null;
+    const contextCount = Math.max(8, Math.min(40, Number(freshChar.context_message_count) || 20));
+    const history = getChatHistory(freshChar, accountId).slice(-contextCount).map(message => {
+        const speaker = message.role === 'user' ? (userChar?.name || '用户') : (freshChar.nick || freshChar.name || '角色');
+        return `${speaker}：${String(message.content || '').replace(/<[^>]*>/g, '').slice(0, 500)}`;
+    }).join('\n');
+    const persona = [freshChar.description, freshChar.personality, freshChar.identity?.signature, freshChar.identity?.bio]
+        .filter(Boolean).join('\n').slice(0, 5000) || '暂无详细人设';
+    const inboundText = batchEvents.map(event => String(event.text || '').trim()).filter(Boolean).join('\n');
+    const prompt = `你要以角色身份，通过 iMessage 回复用户刚刚发来的消息。\n\n角色：${freshChar.nick || freshChar.name || '角色'}\n角色人设：\n${persona}\n用户：${userChar?.name || '用户'}\n当前时间：${new Date().toLocaleString('zh-CN')}\n最近聊天（已经包含用户刚发来的消息）：\n${history || '暂无聊天记录'}\n\n用户本轮连续发来的消息：\n${inboundText}\n\n要求：\n1. 严格符合角色人设、双方关系和聊天上下文。\n2. 像真人回复 iMessage，自然简短，不要复述用户整段话。\n3. 不要解释任务，不要输出角色名、前缀或引号。\n4. 只返回一条纯文字回复，最多300字。`;
+    const generated = await callAI([
+        { role: 'system', content: prompt },
+        { role: 'user', content: '直接生成要发回去的 iMessage。' }
+    ], { max_tokens: 500 });
+    return String(generated || '').replace(/^\s*["“]|["”]\s*$/g, '').trim().slice(0, 2000);
+}
+
+async function processLoopMessageConversation(key) {
+    const entry = loopMessagePendingConversations.get(key);
+    if (!entry || entry.generating || entry.stopped || !entry.events.size) return;
+    entry.timer = null;
+    entry.generating = true;
+    const startVersion = entry.version;
+    const batchEvents = [...entry.events.values()].sort((a, b) => Number(a.receivedAt || 0) - Number(b.receivedAt || 0));
+    const batchIds = batchEvents.map(event => event.webhookId);
+    try {
+        const connectorConfig = await getStoredLoopMessageConnectorConfig();
+        const char = await db.characters.get(entry.charId);
+        if (!connectorConfig || !char) throw new Error('连接器或角色配置已经不存在');
+        const config = getIMessageRuntimeConfig(char, entry.accountId, connectorConfig);
+        if (!config.enabled || !config.autoReplyEnabled) throw new Error('这个角色的 iMessage 自动回复已关闭');
+
+        const reply = await buildLoopMessageAutoReply(char, entry.accountId, batchEvents);
+        if (!reply) throw new Error('AI 没有生成可发送的回复');
+        if (entry.version !== startVersion) {
+            console.log('[LoopMessage Inbox] AI 生成期间收到新消息，合并后重新生成');
+            return;
+        }
+
+        await sendCharacterIMessageTextWithConfig(char, reply, config, entry.accountId, batchIds);
+        try {
+            await acknowledgeLoopMessageEvents(connectorConfig, batchIds);
+        } catch (ackError) {
+            console.warn('[LoopMessage Inbox] 已回复，但队列确认暂时失败；下次轮询会自动去重:', ackError);
+        }
+        batchIds.forEach(id => entry.events.delete(id));
+        entry.attempts = 0;
+        console.log(`[LoopMessage Inbox] 已自动回复角色「${char.nick || char.name || char.id}」`);
+    } catch (error) {
+        entry.attempts = Number(entry.attempts || 0) + 1;
+        console.error('[LoopMessage Inbox] 自动回复失败:', error);
+        if (entry.attempts >= 3) {
+            entry.stopped = true;
+            showToast(`⚠️ iMessage 自动回复暂停：${error.message || '连续失败'}`);
+        }
+    } finally {
+        entry.generating = false;
+        if (!entry.events.size) {
+            loopMessagePendingConversations.delete(key);
+        } else if (!entry.stopped) {
+            const retryDelay = entry.attempts ? 30000 : 150;
+            scheduleLoopMessageConversation(entry, retryDelay);
+        }
+    }
+}
+
+async function queueLoopMessageInboundForReply(route, event, accountId) {
+    const key = `${accountId || '__legacy__'}:${route.char.id}:${event.contact}:${event.sender || ''}`;
+    let entry = loopMessagePendingConversations.get(key);
+    if (!entry) {
+        entry = {
+            key,
+            charId: route.char.id,
+            accountId,
+            events: new Map(),
+            lastEventAt: 0,
+            debounceSeconds: route.config.debounceSeconds,
+            version: 0,
+            attempts: 0,
+            stopped: false,
+            generating: false,
+            timer: null
+        };
+        loopMessagePendingConversations.set(key, entry);
+    }
+    if (entry.events.has(event.webhookId)) return;
+    entry.events.set(event.webhookId, event);
+    entry.lastEventAt = Math.max(entry.lastEventAt, Number(event.receivedAt) || Date.now());
+    entry.debounceSeconds = route.config.debounceSeconds;
+    entry.version += 1;
+    entry.attempts = 0;
+    entry.stopped = false;
+    await appendInboundIMessageToChat(route.char, event, accountId);
+    scheduleLoopMessageConversation(entry);
+}
+
+async function pollLoopMessageInbox() {
+    if (loopMessageInboxPollInFlight || Date.now() < loopMessageInboxNextPollAt) return;
+    loopMessageInboxPollInFlight = true;
+    try {
+        const accountId = getCurrentAccountId();
+        const connectorConfig = await getStoredLoopMessageConnectorConfig();
+        if (!connectorConfig) return;
+        const characters = await db.characters.toArray();
+        const hasAutoReply = characters.some(char => {
+            const binding = getCharacterIMessageConfig(char, accountId);
+            return binding.enabled && binding.autoReplyEnabled;
+        });
+        if (!hasAutoReply) return;
+
+        const payload = await callIMessageConnector('/api/inbox?limit=100', connectorConfig, { method: 'GET' });
+        const events = Array.isArray(payload.events) ? payload.events : [];
+        const acknowledgeNow = [];
+        for (const event of events) {
+            if (!event?.webhookId) continue;
+            const route = await findCharacterForLoopMessageInbound(event, accountId, connectorConfig);
+            if (!route) continue;
+            if (await wasLoopMessageBatchAlreadyReplied(route.char, accountId, event.webhookId)) {
+                acknowledgeNow.push(event.webhookId);
+                continue;
+            }
+            if (event.messageType !== 'text' || !String(event.text || '').trim()) {
+                console.log('[LoopMessage Inbox] 当前只自动回复文字消息，已忽略:', event.messageType);
+                acknowledgeNow.push(event.webhookId);
+                continue;
+            }
+            await queueLoopMessageInboundForReply(route, event, accountId);
+        }
+        if (acknowledgeNow.length) await acknowledgeLoopMessageEvents(connectorConfig, acknowledgeNow);
+        loopMessageInboxErrorCount = 0;
+        loopMessageInboxNextPollAt = 0;
+    } catch (error) {
+        loopMessageInboxErrorCount += 1;
+        const backoffMs = Math.min(60000, 3000 * (2 ** Math.min(4, loopMessageInboxErrorCount - 1)));
+        loopMessageInboxNextPollAt = Date.now() + backoffMs;
+        console.warn('[LoopMessage Inbox] 轮询失败:', error.message || error);
+    } finally {
+        loopMessageInboxPollInFlight = false;
+    }
+}
+
+function startLoopMessageInboxPolling() {
+    if (loopMessageInboxPollTimer) return;
+    pollLoopMessageInbox().catch(() => {});
+    loopMessageInboxPollTimer = setInterval(() => pollLoopMessageInbox().catch(() => {}), 3000);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(startLoopMessageInboxPolling, 2500);
+});
+window.pollLoopMessageInboxNow = pollLoopMessageInbox;
 
 // 显示挂载表情包库弹窗
 async function showMountStickerModal() {

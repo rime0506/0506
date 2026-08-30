@@ -38,6 +38,20 @@ export function requireAccess(req, res) {
   return true;
 }
 
+export function requireWebhookAccess(req, res) {
+  const expected = String(process.env.WEBHOOK_SECRET || process.env.CONNECTOR_ACCESS_KEY || '');
+  if (!expected) {
+    res.status(503).json({ success: false, code: 'WEBHOOK_NOT_CONFIGURED', error: '连接器尚未设置 Webhook 验证密钥' });
+    return false;
+  }
+  const authorization = String(req.headers.authorization || '');
+  if (authorization !== expected && authorization !== `Bearer ${expected}`) {
+    res.status(401).json({ success: false, code: 'INVALID_WEBHOOK_SECRET', error: 'Webhook 验证密钥不正确' });
+    return false;
+  }
+  return true;
+}
+
 export function parseJsonBody(req) {
   const raw = typeof req.body === 'string' ? req.body : JSON.stringify(req.body || {});
   if (Buffer.byteLength(raw, 'utf8') > MAX_BODY_BYTES) {

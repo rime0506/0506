@@ -1,5 +1,6 @@
 import { applyCors, handleOptions, requireAccess, serializeError } from '../lib/http.js';
 import { testLoopMessageCredentials } from '../lib/loopmessage.js';
+import { isInboxConfigured, pingInbox } from '../lib/queue.js';
 
 export default async function handler(req, res) {
   if (handleOptions(req, res)) return;
@@ -9,12 +10,25 @@ export default async function handler(req, res) {
 
   try {
     const result = await testLoopMessageCredentials();
+    const inboxConfigured = isInboxConfigured();
+    let inboxConnected = false;
+    let inboxError = '';
+    if (inboxConfigured) {
+      try {
+        inboxConnected = await pingInbox();
+      } catch (error) {
+        inboxError = String(error?.message || '队列连接失败').slice(0, 200);
+      }
+    }
     return res.status(200).json({
       success: true,
       provider: 'loopmessage',
       loopMessageConnected: true,
       senderCount: result.senderCount,
-      version: '1.0.2'
+      inboxConfigured,
+      inboxConnected,
+      inboxError,
+      version: '2.0.0'
     });
   } catch (error) {
     const parsed = serializeError(error);

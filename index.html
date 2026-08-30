@@ -3064,7 +3064,7 @@
                 </div>
                 <div style="padding:14px 16px; border-bottom:1px solid #f2f2f7;">
                     <div style="font-size:13px; font-weight:600; color:#333; margin-bottom:8px;">先部署你自己的 iMessage 连接器</div>
-                    <a href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Frime0506%2F0506&amp;root-directory=loopmessage-connector&amp;project-name=loopmessage-connector&amp;repository-name=loopmessage-connector&amp;env=LOOPMESSAGE_API_KEY%2CCONNECTOR_ACCESS_KEY%2CALLOWED_ORIGIN&amp;envDescription=%E8%AF%B7%E5%A1%AB%E5%86%99%20LoopMessage%20Organization%20API%20Key%E3%80%81%E7%BD%91%E7%AB%99%E7%94%9F%E6%88%90%E7%9A%84%E8%BF%9E%E6%8E%A5%E5%99%A8%E8%AE%BF%E9%97%AE%E5%AF%86%E9%92%A5%EF%BC%8C%E4%BB%A5%E5%8F%8A%E5%85%81%E8%AE%B8%E8%B0%83%E7%94%A8%E8%BF%9E%E6%8E%A5%E5%99%A8%E7%9A%84%E7%BD%91%E7%AB%99%E6%9D%A5%E6%BA%90%E3%80%82&amp;envLink=https%3A%2F%2Fgithub.com%2Frime0506%2F0506%2Ftree%2Fmain%2Floopmessage-connector" target="_blank" rel="noopener noreferrer" style="display:block; width:100%; box-sizing:border-box; border-radius:9px; padding:11px 12px; background:#111; color:#fff; text-decoration:none; text-align:center; font-size:13px; font-weight:600;">一键部署连接器到 Vercel</a>
+                    <a href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Frime0506%2F0506&amp;root-directory=loopmessage-connector&amp;project-name=loopmessage-connector&amp;repository-name=loopmessage-connector&amp;env=LOOPMESSAGE_API_KEY%2CCONNECTOR_ACCESS_KEY%2CALLOWED_ORIGIN%2CUPSTASH_REDIS_REST_URL%2CUPSTASH_REDIS_REST_TOKEN&amp;envDescription=%E5%A1%AB%E5%86%99%20LoopMessage%20API%20Key%E3%80%81%E8%BF%9E%E6%8E%A5%E5%99%A8%E8%AE%BF%E9%97%AE%E5%AF%86%E9%92%A5%E3%80%81%E7%BD%91%E7%AB%99%E6%9D%A5%E6%BA%90%E4%BB%A5%E5%8F%8A%20Upstash%20Redis%20REST%20%E5%9C%B0%E5%9D%80%E5%92%8C%20Token%E3%80%82&amp;envLink=https%3A%2F%2Fgithub.com%2Frime0506%2F0506%2Ftree%2Fmain%2Floopmessage-connector" target="_blank" rel="noopener noreferrer" style="display:block; width:100%; box-sizing:border-box; border-radius:9px; padding:11px 12px; background:#111; color:#fff; text-decoration:none; text-align:center; font-size:13px; font-weight:600;">一键部署连接器到 Vercel</a>
                     <div style="font-size:11px; color:#999; line-height:1.6; margin-top:8px;">任何用户都能用自己的 GitHub、Vercel 和 LoopMessage 账号部署，不需要拥有本仓库。</div>
                 </div>
                 <div class="detail-item" style="flex-direction:column; align-items:stretch; gap:8px;">
@@ -3093,6 +3093,26 @@
                     <div>接收者 iMessage</div>
                     <input type="text" id="detail-imessage-recipient" placeholder="+8613800000000 或 Apple ID 邮箱" style="width:100%; border:1px solid #e5e5ea; border-radius:8px; padding:10px; font-size:13px; outline:none; box-sizing:border-box;">
                 </div>
+                <div class="detail-item" style="flex-direction:column; align-items:stretch; gap:10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <div>收到 iMessage 后自动回复</div>
+                            <div style="font-size:11px; color:#999; margin-top:3px;">网页保持打开时，调用当前网站的 AI API 回复</div>
+                        </div>
+                        <label class="ios-switch">
+                            <input type="checkbox" id="detail-imessage-auto-reply">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+                        <div style="font-size:13px; color:#555;">连续多久没新消息才回复</div>
+                        <div style="display:flex; align-items:center; gap:5px;">
+                            <input type="number" id="detail-imessage-debounce" min="1" max="60" step="1" value="6" style="width:64px; border:1px solid #e5e5ea; border-radius:8px; padding:8px; text-align:center; font-size:13px; outline:none; box-sizing:border-box;">
+                            <span style="font-size:12px; color:#999;">秒</span>
+                        </div>
+                    </div>
+                    <div style="font-size:11px; color:#999; line-height:1.5;">连续消息会合并后只调用一次 AI。Sandbox/共享模式下，同一个接收者建议只开启一个角色。</div>
+                </div>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:12px 16px;">
                     <button type="button" id="detail-imessage-test-send" onclick="sendIMessageTest()" style="border:none; border-radius:8px; padding:11px 8px; background:#f2f2f7; color:#333; font-size:13px; cursor:pointer;">发送测试文字</button>
                     <button type="button" id="detail-imessage-ai-send" onclick="generateAndSendCharacterIMessage()" style="border:none; border-radius:8px; padding:11px 8px; background:#ffb6c1; color:#fff; font-size:13px; cursor:pointer;">AI生成并发送</button>
@@ -3102,14 +3122,21 @@
                         <summary style="cursor:pointer; color:#666; font-size:12px; margin-bottom:6px;">怎么获得连接器地址？</summary>
                         <div>1. 登录 <a href="https://app.loopmessage.com" target="_blank" rel="noopener noreferrer" style="color:#ff8fa3;">LoopMessage</a>，进入 Organization → API → Settings，复制 Organization API Key。</div>
                         <div>2. 点击上方“一键部署连接器到 Vercel”。</div>
-                        <div>3. 在 Vercel 填写三项环境变量：</div>
+                        <div>3. 在 <a href="https://console.upstash.com/redis" target="_blank" rel="noopener noreferrer" style="color:#ff8fa3;">Upstash</a> 创建免费 Redis，然后在 Vercel 填写五项环境变量：</div>
                         <div style="margin:5px 0 5px 10px;">
                             <div><b>LOOPMESSAGE_API_KEY</b>：刚复制的 Organization API Key。</div>
                             <div><b>CONNECTOR_ACCESS_KEY</b>：点击上方“生成并复制”，Vercel 和本页面填写同一个值。</div>
                             <div><b>ALLOWED_ORIGIN</b>：当前网站来源 <button type="button" onclick="copyIMessageAllowedOrigin()" style="border:none; background:none; padding:0; color:#ff8fa3; cursor:pointer; font-size:11px;">点此复制</button>；本地 file:// 测试可暂填 *。</div>
+                            <div><b>UPSTASH_REDIS_REST_URL</b>：Upstash 数据库的 REST URL。</div>
+                            <div><b>UPSTASH_REDIS_REST_TOKEN</b>：同一数据库的 REST Token。</div>
                         </div>
                         <div>4. 部署完成后，把生成的 https://xxx.vercel.app 地址粘贴到“连接器地址”。</div>
                         <div>5. Sandbox 需要先在 LoopMessage 添加接收者，并让接收者先给 Sandbox 号码发一条消息；专用模式还要把角色对应的 Sender ID 填到上方。</div>
+                        <div>6. 在 LoopMessage → API → Webhooks 新建 <b>message_inbound</b>：</div>
+                        <div style="margin:5px 0 5px 10px;">
+                            <div>URL：<button type="button" onclick="copyIMessageWebhookUrl()" style="border:none; background:none; padding:0; color:#ff8fa3; cursor:pointer; font-size:11px;">复制 Webhook 地址</button></div>
+                            <div>Authorization：<button type="button" onclick="copyIMessageWebhookAuth()" style="border:none; background:none; padding:0; color:#ff8fa3; cursor:pointer; font-size:11px;">复制验证头内容</button></div>
+                        </div>
                     </details>
                     <div style="margin-top:6px;">LoopMessage API Key 只填写在你自己的 Vercel 环境变量中，不要填写到网页。</div>
                 </div>
@@ -8623,7 +8650,7 @@
     <script src="xianyu.js"></script>
     <!-- 小屋功能 JS（独立文件） -->
     <script src="cabin.js"></script>
-    <script src="script.js?v=6.7" defer></script>
+    <script src="script.js?v=6.8" defer></script>
     
 
 </body>
