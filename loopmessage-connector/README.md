@@ -18,7 +18,7 @@
 
 ## 发送模式
 
-- Sandbox：免费测试，最多添加少量联系人；接收者必须先给 Sandbox 号码发消息，并在有效会话窗口内发送。网站里的 Sender ID 可留空。
+- Sandbox：免费测试，最多添加少量联系人。联系人必须与 iPhone/Mac“发起新对话时使用”的手机号或邮箱完全一致，并先给 Sandbox 发一条 iMessage；收到入站消息后会开启 24 小时发送窗口。网站里的 Sender ID 可留空。
 - 共享 Sender：接收者先完成共享号码的 opt-in 并建立会话。已建立会话时 Sender ID 可留空。
 - 专用 Sender：适合“一角色一个固定号码”。在每个角色设置里填入该角色对应的 LoopMessage Sender ID。
 

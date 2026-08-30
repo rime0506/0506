@@ -14,7 +14,7 @@ export default async function handler(req, res) {
       provider: 'loopmessage',
       loopMessageConnected: true,
       senderCount: result.senderCount,
-      version: '1.0.0'
+      version: '1.0.1'
     });
   } catch (error) {
     const parsed = serializeError(error);
