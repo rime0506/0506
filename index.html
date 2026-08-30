@@ -3063,9 +3063,13 @@
                     </label>
                 </div>
                 <div style="padding:14px 16px; border-bottom:1px solid #f2f2f7;">
-                    <div style="font-size:13px; font-weight:600; color:#333; margin-bottom:8px;">先部署你自己的 iMessage 连接器</div>
+                    <div style="font-size:13px; font-weight:600; color:#333; margin-bottom:8px;">第 1 步：创建免费入站数据库</div>
+                    <a href="https://console.upstash.com/redis" target="_blank" rel="noopener noreferrer" style="display:block; width:100%; box-sizing:border-box; border-radius:9px; padding:11px 12px; background:#00a86b; color:#fff; text-decoration:none; text-align:center; font-size:13px; font-weight:600;">创建免费 Upstash Redis</a>
+                    <div style="font-size:11px; color:#777; line-height:1.6; margin-top:8px;">创建数据库后，在数据库的 REST API 区域复制 <strong>UPSTASH_REDIS_REST_URL</strong> 和 <strong>UPSTASH_REDIS_REST_TOKEN</strong>。这两个值只填到 Vercel，不要填在网页里。</div>
+
+                    <div style="font-size:13px; font-weight:600; color:#333; margin:16px 0 8px;">第 2 步：部署 iMessage 连接器</div>
                     <a href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Frime0506%2F0506&amp;root-directory=loopmessage-connector&amp;project-name=loopmessage-connector&amp;repository-name=loopmessage-connector&amp;env=LOOPMESSAGE_API_KEY%2CCONNECTOR_ACCESS_KEY%2CALLOWED_ORIGIN%2CUPSTASH_REDIS_REST_URL%2CUPSTASH_REDIS_REST_TOKEN&amp;envDescription=%E5%A1%AB%E5%86%99%20LoopMessage%20API%20Key%E3%80%81%E8%BF%9E%E6%8E%A5%E5%99%A8%E8%AE%BF%E9%97%AE%E5%AF%86%E9%92%A5%E3%80%81%E7%BD%91%E7%AB%99%E6%9D%A5%E6%BA%90%E4%BB%A5%E5%8F%8A%20Upstash%20Redis%20REST%20%E5%9C%B0%E5%9D%80%E5%92%8C%20Token%E3%80%82&amp;envLink=https%3A%2F%2Fgithub.com%2Frime0506%2F0506%2Ftree%2Fmain%2Floopmessage-connector" target="_blank" rel="noopener noreferrer" style="display:block; width:100%; box-sizing:border-box; border-radius:9px; padding:11px 12px; background:#111; color:#fff; text-decoration:none; text-align:center; font-size:13px; font-weight:600;">一键部署连接器到 Vercel</a>
-                    <div style="font-size:11px; color:#999; line-height:1.6; margin-top:8px;">任何用户都能用自己的 GitHub、Vercel 和 LoopMessage 账号部署，不需要拥有本仓库。</div>
+                    <div style="font-size:11px; color:#999; line-height:1.6; margin-top:8px;">先准备好上面的两个 Upstash 值。任何用户都能用自己的 GitHub、Vercel 和 LoopMessage 账号部署，不需要拥有本仓库。</div>
                 </div>
                 <div class="detail-item" style="flex-direction:column; align-items:stretch; gap:8px;">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -8650,7 +8654,7 @@
     <script src="xianyu.js"></script>
     <!-- 小屋功能 JS（独立文件） -->
     <script src="cabin.js"></script>
-    <script src="script.js?v=6.8" defer></script>
+    <script src="script.js?v=6.9" defer></script>
     
 
 </body>
