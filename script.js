@@ -21962,7 +21962,8 @@ async function testIMessageConnector() {
 }
 
 async function appendSentIMessageToChat(char, text, result, clientMessageId, accountId = getCurrentAccountId(), sourceWebhookIds = []) {
-    const history = [...getChatHistory(char, accountId)];
+    const freshChar = await db.characters.get(char.id) || char;
+    const history = [...getChatHistory(freshChar, accountId)];
     history.push({
         role: 'char',
         content: text,
@@ -21975,7 +21976,7 @@ async function appendSentIMessageToChat(char, text, result, clientMessageId, acc
         clientMessageId,
         sourceWebhookIds: Array.isArray(sourceWebhookIds) ? sourceWebhookIds : []
     });
-    await setChatHistory(char, accountId, history);
+    await setChatHistory(freshChar, accountId, history);
 
     if (currentChatCharId === char.id && typeof renderChatBody === 'function') {
         const freshChar = await db.characters.get(char.id);
@@ -22013,6 +22014,75 @@ async function sendCharacterIMessageTextWithConfig(char, text, config, accountId
     });
     await appendSentIMessageToChat(char, cleanText, result, clientMessageId, accountId, sourceWebhookIds);
     return result;
+}
+
+function getIMessageReplyCountRange(char) {
+    const min = Math.max(1, Math.min(50, parseInt(char?.reply_min_count, 10) || 1));
+    const configuredMax = Math.max(1, Math.min(50, parseInt(char?.reply_max_count, 10) || 3));
+    return { min, max: Math.max(min, configuredMax) };
+}
+
+function parseIMessageReplySegments(rawReply, minCount, maxCount) {
+    let text = String(rawReply || '').trim().replace(/^```(?:json|text)?\s*/i, '').replace(/\s*```$/, '').trim();
+    try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) text = parsed.join('|||');
+        else if (Array.isArray(parsed?.messages)) text = parsed.messages.join('|||');
+        else if (typeof parsed?.reply === 'string') text = parsed.reply;
+    } catch (_) {}
+
+    let segments = text.split('|||').map(item => String(item || '')
+        .replace(/^\s*["“]|["”]\s*$/g, '')
+        .trim()).filter(Boolean);
+    if (segments.length < minCount && !text.includes('|||')) {
+        const lineSegments = text.split(/\r?\n+/).map(item => item.trim()).filter(Boolean);
+        if (lineSegments.length > segments.length) segments = lineSegments;
+    }
+    if (segments.length < minCount) {
+        const sentenceSegments = text.match(/[^。！？!?\n]+[。！？!?]?/g)?.map(item => item.trim()).filter(Boolean) || [];
+        if (sentenceSegments.length > segments.length) segments = sentenceSegments;
+    }
+    if (segments.length > maxCount) {
+        const kept = segments.slice(0, Math.max(0, maxCount - 1));
+        kept.push(segments.slice(Math.max(0, maxCount - 1)).join(' '));
+        segments = kept;
+    }
+    return segments.map(item => item.replace(/\s*\|\|\|\s*/g, ' ').trim()).filter(Boolean);
+}
+
+async function generateIMessageSegments(prompt, userPrompt, char) {
+    const { min, max } = getIMessageReplyCountRange(char);
+    const maxTokens = Math.min(3000, Math.max(500, max * 100));
+    let generated = await callAI([
+        { role: 'system', content: prompt },
+        { role: 'user', content: userPrompt }
+    ], { max_tokens: maxTokens });
+    let segments = parseIMessageReplySegments(generated, min, max);
+
+    if (segments.length < min) {
+        generated = await callAI([
+            { role: 'system', content: prompt },
+            { role: 'user', content: `${userPrompt}\n上一次只生成了 ${segments.length} 条，不符合要求。请重新生成，必须是 ${min} 到 ${max} 条，并用 ||| 分隔。` }
+        ], { max_tokens: maxTokens });
+        segments = parseIMessageReplySegments(generated, min, max);
+    }
+    if (segments.length < min) throw new Error(`AI 只生成了 ${segments.length} 条消息，少于角色设置的最少 ${min} 条`);
+    return segments.slice(0, max);
+}
+
+function waitBeforeNextIMessage(delayMs = 650) {
+    return new Promise(resolve => setTimeout(resolve, delayMs));
+}
+
+async function sendCharacterIMessageSegmentsWithConfig(char, segments, config, accountId = getCurrentAccountId(), sourceWebhookIds = [], startIndex = 0, onProgress = null) {
+    const messages = Array.isArray(segments) ? segments.filter(Boolean) : [];
+    if (!messages.length) throw new Error('没有可发送的消息内容');
+    for (let index = startIndex; index < messages.length; index += 1) {
+        const isLast = index === messages.length - 1;
+        await sendCharacterIMessageTextWithConfig(char, messages[index], config, accountId, isLast ? sourceWebhookIds : []);
+        if (typeof onProgress === 'function') onProgress(index + 1, messages.length);
+        if (!isLast) await waitBeforeNextIMessage();
+    }
 }
 
 async function runIMessageSendAction(buttonId, task) {
@@ -22054,6 +22124,10 @@ async function generateAndSendCharacterIMessage() {
     await runIMessageSendAction('detail-imessage-ai-send', async () => {
         const char = currentChatCharId ? await db.characters.get(currentChatCharId) : null;
         if (!char) throw new Error('当前角色不存在');
+        const config = getIMessageFormConfig();
+        validateIMessageFormConfig(config, { requireBinding: true });
+        await assertIMessageSenderNotBoundElsewhere(char, config);
+        await persistIMessageFormConfig(char, config, 'connected');
         const accountId = getCurrentAccountId();
         const userChar = accountId ? await db.characters.get(parseInt(accountId)) : null;
         const history = getChatHistory(char, accountId).slice(-12).map(message => {
@@ -22062,13 +22136,10 @@ async function generateAndSendCharacterIMessage() {
         }).join('\n');
         const persona = [char.description, char.personality, char.identity?.signature, char.identity?.bio]
             .filter(Boolean).join('\n').slice(0, 4000) || '暂无详细人设';
-        const prompt = `你要以角色身份，通过 iMessage 主动给用户发送一条消息。\n\n角色：${char.nick || char.name || '角色'}\n角色人设：\n${persona}\n用户：${userChar?.name || '用户'}\n当前时间：${new Date().toLocaleString('zh-CN')}\n最近聊天：\n${history || '暂无聊天记录'}\n\n要求：\n1. 严格符合角色人设和双方关系。\n2. 像真人发 iMessage，自然简短。\n3. 不要解释，不要输出角色名或引号。\n4. 只返回一条要发送的纯文字消息，最多300字。`;
-        const generated = await callAI([
-            { role: 'system', content: prompt },
-            { role: 'user', content: '生成现在要发送的 iMessage。' }
-        ], { max_tokens: 500 });
-        const text = String(generated || '').replace(/^\s*["“]|["”]\s*$/g, '').trim().slice(0, 2000);
-        await sendCharacterIMessageText(char, text);
+        const { min, max } = getIMessageReplyCountRange(char);
+        const prompt = `你要以角色身份，通过 iMessage 主动给用户发送消息。\n\n角色：${char.nick || char.name || '角色'}\n角色人设：\n${persona}\n用户：${userChar?.name || '用户'}\n当前时间：${new Date().toLocaleString('zh-CN')}\n最近聊天：\n${history || '暂无聊天记录'}\n\n要求：\n1. 严格符合角色人设和双方关系。\n2. 像真人发 iMessage，自然简短。\n3. 不要解释，不要输出角色名、前缀、序号或引号。\n4. 必须生成 ${min} 到 ${max} 条独立短消息，并且只用 ||| 分隔每条消息。\n5. 每一段都会作为一条独立 iMessage 发送，不要把多句话挤在同一段。`;
+        const segments = await generateIMessageSegments(prompt, '直接生成现在要发送的 iMessage。', char);
+        await sendCharacterIMessageSegmentsWithConfig(char, segments, config, accountId);
     });
 }
 
@@ -22256,12 +22327,9 @@ async function buildLoopMessageAutoReply(char, accountId, batchEvents) {
     const persona = [freshChar.description, freshChar.personality, freshChar.identity?.signature, freshChar.identity?.bio]
         .filter(Boolean).join('\n').slice(0, 5000) || '暂无详细人设';
     const inboundText = batchEvents.map(event => String(event.text || '').trim()).filter(Boolean).join('\n');
-    const prompt = `你要以角色身份，通过 iMessage 回复用户刚刚发来的消息。\n\n角色：${freshChar.nick || freshChar.name || '角色'}\n角色人设：\n${persona}\n用户：${userChar?.name || '用户'}\n当前时间：${new Date().toLocaleString('zh-CN')}\n最近聊天（已经包含用户刚发来的消息）：\n${history || '暂无聊天记录'}\n\n用户本轮连续发来的消息：\n${inboundText}\n\n要求：\n1. 严格符合角色人设、双方关系和聊天上下文。\n2. 像真人回复 iMessage，自然简短，不要复述用户整段话。\n3. 不要解释任务，不要输出角色名、前缀或引号。\n4. 只返回一条纯文字回复，最多300字。`;
-    const generated = await callAI([
-        { role: 'system', content: prompt },
-        { role: 'user', content: '直接生成要发回去的 iMessage。' }
-    ], { max_tokens: 500 });
-    return String(generated || '').replace(/^\s*["“]|["”]\s*$/g, '').trim().slice(0, 2000);
+    const { min, max } = getIMessageReplyCountRange(freshChar);
+    const prompt = `你要以角色身份，通过 iMessage 回复用户刚刚发来的消息。\n\n角色：${freshChar.nick || freshChar.name || '角色'}\n角色人设：\n${persona}\n用户：${userChar?.name || '用户'}\n当前时间：${new Date().toLocaleString('zh-CN')}\n最近聊天（已经包含用户刚发来的消息）：\n${history || '暂无聊天记录'}\n\n用户本轮连续发来的消息：\n${inboundText}\n\n要求：\n1. 严格符合角色人设、双方关系和聊天上下文。\n2. 像真人回复 iMessage，自然简短，不要复述用户整段话。\n3. 不要解释任务，不要输出角色名、前缀、序号或引号。\n4. 必须生成 ${min} 到 ${max} 条独立短消息，并且只用 ||| 分隔每条消息。\n5. 每一段都会作为一条独立 iMessage 发送，不要把多句话挤在同一段。`;
+    return await generateIMessageSegments(prompt, '直接生成要发回去的 iMessage。', freshChar);
 }
 
 async function processLoopMessageConversation(key) {
@@ -22269,10 +22337,6 @@ async function processLoopMessageConversation(key) {
     if (!entry || entry.generating || entry.stopped || !entry.events.size) return;
     entry.timer = null;
     entry.generating = true;
-    const startVersion = entry.version;
-    const batchEvents = [...entry.events.values()].sort((a, b) => Number(a.receivedAt || 0) - Number(b.receivedAt || 0));
-    const batchIds = batchEvents.map(event => event.webhookId);
-    setLoopMessageAutoReplyRuntimeStatus(entry.charId, '正在调用 AI 生成回复…', 'generating', `已合并 ${batchEvents.length} 条消息，请不要关闭网页。`);
     try {
         const connectorConfig = await getStoredLoopMessageConnectorConfig();
         const char = await db.characters.get(entry.charId);
@@ -22280,25 +22344,52 @@ async function processLoopMessageConversation(key) {
         const config = getIMessageRuntimeConfig(char, entry.accountId, connectorConfig);
         if (!config.enabled || !config.autoReplyEnabled) throw new Error('这个角色的 iMessage 自动回复已关闭');
 
-        const reply = await buildLoopMessageAutoReply(char, entry.accountId, batchEvents);
-        if (!reply) throw new Error('AI 没有生成可发送的回复');
-        if (entry.version !== startVersion) {
-            console.log('[LoopMessage Inbox] AI 生成期间收到新消息，合并后重新生成');
-            setLoopMessageAutoReplyRuntimeStatus(entry.charId, '生成期间收到新消息 · 准备重新生成', 'waiting', `将按 ${entry.debounceSeconds} 秒防抖合并本轮消息。`);
-            return;
+        let activeBatch = entry.activeBatch;
+        if (!activeBatch) {
+            const startVersion = entry.version;
+            const batchEvents = [...entry.events.values()].sort((a, b) => Number(a.receivedAt || 0) - Number(b.receivedAt || 0));
+            const batchIds = batchEvents.map(event => event.webhookId);
+            setLoopMessageAutoReplyRuntimeStatus(entry.charId, '正在调用 AI 生成回复…', 'generating', `已合并 ${batchEvents.length} 条消息，请不要关闭网页。`);
+            const replies = await buildLoopMessageAutoReply(char, entry.accountId, batchEvents);
+            if (!Array.isArray(replies) || !replies.length) throw new Error('AI 没有生成可发送的回复');
+            if (entry.version !== startVersion) {
+                console.log('[LoopMessage Inbox] AI 生成期间收到新消息，合并后重新生成');
+                setLoopMessageAutoReplyRuntimeStatus(entry.charId, '生成期间收到新消息 · 准备重新生成', 'waiting', `将按 ${entry.debounceSeconds} 秒防抖合并本轮消息。`);
+                return;
+            }
+            activeBatch = {
+                webhookIds: batchIds,
+                replies,
+                nextIndex: 0
+            };
+            entry.activeBatch = activeBatch;
         }
 
-        setLoopMessageAutoReplyRuntimeStatus(entry.charId, 'AI 已生成 · 正在发送 iMessage…', 'sending', '正在通过 LoopMessage 发送，请稍候。');
-        await sendCharacterIMessageTextWithConfig(char, reply, config, entry.accountId, batchIds);
+        const total = activeBatch.replies.length;
+        setLoopMessageAutoReplyRuntimeStatus(entry.charId, `AI 已生成 · 正在发送 ${activeBatch.nextIndex + 1}/${total}`, 'sending', `会按照网站 WeChat 设置依次发送 ${total} 条 iMessage。`);
+        await sendCharacterIMessageSegmentsWithConfig(
+            char,
+            activeBatch.replies,
+            config,
+            entry.accountId,
+            activeBatch.webhookIds,
+            activeBatch.nextIndex,
+            (sentCount, messageCount) => {
+                activeBatch.nextIndex = sentCount;
+                setLoopMessageAutoReplyRuntimeStatus(entry.charId, `正在发送 iMessage · ${sentCount}/${messageCount}`, 'sending', sentCount === messageCount ? '全部消息已发出，正在确认入站事件。' : '正在发送下一条…');
+            }
+        );
         try {
-            await acknowledgeLoopMessageEvents(connectorConfig, batchIds);
+            await acknowledgeLoopMessageEvents(connectorConfig, activeBatch.webhookIds);
         } catch (ackError) {
             console.warn('[LoopMessage Inbox] 已回复，但队列确认暂时失败；下次轮询会自动去重:', ackError);
         }
-        batchIds.forEach(id => entry.events.delete(id));
+        activeBatch.webhookIds.forEach(id => entry.events.delete(id));
+        const sentCount = activeBatch.replies.length;
+        entry.activeBatch = null;
         entry.attempts = 0;
         console.log(`[LoopMessage Inbox] 已自动回复角色「${char.nick || char.name || char.id}」`);
-        setLoopMessageAutoReplyRuntimeStatus(entry.charId, '回复已发送', 'success', `${formatLoopMessageRuntimeTime()} 已成功通过 LoopMessage 发出。`);
+        setLoopMessageAutoReplyRuntimeStatus(entry.charId, `已发送 ${sentCount} 条回复`, 'success', `${formatLoopMessageRuntimeTime()} 已全部通过 LoopMessage 发出。`);
     } catch (error) {
         entry.attempts = Number(entry.attempts || 0) + 1;
         console.error('[LoopMessage Inbox] 自动回复失败:', error);
@@ -22335,6 +22426,7 @@ async function queueLoopMessageInboundForReply(route, event, accountId) {
             attempts: 0,
             stopped: false,
             generating: false,
+            activeBatch: null,
             timer: null
         };
         loopMessagePendingConversations.set(key, entry);
