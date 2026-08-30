@@ -4,7 +4,7 @@
 console.log('[SW] Service Worker loaded (纯前端模式)');
 
 // 缓存名称（更新版本号以触发CDN资源缓存）
-const CACHE_NAME = 'ins-desktop-v22';
+const CACHE_NAME = 'ins-desktop-v23';
 
 // 需要缓存的资源
 const CACHE_URLS = [
@@ -12,6 +12,8 @@ const CACHE_URLS = [
     './index.html',
     './style.css',
     './script.js',
+    './loopmessage-imessage-guide.html',
+    './LOOPMESSAGE_IMESSAGE_USER_GUIDE.md',
     './manifest.json'
 ];
 

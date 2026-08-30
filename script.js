@@ -22264,10 +22264,33 @@ async function loadIMessageAIContext(char, accountId, options = {}) {
     if (!userChar && freshChar.linked_user_id) userChar = await db.characters.get(freshChar.linked_user_id);
 
     const contextCount = Math.max(8, Math.min(40, Number(freshChar.context_message_count) || 20));
-    const historyMessages = getStoredIMessageHistory(freshChar, accountId).slice(-contextCount);
-    const history = historyMessages.map(message => {
-        const speaker = message.role === 'user' ? (userChar?.name || '用户') : (freshChar.nick || freshChar.name || '角色');
-        return `${speaker}：${String(message.content || '').replace(/<[^>]*>/g, '').slice(0, 500)}`;
+    const iMessageMessages = getStoredIMessageHistory(freshChar, accountId).slice(-contextCount);
+    const wechatMessages = getChatHistory(freshChar, accountId)
+        .filter(message => message?.channel !== 'imessage')
+        .slice(-contextCount);
+    const historyMessages = [
+        ...wechatMessages.map((message, index) => ({
+            message,
+            channel: 'WeChat',
+            order: index
+        })),
+        ...iMessageMessages.map((message, index) => ({
+            message,
+            channel: 'iMessage',
+            order: wechatMessages.length + index
+        }))
+    ].sort((left, right) => {
+        const leftTime = Number(left.message?.time || left.message?.timestamp || 0);
+        const rightTime = Number(right.message?.time || right.message?.timestamp || 0);
+        return leftTime === rightTime ? left.order - right.order : leftTime - rightTime;
+    }).slice(-contextCount);
+    const history = historyMessages.map(({ message, channel }) => {
+        const content = String(message?.content || '').replace(/<[^>]*>/g, '').slice(0, 500);
+        if (message?.role === 'system') return `[已发生事件 · ${channel}] ${content}`;
+        const speaker = message?.role === 'user'
+            ? (userChar?.name || '用户')
+            : (freshChar.nick || freshChar.name || '角色');
+        return `[${channel}] ${speaker}：${content}`;
     }).join('\n');
 
     const currentText = String(options.currentText || '').trim();
@@ -22275,7 +22298,7 @@ async function loadIMessageAIContext(char, accountId, options = {}) {
         freshChar.name,
         freshChar.nick,
         userChar?.name,
-        historyMessages.slice(-10).map(message => message.content).join(' '),
+        historyMessages.slice(-10).map(entry => entry.message?.content).join(' '),
         currentText
     ].filter(Boolean).join(' ').slice(0, 6000);
 
@@ -22300,7 +22323,9 @@ async function loadIMessageAIContext(char, accountId, options = {}) {
 
     loreContext = String(loreContext || '').slice(0, 10000);
     summaryMemoryContext = String(summaryMemoryContext || '').slice(0, 10000);
-    console.log(`[LoopMessage iMessage] 上下文已加载：最近短信 ${historyMessages.length} 条，世界书 ${loreContext ? '有' : '无'}，长期记忆 ${summaryMemoryContext ? '有' : '无'}，用户人设 ${userChar ? '有' : '无'}`);
+    const loadedWechatCount = historyMessages.filter(entry => entry.channel === 'WeChat').length;
+    const loadedIMessageCount = historyMessages.filter(entry => entry.channel === 'iMessage').length;
+    console.log(`[LoopMessage iMessage] 跨渠道上下文已加载：WeChat ${loadedWechatCount} 条，iMessage ${loadedIMessageCount} 条，世界书 ${loreContext ? '有' : '无'}，长期记忆 ${summaryMemoryContext ? '有' : '无'}，用户人设 ${userChar ? '有' : '无'}`);
 
     return {
         char: freshChar,
@@ -22425,7 +22450,7 @@ async function generateAndSendCharacterIMessage() {
         const accountId = getCurrentAccountId();
         const context = await loadIMessageAIContext(char, accountId);
         const { min, max } = getIMessageReplyCountRange(context.char);
-        const prompt = `你要以角色身份，通过 iMessage 主动给用户发送消息。\n\n【角色完整人设】\n${context.rolePersona}\n\n【对话用户人设】\n${context.userPersona}\n\n【世界书】\n${context.loreContext || '没有匹配到世界书内容'}\n\n【长期记忆】\n${context.summaryMemoryContext || '暂无长期记忆'}\n\n【最近独立 iMessage】\n${context.history || '暂无 iMessage 聊天记录'}\n\n当前时间：${new Date().toLocaleString('zh-CN')}\n\n要求：\n1. 严格符合角色人设、世界书、长期记忆和双方关系。\n2. 像真人发 iMessage，自然简短。\n3. 不要解释，不要输出角色名、前缀、序号或引号。\n4. 必须生成 ${min} 到 ${max} 条独立短消息，并且只用 ||| 分隔每条消息。\n5. 每一段都会作为一条独立 iMessage 发送，不要把多句话挤在同一段。`;
+        const prompt = `你要以角色身份，通过 iMessage 主动给用户发送消息。\n\n【角色完整人设】\n${context.rolePersona}\n\n【对话用户人设】\n${context.userPersona}\n\n【世界书】\n${context.loreContext || '没有匹配到世界书内容'}\n\n【长期记忆】\n${context.summaryMemoryContext || '暂无长期记忆'}\n\n【最近 WeChat / iMessage 跨渠道上下文】\n${context.history || '暂无最近聊天记录'}\n\n当前时间：${new Date().toLocaleString('zh-CN')}\n\n要求：\n1. 严格符合角色人设、世界书、长期记忆和双方关系。\n2. 上下文中的 [已发生事件] 是已经实际完成的行为，必须记得并承接，不要否认或重新执行。\n3. 像真人发 iMessage，自然简短。\n4. 不要解释，不要输出角色名、前缀、序号或引号。\n5. 必须生成 ${min} 到 ${max} 条独立短消息，并且只用 ||| 分隔每条消息。\n6. 每一段都会作为一条独立 iMessage 发送，不要把多句话挤在同一段。`;
         const segments = await generateIMessageSegments(prompt, '直接生成现在要发送的 iMessage。', context.char);
         await sendCharacterIMessageSegmentsWithConfig(char, segments, config, accountId);
     });
@@ -22669,7 +22694,7 @@ async function buildLoopMessageAutoReply(char, accountId, batchEvents) {
     const inboundText = batchEvents.map(event => String(event.text || '').trim()).filter(Boolean).join('\n');
     const context = await loadIMessageAIContext(char, accountId, { currentText: inboundText });
     const { min, max } = getIMessageReplyCountRange(context.char);
-    const prompt = `你要以角色身份，通过 iMessage 回复用户刚刚发来的消息。\n\n【角色完整人设】\n${context.rolePersona}\n\n【对话用户人设】\n${context.userPersona}\n\n【世界书】\n${context.loreContext || '没有匹配到世界书内容'}\n\n【长期记忆】\n${context.summaryMemoryContext || '暂无长期记忆'}\n\n【最近独立 iMessage】\n${context.history || '暂无 iMessage 聊天记录'}\n\n【用户本轮连续发来的消息】\n${inboundText}\n\n当前时间：${new Date().toLocaleString('zh-CN')}\n\n要求：\n1. 严格符合角色人设、用户人设、世界书、长期记忆和双方关系。\n2. 像真人回复 iMessage，自然简短，不要复述用户整段话。\n3. 不要解释任务，不要输出角色名、前缀、序号或引号。\n4. 必须生成 ${min} 到 ${max} 条独立短消息，并且只用 ||| 分隔每条消息。\n5. 每一段都会作为一条独立 iMessage 发送，不要把多句话挤在同一段。`;
+    const prompt = `你要以角色身份，通过 iMessage 回复用户刚刚发来的消息。\n\n【角色完整人设】\n${context.rolePersona}\n\n【对话用户人设】\n${context.userPersona}\n\n【世界书】\n${context.loreContext || '没有匹配到世界书内容'}\n\n【长期记忆】\n${context.summaryMemoryContext || '暂无长期记忆'}\n\n【最近 WeChat / iMessage 跨渠道上下文】\n${context.history || '暂无最近聊天记录'}\n\n【用户本轮连续发来的消息】\n${inboundText}\n\n当前时间：${new Date().toLocaleString('zh-CN')}\n\n要求：\n1. 严格符合角色人设、用户人设、世界书、长期记忆和双方关系。\n2. 上下文中的 [已发生事件] 是已经实际完成的行为，必须记得并承接，不要否认或重新执行。\n3. 像真人回复 iMessage，自然简短，不要复述用户整段话。\n4. 不要解释任务，不要输出角色名、前缀、序号或引号。\n5. 必须生成 ${min} 到 ${max} 条独立短消息，并且只用 ||| 分隔每条消息。\n6. 每一段都会作为一条独立 iMessage 发送，不要把多句话挤在同一段。`;
     return await generateIMessageSegments(prompt, '直接生成要发回去的 iMessage。', context.char);
 }
 

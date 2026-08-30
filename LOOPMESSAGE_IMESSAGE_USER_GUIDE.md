@@ -347,8 +347,11 @@ AI 生成期间如果又收到新消息，网站会把新消息加入本轮内�
 - 当前用户绑定的用户世界书。
 - 已启用的全局世界书。
 - 该角色已有的长期总结记忆。
+- 当前角色最近的 WeChat 聊天和其中的系统事件，例如拉黑、登录账号及解除拉黑。
 - 当前角色独立保存的最近 iMessage 聊天记录。
 - 用户这一次在防抖时间内连续发来的全部消息。
+
+最近 WeChat 与 iMessage 会按时间合并，并分别标记渠道。`[已发生事件]` 只作为 AI 的隐藏上下文，不会作为短信发送到手机。
 
 iMessage 的回复条数沿用角色在网站 WeChat 中设置的最少和最多回复条数。模型生成多段内容后，网站会逐条发成多条 iMessage。
 
@@ -568,4 +571,3 @@ Sandbox 或共享模式下，同一个接收者建议只开启一个角色的自
 - [Vercel Environment Variables](https://vercel.com/docs/environment-variables/managing-environment-variables)
 - [Upstash Redis REST API](https://upstash.com/docs/redis/features/restapi)
 - [Upstash 与 Vercel 集成](https://upstash.com/docs/redis/howto/vercelintegration)
-
