@@ -2237,7 +2237,7 @@ async function saveFinanceData(key, value) {
         }
 
         // ===== 更新公告弹窗 =====
-        const UPDATE_VERSION = 'v2026-08-25'; // 每次更新改这个版本号，就会重新弹出
+        const UPDATE_VERSION = 'v2026-08-31-imessage'; // 每次更新改这个版本号，就会重新弹出
         
         function checkUpdateNotice() {
             const readKey = 'update_notice_read_' + UPDATE_VERSION;
@@ -2257,17 +2257,11 @@ async function saveFinanceData(key, value) {
                         <div id="update-notice-title" style="font-size:19px;font-weight:700;color:#000;letter-spacing:0.5px;">更新公告</div>
                     </div>
                     <div style="padding:20px 24px 8px;font-size:13px;color:#000;line-height:1.8;letter-spacing:0.1px;overflow-y:auto;flex:1;">
-                        <div style="font-size:15px;font-weight:600;color:#000;margin-bottom:12px;">新增内容</div>
+                        <div style="font-size:15px;font-weight:600;color:#000;margin-bottom:12px;">更新</div>
                         <div>
-                            <p style="margin:0 0 10px;">1. 增加线下查岗功能</p>
-                            <p style="margin:0 0 10px;">2. 增加手机自定义功能，角色可以自己搭配桌面壁纸和图标，自动生成桌面APP（需要在个性化上传图集）。点击对应APP后，会二次生成该APP的内部内容页面，支持交互使用</p>
-                            <p style="margin:0 0 10px;">3. 增加角色自主行动功能，角色可以自主下载、卸载APP，自主打开和使用各类APP、继续游玩软件内内容</p>
-                        </div>
-                        <div style="margin-top:14px;padding-top:14px;border-top:1px solid #e8e8e8;color:#000;">
-                            <p style="margin:0 0 8px;">有bug后续随缘修复</p>
-                            <p style="margin:0 0 8px;">链接可以分享给朋友</p>
-                            <p style="margin:0 0 8px;font-weight:600;">禁止任何盈利行为，禁止付费购买</p>
-                            <p style="margin:0;">不懂代码随便做做 带着视奸目的来的倒大霉₍ᐢ..ᐢ₎ ༘♡</p>
+                            <p style="margin:0 0 12px;">现已支持角色发送真实 iMessage，该功能仅 iOS 设备可用，发送消息会产生话费，请谨慎使用。</p>
+                            <p style="margin:0 0 12px;font-weight:600;">⚠️ 注意：仅可绑定单个角色，请勿绑定多个。</p>
+                            <p style="margin:0;">❗本功能非原创，参考开源项目 Hermes，借助 Photon 实现 iMessage 通讯。</p>
                         </div>
                     </div>
                     <div style="padding:14px 24px 22px;text-align:center;">
