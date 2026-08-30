@@ -21301,7 +21301,7 @@ ${chatContext || '（没有聊天记录）'}
             document.getElementById('detail-imessage-debounce').value = Math.max(1, Math.min(60, Number(imessageConfig.debounceSeconds) || 6));
             setIMessageStatus(isLoopMessageConnector && connectorConfig.lastStatus === 'connected' ? '已连接' : '未测试', isLoopMessageConnector && connectorConfig.lastStatus === 'connected' ? 'success' : 'neutral');
             renderLoopMessageAutoReplyStatus();
-            await renderIMessageHistoryList();
+            await renderIMessageHistoryPage();
             
             // 3.5. 回显外语翻译模式设置
             document.getElementById('detail-foreign-lang-switch').checked = !!char.foreign_lang_mode;
@@ -21469,6 +21469,7 @@ ${chatContext || '（没有聊天记录）'}
         }
 
         function hideChatDetail() {
+            hideIMessageHistoryPage();
             document.getElementById('chat-detail-page').style.display = 'none';
         }
 
@@ -22057,44 +22058,59 @@ async function appendSentIMessageToChat(char, text, result, clientMessageId, acc
         sourceWebhookIds: Array.isArray(sourceWebhookIds) ? sourceWebhookIds : []
     });
     await setStoredIMessageHistory(freshChar, accountId, history);
-    if (currentChatCharId === char.id) await renderIMessageHistoryList();
+    if (currentChatCharId === char.id) await renderIMessageHistoryPage();
 }
 
-async function renderIMessageHistoryList() {
-    const list = document.getElementById('detail-imessage-history-list');
-    if (!list) return;
+function showIMessageHistoryPage() {
+    const page = document.getElementById('imessage-history-page');
+    if (!page) return;
+    page.style.display = 'flex';
+    renderIMessageHistoryPage();
+}
+
+function hideIMessageHistoryPage() {
+    const page = document.getElementById('imessage-history-page');
+    if (page) page.style.display = 'none';
+}
+
+async function renderIMessageHistoryPage() {
+    const page = document.getElementById('imessage-history-page');
+    const list = document.getElementById('imessage-history-page-body');
+    const summary = document.getElementById('imessage-history-page-summary');
+    if (!list || !summary) return;
     const charId = currentChatCharId;
     let char = charId ? await db.characters.get(charId) : null;
     if (!char) {
-        list.innerHTML = '<div style="padding:16px; text-align:center; color:#aaa; font-size:12px;">当前角色不存在</div>';
+        summary.textContent = '当前角色不存在';
+        list.innerHTML = '<div style="margin:auto; color:#aaa; font-size:13px;">当前角色不存在</div>';
         return;
     }
     const accountId = getCurrentAccountId();
     char = await migrateLegacyIMessageHistoryForCharacter(char, accountId);
-    const allMessages = getStoredIMessageHistory(char, accountId)
-        .map(message => ({ message }))
-        .reverse();
+    const allMessages = getStoredIMessageHistory(char, accountId);
+    const roleName = char.nick || char.name || '角色';
+    summary.textContent = `${roleName} · 共 ${allMessages.length} 条独立 iMessage 记录，不包含网站 WeChat`;
     if (!allMessages.length) {
-        list.innerHTML = '<div style="padding:16px; text-align:center; color:#aaa; font-size:12px;">暂无 iMessage 聊天记录</div>';
+        list.innerHTML = '<div style="margin:auto; text-align:center; color:#aaa; font-size:13px; line-height:1.8;">暂无 iMessage 聊天记录<br><span style="font-size:11px;">收到或发送消息后会显示在这里</span></div>';
         return;
     }
 
-    const visibleMessages = allMessages.slice(0, 200);
-    const roleName = escapeIMessageHistoryHtml(char.nick || char.name || '角色');
-    list.innerHTML = visibleMessages.map(({ message }) => {
+    const safeRoleName = escapeIMessageHistoryHtml(roleName);
+    list.innerHTML = allMessages.map(message => {
         const incoming = message.role === 'user';
-        const label = incoming ? '用户 → 角色' : `${roleName} → 用户`;
+        const label = incoming ? '用户' : safeRoleName;
         const time = Number(message.time) ? new Date(message.time).toLocaleString('zh-CN', { hour12: false }) : '时间未知';
         const encodedKey = encodeURIComponent(getIMessageHistoryMessageKey(message));
-        const content = escapeIMessageHistoryHtml(String(message.content || '').replace(/<[^>]*>/g, '').slice(0, 1000));
-        return `<div style="padding:9px 10px; border:1px solid #ececf1; border-radius:9px; background:${incoming ? '#fff' : '#fff5f7'};">
-            <div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">
-                <span style="flex:1; min-width:0; font-size:10px; color:${incoming ? '#666' : '#d85d75'};">${label} · ${escapeIMessageHistoryHtml(time)}</span>
-                <button type="button" onclick="deleteIMessageHistoryMessage('${encodedKey}')" style="border:none; background:none; color:#ff3b30; padding:2px 3px; font-size:11px; cursor:pointer;">删除</button>
+        const content = escapeIMessageHistoryHtml(String(message.content || '').replace(/<[^>]*>/g, ''));
+        return `<div style="display:flex; flex-direction:column; align-items:${incoming ? 'flex-start' : 'flex-end'};">
+            <div style="max-width:84%; display:flex; flex-direction:column; align-items:${incoming ? 'flex-start' : 'flex-end'};">
+                <div style="font-size:10px; color:#8e8e93; margin:0 5px 5px;">${label} · ${escapeIMessageHistoryHtml(time)}</div>
+                <div style="max-width:100%; padding:9px 12px; border-radius:${incoming ? '17px 17px 17px 5px' : '17px 17px 5px 17px'}; background:${incoming ? '#e5e5ea' : '#0a84ff'}; color:${incoming ? '#111' : '#fff'}; font-size:14px; line-height:1.45; white-space:pre-wrap; word-break:break-word; box-shadow:0 1px 1px rgba(0,0,0,.04);">${content || '[空消息]'}</div>
+                <button type="button" onclick="deleteIMessageHistoryMessage('${encodedKey}')" style="border:none; background:none; color:#ff3b30; margin-top:4px; padding:2px 5px; font-size:10px; cursor:pointer;">删除这条</button>
             </div>
-            <div style="font-size:12px; color:#333; line-height:1.5; white-space:pre-wrap; word-break:break-word;">${content || '[空消息]'}</div>
         </div>`;
-    }).join('') + (allMessages.length > 200 ? `<div style="padding:6px; text-align:center; color:#aaa; font-size:10px;">共有 ${allMessages.length} 条，仅显示最近 200 条</div>` : '');
+    }).join('');
+    if (page?.style.display !== 'none') requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
 }
 
 async function deleteIMessageHistoryMessage(encodedKey) {
@@ -22108,7 +22124,7 @@ async function deleteIMessageHistoryMessage(encodedKey) {
     const index = history.findIndex(message => getIMessageHistoryMessageKey(message) === key);
     if (index < 0) {
         showToast('⚠️ 这条 iMessage 已经不存在');
-        await renderIMessageHistoryList();
+        await renderIMessageHistoryPage();
         return;
     }
     if (!confirm('删除这一条 iMessage，并让 AI 忘记它吗？')) return;
@@ -22116,8 +22132,27 @@ async function deleteIMessageHistoryMessage(encodedKey) {
     const deletedMessages = history.splice(index, 1);
     await setStoredIMessageHistory(char, accountId, history);
     await forgetDeletedIMessageMessages(deletedMessages);
-    await renderIMessageHistoryList();
+    await renderIMessageHistoryPage();
     showToast('✅ 已删除这一条 iMessage，AI 不会再读取它');
+}
+
+async function clearAllIMessageHistory() {
+    const charId = currentChatCharId;
+    let char = charId ? await db.characters.get(charId) : null;
+    if (!char) return;
+    const accountId = getCurrentAccountId();
+    char = await migrateLegacyIMessageHistoryForCharacter(char, accountId);
+    const history = [...getStoredIMessageHistory(char, accountId)];
+    if (!history.length) {
+        showToast('暂无可清除的 iMessage 记录');
+        return;
+    }
+    if (!confirm(`确定清除全部 ${history.length} 条 iMessage 记录吗？\n\n这只会清除当前角色的 iMessage，不会影响网站 WeChat。清除后 AI 将不再读取这些内容。`)) return;
+
+    await setStoredIMessageHistory(char, accountId, []);
+    await forgetDeletedIMessageMessages(history);
+    await renderIMessageHistoryPage();
+    showToast(`✅ 已清除 ${history.length} 条 iMessage 记录`);
 }
 
 async function sendCharacterIMessageText(char, text) {
@@ -22131,10 +22166,27 @@ async function sendCharacterIMessageText(char, text) {
     return await sendCharacterIMessageTextWithConfig(char, text, config, getCurrentAccountId());
 }
 
+const IMESSAGE_CONTROL_SECTION_PATTERN = /\[(?:CALL|SMS|IMESSAGE|FRIEND_REQUEST|UNBLOCK_SELF|SEND_AS_USER|SEND_AFTER_UNBLOCK)\]/i;
+const IMESSAGE_INLINE_CONTROL_PATTERN = /\[(?:CALL|SMS|IMESSAGE|FRIEND_REQUEST|UNBLOCK_SELF|SEND_AS_USER|SEND_AFTER_UNBLOCK)(?::[^\]\r\n]*)?\]/gi;
+
+function sanitizeIMessageVisibleText(value) {
+    let text = String(value || '').replace(/\r\n/g, '\n').trim();
+    const sectionMatch = text.match(IMESSAGE_CONTROL_SECTION_PATTERN);
+    if (sectionMatch?.index !== undefined) text = text.slice(0, sectionMatch.index);
+    text = text
+        .replace(IMESSAGE_INLINE_CONTROL_PATTERN, '')
+        .replace(/\(\([A-Z][A-Z0-9_]*(?::[^)]*)?\)\)/g, '')
+        .replace(/^\s*(?:messages|count|interval|reason|password)\s*:\s*.*$/gim, '')
+        .replace(/^\s*[-*]\s*(?=\s*$)/gm, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    return text;
+}
+
 async function sendCharacterIMessageTextWithConfig(char, text, config, accountId = getCurrentAccountId(), sourceWebhookIds = []) {
     validateIMessageFormConfig(config, { requireBinding: true });
 
-    const cleanText = String(text || '').replace(/\s*\|\|\|\s*/g, ' ').trim();
+    const cleanText = sanitizeIMessageVisibleText(String(text || '').replace(/\s*\|\|\|\s*/g, ' '));
     if (!cleanText) throw new Error('没有可发送的消息内容');
     if (cleanText.length > 2000) throw new Error('iMessage 文字不能超过 2000 个字符');
 
@@ -22156,6 +22208,109 @@ function getIMessageReplyCountRange(char) {
     const min = Math.max(1, Math.min(50, parseInt(char?.reply_min_count, 10) || 1));
     const configuredMax = Math.max(1, Math.min(50, parseInt(char?.reply_max_count, 10) || 3));
     return { min, max: Math.max(min, configuredMax) };
+}
+
+function getIMessageLorebookIds(...characters) {
+    const ids = [];
+    characters.filter(Boolean).forEach(character => {
+        const candidates = [
+            ...(Array.isArray(character.lorebookIds) ? character.lorebookIds : []),
+            ...(Array.isArray(character.mounted_lorebooks) ? character.mounted_lorebooks : []),
+            character.lorebookId
+        ];
+        candidates.filter(id => id !== null && id !== undefined && id !== '').forEach(id => {
+            if (!ids.some(existing => String(existing) === String(id))) ids.push(id);
+        });
+    });
+    return ids;
+}
+
+function buildIMessageRolePersona(char) {
+    const relationships = Array.isArray(char?.relationships)
+        ? char.relationships.map(item => {
+            const target = item?.targetName || item?.name || '某人';
+            const relation = item?.relation || item?.type || '关系未知';
+            return `${target}（${relation}）${item?.desc ? `：${item.desc}` : ''}`;
+        }).filter(Boolean).join('\n')
+        : '';
+    return [
+        `名字：${char?.name || '角色'}`,
+        char?.nick ? `昵称：${char.nick}` : '',
+        char?.wx_nickname ? `社交昵称：${char.wx_nickname}` : '',
+        `核心设定：${char?.description || char?.desc || '暂无详细设定'}`,
+        char?.personality ? `性格：${char.personality}` : '',
+        char?.identity?.bio ? `个人简介：${char.identity.bio}` : '',
+        char?.identity?.signature ? `签名：${char.identity.signature}` : '',
+        relationships ? `重要人物与关系：\n${relationships}` : ''
+    ].filter(Boolean).join('\n').slice(0, 7000);
+}
+
+function buildIMessageUserPersona(userChar) {
+    if (!userChar) return '名字：用户\n暂无更详细的用户设定';
+    return [
+        `名字：${userChar.name || '用户'}`,
+        userChar.nick ? `昵称：${userChar.nick}` : '',
+        `设定：${userChar.description || userChar.desc || '暂无详细设定'}`,
+        userChar.personality ? `性格：${userChar.personality}` : '',
+        userChar.identity?.bio ? `个人简介：${userChar.identity.bio}` : '',
+        userChar.identity?.signature ? `签名：${userChar.identity.signature}` : ''
+    ].filter(Boolean).join('\n').slice(0, 4000);
+}
+
+async function loadIMessageAIContext(char, accountId, options = {}) {
+    const freshChar = await migrateLegacyIMessageHistoryForCharacter(char, accountId);
+    const parsedAccountId = Number.parseInt(accountId, 10);
+    let userChar = Number.isFinite(parsedAccountId) ? await db.characters.get(parsedAccountId) : null;
+    if (!userChar && freshChar.linked_user_id) userChar = await db.characters.get(freshChar.linked_user_id);
+
+    const contextCount = Math.max(8, Math.min(40, Number(freshChar.context_message_count) || 20));
+    const historyMessages = getStoredIMessageHistory(freshChar, accountId).slice(-contextCount);
+    const history = historyMessages.map(message => {
+        const speaker = message.role === 'user' ? (userChar?.name || '用户') : (freshChar.nick || freshChar.name || '角色');
+        return `${speaker}：${String(message.content || '').replace(/<[^>]*>/g, '').slice(0, 500)}`;
+    }).join('\n');
+
+    const currentText = String(options.currentText || '').trim();
+    const keywordText = [
+        freshChar.name,
+        freshChar.nick,
+        userChar?.name,
+        historyMessages.slice(-10).map(message => message.content).join(' '),
+        currentText
+    ].filter(Boolean).join(' ').slice(0, 6000);
+
+    let loreContext = '';
+    try {
+        if (typeof getLorebookContext === 'function') {
+            const lorebookIds = getIMessageLorebookIds(freshChar, userChar);
+            loreContext = await getLorebookContext(lorebookIds, keywordText);
+        }
+    } catch (error) {
+        console.warn('[LoopMessage iMessage] 世界书读取失败，继续使用其他上下文:', error);
+    }
+
+    let summaryMemoryContext = '';
+    try {
+        if (typeof getSummaryMemoryContext === 'function') {
+            summaryMemoryContext = await getSummaryMemoryContext('private', freshChar.id, accountId);
+        }
+    } catch (error) {
+        console.warn('[LoopMessage iMessage] 长期记忆读取失败，继续使用其他上下文:', error);
+    }
+
+    loreContext = String(loreContext || '').slice(0, 10000);
+    summaryMemoryContext = String(summaryMemoryContext || '').slice(0, 10000);
+    console.log(`[LoopMessage iMessage] 上下文已加载：最近短信 ${historyMessages.length} 条，世界书 ${loreContext ? '有' : '无'}，长期记忆 ${summaryMemoryContext ? '有' : '无'}，用户人设 ${userChar ? '有' : '无'}`);
+
+    return {
+        char: freshChar,
+        userChar,
+        rolePersona: buildIMessageRolePersona(freshChar),
+        userPersona: buildIMessageUserPersona(userChar),
+        history,
+        loreContext,
+        summaryMemoryContext
+    };
 }
 
 function parseIMessageReplySegments(rawReply, minCount, maxCount) {
@@ -22193,14 +22348,14 @@ async function generateIMessageSegments(prompt, userPrompt, char) {
         { role: 'system', content: prompt },
         { role: 'user', content: userPrompt }
     ], { max_tokens: maxTokens });
-    let segments = parseIMessageReplySegments(generated, min, max);
+    let segments = parseIMessageReplySegments(generated, min, max).map(sanitizeIMessageVisibleText).filter(Boolean);
 
     if (segments.length < min) {
         generated = await callAI([
             { role: 'system', content: prompt },
             { role: 'user', content: `${userPrompt}\n上一次只生成了 ${segments.length} 条，不符合要求。请重新生成，必须是 ${min} 到 ${max} 条，并用 ||| 分隔。` }
         ], { max_tokens: maxTokens });
-        segments = parseIMessageReplySegments(generated, min, max);
+        segments = parseIMessageReplySegments(generated, min, max).map(sanitizeIMessageVisibleText).filter(Boolean);
     }
     if (segments.length < min) throw new Error(`AI 只生成了 ${segments.length} 条消息，少于角色设置的最少 ${min} 条`);
     return segments.slice(0, max);
@@ -22211,7 +22366,7 @@ function waitBeforeNextIMessage(delayMs = 650) {
 }
 
 async function sendCharacterIMessageSegmentsWithConfig(char, segments, config, accountId = getCurrentAccountId(), sourceWebhookIds = [], startIndex = 0, onProgress = null, shouldContinue = null) {
-    const messages = Array.isArray(segments) ? segments.filter(Boolean) : [];
+    const messages = Array.isArray(segments) ? segments.map(sanitizeIMessageVisibleText).filter(Boolean) : [];
     if (!messages.length) throw new Error('没有可发送的消息内容');
     for (let index = startIndex; index < messages.length; index += 1) {
         if (typeof shouldContinue === 'function' && !shouldContinue()) {
@@ -22268,17 +22423,10 @@ async function generateAndSendCharacterIMessage() {
         await assertIMessageSenderNotBoundElsewhere(char, config);
         await persistIMessageFormConfig(char, config, 'connected');
         const accountId = getCurrentAccountId();
-        const userChar = accountId ? await db.characters.get(parseInt(accountId)) : null;
-        const historyChar = await migrateLegacyIMessageHistoryForCharacter(char, accountId);
-        const history = getStoredIMessageHistory(historyChar, accountId).slice(-12).map(message => {
-            const speaker = message.role === 'user' ? (userChar?.name || '用户') : (char.nick || char.name || '角色');
-            return `${speaker}：${String(message.content || '').replace(/<[^>]*>/g, '').slice(0, 300)}`;
-        }).join('\n');
-        const persona = [char.description, char.personality, char.identity?.signature, char.identity?.bio]
-            .filter(Boolean).join('\n').slice(0, 4000) || '暂无详细人设';
-        const { min, max } = getIMessageReplyCountRange(char);
-        const prompt = `你要以角色身份，通过 iMessage 主动给用户发送消息。\n\n角色：${char.nick || char.name || '角色'}\n角色人设：\n${persona}\n用户：${userChar?.name || '用户'}\n当前时间：${new Date().toLocaleString('zh-CN')}\n最近聊天：\n${history || '暂无聊天记录'}\n\n要求：\n1. 严格符合角色人设和双方关系。\n2. 像真人发 iMessage，自然简短。\n3. 不要解释，不要输出角色名、前缀、序号或引号。\n4. 必须生成 ${min} 到 ${max} 条独立短消息，并且只用 ||| 分隔每条消息。\n5. 每一段都会作为一条独立 iMessage 发送，不要把多句话挤在同一段。`;
-        const segments = await generateIMessageSegments(prompt, '直接生成现在要发送的 iMessage。', char);
+        const context = await loadIMessageAIContext(char, accountId);
+        const { min, max } = getIMessageReplyCountRange(context.char);
+        const prompt = `你要以角色身份，通过 iMessage 主动给用户发送消息。\n\n【角色完整人设】\n${context.rolePersona}\n\n【对话用户人设】\n${context.userPersona}\n\n【世界书】\n${context.loreContext || '没有匹配到世界书内容'}\n\n【长期记忆】\n${context.summaryMemoryContext || '暂无长期记忆'}\n\n【最近独立 iMessage】\n${context.history || '暂无 iMessage 聊天记录'}\n\n当前时间：${new Date().toLocaleString('zh-CN')}\n\n要求：\n1. 严格符合角色人设、世界书、长期记忆和双方关系。\n2. 像真人发 iMessage，自然简短。\n3. 不要解释，不要输出角色名、前缀、序号或引号。\n4. 必须生成 ${min} 到 ${max} 条独立短消息，并且只用 ||| 分隔每条消息。\n5. 每一段都会作为一条独立 iMessage 发送，不要把多句话挤在同一段。`;
+        const segments = await generateIMessageSegments(prompt, '直接生成现在要发送的 iMessage。', context.char);
         await sendCharacterIMessageSegmentsWithConfig(char, segments, config, accountId);
     });
 }
@@ -22288,8 +22436,11 @@ window.sendIMessageTest = sendIMessageTest;
 window.generateAndSendCharacterIMessage = generateAndSendCharacterIMessage;
 window.copyIMessageWebhookUrl = copyIMessageWebhookUrl;
 window.copyIMessageWebhookAuth = copyIMessageWebhookAuth;
-window.renderIMessageHistoryList = renderIMessageHistoryList;
+window.showIMessageHistoryPage = showIMessageHistoryPage;
+window.hideIMessageHistoryPage = hideIMessageHistoryPage;
+window.renderIMessageHistoryPage = renderIMessageHistoryPage;
 window.deleteIMessageHistoryMessage = deleteIMessageHistoryMessage;
+window.clearAllIMessageHistory = clearAllIMessageHistory;
 
 // ==================== LoopMessage 入站自动回复（网页在线模式） ====================
 const loopMessagePendingConversations = new Map();
@@ -22381,6 +22532,22 @@ function getIMessageRuntimeConfig(char, accountId, connectorConfig) {
     };
 }
 
+async function sendBlockedContactRealIMessage(char, accountId, messages) {
+    const visibleMessages = (messages || []).map(sanitizeIMessageVisibleText).filter(Boolean);
+    if (!visibleMessages.length) return 0;
+
+    const connectorConfig = await getStoredLoopMessageConnectorConfig();
+    if (!connectorConfig) throw new Error('角色已开启真实 iMessage，但连接器地址或访问密钥没有保存');
+    const config = getIMessageRuntimeConfig(char, accountId, connectorConfig);
+    validateIMessageFormConfig(config, { requireBinding: true });
+    await assertIMessageSenderNotBoundElsewhere(char, config);
+
+    setLoopMessageAutoReplyRuntimeStatus(char.id, '拉黑剧情 · 正在发送真实 iMessage', 'sending', `共 ${visibleMessages.length} 条；控制指令不会发送到手机。`);
+    await sendCharacterIMessageSegmentsWithConfig(char, visibleMessages, config, accountId);
+    setLoopMessageAutoReplyRuntimeStatus(char.id, '拉黑剧情 · 真实 iMessage 已发送', 'success', `已发送 ${visibleMessages.length} 条，记录已写入独立 iMessage 上下文。`);
+    return visibleMessages.length;
+}
+
 async function findCharacterForLoopMessageInbound(event, accountId, connectorConfig) {
     const contact = normalizeIMessageRecipient(event.contact);
     const sender = String(event.sender || '').trim();
@@ -22425,7 +22592,7 @@ async function appendInboundIMessageToChat(char, event, accountId) {
         providerSenderId: event.sender || null
     });
     await setStoredIMessageHistory(freshChar, accountId, history);
-    if (currentChatCharId === char.id) await renderIMessageHistoryList();
+    if (currentChatCharId === char.id) await renderIMessageHistoryPage();
     return true;
 }
 
@@ -22499,19 +22666,11 @@ function scheduleLoopMessageConversation(entry, minimumDelay = 150) {
 }
 
 async function buildLoopMessageAutoReply(char, accountId, batchEvents) {
-    const freshChar = await migrateLegacyIMessageHistoryForCharacter(char, accountId);
-    const userChar = accountId ? await db.characters.get(parseInt(accountId)) : null;
-    const contextCount = Math.max(8, Math.min(40, Number(freshChar.context_message_count) || 20));
-    const history = getStoredIMessageHistory(freshChar, accountId).slice(-contextCount).map(message => {
-        const speaker = message.role === 'user' ? (userChar?.name || '用户') : (freshChar.nick || freshChar.name || '角色');
-        return `${speaker}：${String(message.content || '').replace(/<[^>]*>/g, '').slice(0, 500)}`;
-    }).join('\n');
-    const persona = [freshChar.description, freshChar.personality, freshChar.identity?.signature, freshChar.identity?.bio]
-        .filter(Boolean).join('\n').slice(0, 5000) || '暂无详细人设';
     const inboundText = batchEvents.map(event => String(event.text || '').trim()).filter(Boolean).join('\n');
-    const { min, max } = getIMessageReplyCountRange(freshChar);
-    const prompt = `你要以角色身份，通过 iMessage 回复用户刚刚发来的消息。\n\n角色：${freshChar.nick || freshChar.name || '角色'}\n角色人设：\n${persona}\n用户：${userChar?.name || '用户'}\n当前时间：${new Date().toLocaleString('zh-CN')}\n最近聊天（已经包含用户刚发来的消息）：\n${history || '暂无聊天记录'}\n\n用户本轮连续发来的消息：\n${inboundText}\n\n要求：\n1. 严格符合角色人设、双方关系和聊天上下文。\n2. 像真人回复 iMessage，自然简短，不要复述用户整段话。\n3. 不要解释任务，不要输出角色名、前缀、序号或引号。\n4. 必须生成 ${min} 到 ${max} 条独立短消息，并且只用 ||| 分隔每条消息。\n5. 每一段都会作为一条独立 iMessage 发送，不要把多句话挤在同一段。`;
-    return await generateIMessageSegments(prompt, '直接生成要发回去的 iMessage。', freshChar);
+    const context = await loadIMessageAIContext(char, accountId, { currentText: inboundText });
+    const { min, max } = getIMessageReplyCountRange(context.char);
+    const prompt = `你要以角色身份，通过 iMessage 回复用户刚刚发来的消息。\n\n【角色完整人设】\n${context.rolePersona}\n\n【对话用户人设】\n${context.userPersona}\n\n【世界书】\n${context.loreContext || '没有匹配到世界书内容'}\n\n【长期记忆】\n${context.summaryMemoryContext || '暂无长期记忆'}\n\n【最近独立 iMessage】\n${context.history || '暂无 iMessage 聊天记录'}\n\n【用户本轮连续发来的消息】\n${inboundText}\n\n当前时间：${new Date().toLocaleString('zh-CN')}\n\n要求：\n1. 严格符合角色人设、用户人设、世界书、长期记忆和双方关系。\n2. 像真人回复 iMessage，自然简短，不要复述用户整段话。\n3. 不要解释任务，不要输出角色名、前缀、序号或引号。\n4. 必须生成 ${min} 到 ${max} 条独立短消息，并且只用 ||| 分隔每条消息。\n5. 每一段都会作为一条独立 iMessage 发送，不要把多句话挤在同一段。`;
+    return await generateIMessageSegments(prompt, '直接生成要发回去的 iMessage。', context.char);
 }
 
 async function processLoopMessageConversation(key) {
@@ -33108,26 +33267,40 @@ ${wishBlock}
                             }
                             notificationDelay += callTimes.length * 500;
                         } else if (action.type === 'SMS') {
-                            const messages = action.params.messages || [];
+                            const messages = (action.params.messages || []).map(sanitizeIMessageVisibleText).filter(Boolean);
                             console.log(`[BlockedContact] 生成 ${messages.length} 条短信`);
-                            
-                            // 每条短信在时间段内随机分布
-                            const smsTimes = [];
-                            for (let i = 0; i < messages.length; i++) {
-                                const randomTime = actionBaseTime + Math.random() * elapsedMs;
-                                smsTimes.push({ time: randomTime, content: messages[i] });
-                            }
-                            // 按时间排序
-                            smsTimes.sort((a, b) => a.time - b.time);
-                            
-                            // 创建短信记录
-                            for (const sms of smsTimes) {
-                                await createBlockedMessageRecord(char, myChar, accountId, sms.time, sms.content);
-                            }
-                            
-                            // 🎯 将所有短信通知加入队列，队列系统会确保一条一条显示
-                            for (let i = 0; i < smsTimes.length; i++) {
-                                showBlockedSmsNotification(char, smsTimes[i].content, smsTimes[i].time);
+                            const imessageBinding = getCharacterIMessageConfig(char, accountId);
+
+                            if (imessageBinding.enabled) {
+                                // 开启真实 iMessage 后只走 LoopMessage，不再写入网站假短信。
+                                // action 标签已经由解析器消费，正文还会经过第二次控制指令过滤。
+                                try {
+                                    const sentCount = await sendBlockedContactRealIMessage(char, accountId, messages);
+                                    if (sentCount > 0) {
+                                        showToast(`📱 ${char.name} 已发送 ${sentCount} 条真实 iMessage`, 4000);
+                                    }
+                                } catch (error) {
+                                    setLoopMessageAutoReplyRuntimeStatus(char.id, '拉黑剧情 · 真实 iMessage 发送失败', 'error', error.message || '未知错误');
+                                    showToast(`❌ ${char.name} 的真实 iMessage 发送失败：${error.message || '未知错误'}`, 6000);
+                                    throw error;
+                                }
+                            } else {
+                                // 未开启真实 iMessage 时保留原来的网站假短信行为。
+                                const smsTimes = [];
+                                for (let i = 0; i < messages.length; i++) {
+                                    const randomTime = actionBaseTime + Math.random() * elapsedMs;
+                                    smsTimes.push({ time: randomTime, content: messages[i] });
+                                }
+                                smsTimes.sort((a, b) => a.time - b.time);
+
+                                for (const sms of smsTimes) {
+                                    await createBlockedMessageRecord(char, myChar, accountId, sms.time, sms.content);
+                                }
+
+                                // 🎯 将所有短信通知加入队列，队列系统会确保一条一条显示
+                                for (let i = 0; i < smsTimes.length; i++) {
+                                    showBlockedSmsNotification(char, smsTimes[i].content, smsTimes[i].time);
+                                }
                             }
                         } else if (action.type === 'FRIEND_REQUEST') {
                             const message = action.params.message || '';
@@ -33461,9 +33634,18 @@ ${wishBlock}
                 const role = sms.type === 'sent' ? myChar.name : char.name;
                 return `[短信] ${role}: ${sms.content}`;
             });
+
+            // 真实 iMessage 开启后，后续快进必须记得已经发到手机的内容，避免重复轰炸。
+            const rawRecentRealIMessage = getStoredIMessageHistory(char, accountId).slice(-contextCount);
+            const recentRealIMessage = rawRecentRealIMessage.map(message => {
+                const role = message.role === 'user' ? myChar.name : char.name;
+                return `[真实 iMessage] ${role}: ${String(message.content || '').replace(/<[^>]*>/g, '')}`;
+            });
+            const hasPriorPhoneMessages = recentSms.length > 0 || recentRealIMessage.length > 0;
+            const hasRealIMessageUserReply = rawRecentRealIMessage.some(message => message.role === 'user');
             
-            // 3. 合并所有历史消息（微信 + 短信），按照上下文条数截取
-            const allMessages = [...wechatMessages, ...recentSms].slice(-contextCount);
+            // 3. 合并所有历史消息（微信 + 网站短信 + 真实 iMessage），按照上下文条数截取
+            const allMessages = [...wechatMessages, ...recentSms, ...recentRealIMessage].slice(-contextCount);
             const recentMessages = allMessages.join('\n');
             
             // 4. 获取总结记忆
@@ -33478,17 +33660,17 @@ ${wishBlock}
             console.log(`[BlockedContact] ${char.name} 的上下文消息数:`, allMessages.length);
             console.log(`[BlockedContact]   - 微信消息: ${wechatMessages.length} 条`);
             console.log(`[BlockedContact]   - 短信消息: ${recentSms.length} 条`);
+            console.log(`[BlockedContact]   - 真实 iMessage: ${recentRealIMessage.length} 条`);
             console.log(`[BlockedContact]   - 总结记忆: ${summaryMemoryContext ? '✅已包含' : '❌未包含'}`);
             
             // 5. 获取世界书上下文
             let loreContext = '';
             try {
-                const lorebookIds = [...(char.mounted_lorebooks || []), ...(myChar.mounted_lorebooks || [])];
-                if (lorebookIds.length > 0) {
-                    loreContext = await getLorebookContext(lorebookIds, `${char.name} ${myChar.name}`);
-                    if (loreContext) {
-                        console.log(`[BlockedContact] ${char.name} 世界书已加载`);
-                    }
+                const lorebookIds = getIMessageLorebookIds(char, myChar);
+                // 即使没有角色挂载也要调用，getLorebookContext 会自动加入全局世界书。
+                loreContext = await getLorebookContext(lorebookIds, `${char.name} ${myChar.name} ${allMessages.slice(-10).join(' ')}`);
+                if (loreContext) {
+                    console.log(`[BlockedContact] ${char.name} 世界书已加载`);
                 }
             } catch (e) {
                 console.warn(`[BlockedContact] ${char.name} 世界书加载失败:`, e);
@@ -33585,28 +33767,30 @@ ${summaryMemoryContext}
 ` : ''}【完整的聊天历史记录】
 ${recentMessages || '（无记录）'}
 
-${recentSms.length > 0 ? `
-⚠️ 重要提示：上面的【短信】记录是你之前已经发送过的！
+${hasPriorPhoneMessages ? `
+⚠️ 重要提示：上面的【短信/真实 iMessage】记录是你们之前已经发送过的！
 你需要基于这些已发送的短信，考虑：
-- 对方依然没有回应你
+- ${hasRealIMessageUserReply ? '对方已经通过真实 iMessage 回应过你，要接着最新内容和情绪发展' : '对方依然没有回应你'}
 - 你的情绪如何进一步发展？
 - 现在又过去了 ${elapsedText}，你会做什么？
 ` : ''}
 
 【当前情境】
-你${recentSms.length > 0 ? '之前' : '突然'}发现自己被「${myChar.name}」拉黑了！
+你${hasPriorPhoneMessages ? '之前' : '突然'}发现自己被「${myChar.name}」拉黑了！
 微信消息发不出去，好友申请石沉大海，对方彻底将你屏蔽。
-${recentSms.length > 0 ? `在之前的时间里，你已经尝试联系过对方（见上面的【短信】记录），但依然没有任何回应。` : ''}
+${hasPriorPhoneMessages ? (hasRealIMessageUserReply ? `你们之后已经通过真实 iMessage 有过交流（见上面的记录），必须承接对方最新的回复。` : `在之前的时间里，你已经尝试联系过对方（见上面的【短信/真实 iMessage】记录），但依然没有任何回应。`) : ''}
 现在又过去了 ${elapsedText}。
 
 【你需要思考】
-1. ${recentSms.length > 0 ? '对方还是不回应你，你现在的心态有什么变化？' : '以你的性格，被这个人拉黑后会有什么反应？'}
-2. ${recentSms.length > 0 ? '你会继续联系？还是放弃了？情绪会从之前的状态如何转变？' : '你会感到愤怒？悲伤？不甘？困惑？绝望？释然？还是其他情绪？'}
-3. ${recentSms.length > 0 ? '如果继续联系，你的语气和内容会和之前有什么不同？' : '你会选择疯狂打电话？发短信质问？冷静等待？还是直接放弃？'}
+1. ${hasRealIMessageUserReply ? '对方已经在真实 iMessage 回应你，你现在的心态和关系有什么变化？' : (hasPriorPhoneMessages ? '对方还是不回应你，你现在的心态有什么变化？' : '以你的性格，被这个人拉黑后会有什么反应？')}
+2. ${hasPriorPhoneMessages ? '你会继续联系？还是放弃了？情绪会从之前的状态如何转变？' : '你会感到愤怒？悲伤？不甘？困惑？绝望？释然？还是其他情绪？'}
+3. ${hasPriorPhoneMessages ? '如果继续联系，你的语气和内容会和之前有什么不同？' : '你会选择疯狂打电话？发短信质问？冷静等待？还是直接放弃？'}
 4. 随着时间推移和对方的持续不回应，你的情绪应该有明显的变化和层次（比如从愤怒到悲伤，从质问到哀求，从不甘到释然，或者从哀求到愤怒...）
 
 【输出要求】
 根据你的性格和与对方的关系，决定是否会通过电话/短信联系对方，或者用小号加对方好友。
+
+所有方括号指令都是给网站程序执行的隐藏控制指令，必须单独成行，绝对不要把指令、字段名或参数写进 messages 的短信正文。程序只会把 messages 下的自然语言正文发送给对方。
 
 如果你会联系，按以下格式输出：
 
@@ -33631,7 +33815,7 @@ message: 好友申请附言（可选，如果不写则使用默认附言）
 - 符合你的人设和说话风格，用你平时的语气
 - 可以有错别字、语气词、表情符号，更真实
 - 如果关系亲密，可以更激烈；如果关系一般，可以更克制
-${recentSms.length > 0 ? `- ⚠️ 重要：不要重复上面【短信】中已经发送过的内容！要基于之前的短信继续推进情绪和对话，展现情绪的变化和发展` : ''}
+${hasPriorPhoneMessages ? `- ⚠️ 重要：不要重复上面【短信/真实 iMessage】中已经发送过的内容！要基于之前的内容继续推进情绪和对话，展现情绪的变化和发展` : ''}
 
 【小号加好友说明】
 - 如果你决定用小号加对方好友，可以添加[FRIEND_REQUEST]指令

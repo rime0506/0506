@@ -3131,18 +3131,15 @@
                     <button type="button" id="detail-imessage-test-send" onclick="sendIMessageTest()" style="border:none; border-radius:8px; padding:11px 8px; background:#f2f2f7; color:#333; font-size:13px; cursor:pointer;">发送测试文字</button>
                     <button type="button" id="detail-imessage-ai-send" onclick="generateAndSendCharacterIMessage()" style="border:none; border-radius:8px; padding:11px 8px; background:#ffb6c1; color:#fff; font-size:13px; cursor:pointer;">AI生成并发送</button>
                 </div>
-                <div class="detail-item" style="flex-direction:column; align-items:stretch; gap:8px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <div>
-                            <div>iMessage 聊天记录</div>
-                            <div style="font-size:11px; color:#999; margin-top:3px;">独立保存，不会显示在网站 WeChat；这里只提供给 iMessage AI</div>
-                        </div>
-                        <button type="button" onclick="renderIMessageHistoryList()" style="border:none; border-radius:7px; padding:6px 9px; background:#f2f2f7; color:#555; font-size:11px; cursor:pointer;">刷新</button>
+                <div class="detail-item" onclick="showIMessageHistoryPage()" style="cursor:pointer;">
+                    <div style="flex:1; min-width:0;">
+                        <div>iMessage 聊天记录</div>
+                        <div style="font-size:11px; color:#999; margin-top:3px;">进入独立页面预览、逐条删除或全部清除</div>
                     </div>
-                    <div id="detail-imessage-history-list" style="max-height:280px; overflow-y:auto; display:flex; flex-direction:column; gap:7px;">
-                        <div style="padding:16px; text-align:center; color:#aaa; font-size:12px;">暂无 iMessage 聊天记录</div>
+                    <div style="display:flex; align-items:center; gap:5px; color:#999; font-size:13px;">
+                        <span>查看记录</span>
+                        <span class="detail-arrow">›</span>
                     </div>
-                    <div style="font-size:10px; color:#999; line-height:1.5;">逐条删除只会忘记选中的记录，不会清空 WeChat 或其他 iMessage。尚未处理的入站消息也会同步从队列移除。</div>
                 </div>
                 <div style="padding:0 16px 14px; font-size:11px; color:#999; line-height:1.6;">
                     <details>
@@ -3668,6 +3665,24 @@
             <div style="padding:0 20px 20px; text-align:center;">
                 <button onclick="blockFriendConfirm()" style="color:#ff3b30; background:none; border:none; font-size:16px; font-weight:600;">拉黑好友</button>
             </div>
+        </div>
+    </div>
+
+    <!-- iMessage 独立聊天记录页 -->
+    <div class="chat-detail-page" id="imessage-history-page" style="display:none; z-index:430; background:#f2f2f7;">
+        <div class="wechat-header" style="background:#fff; flex:0 0 auto;">
+            <div class="back-btn" onclick="hideIMessageHistoryPage()" style="margin:0; background:none; width:72px; justify-content:flex-start; padding-left:0; color:var(--ins-text);">
+                <svg class="svg-icon" viewBox="0 0 24 24" style="width:28px; height:28px;"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </div>
+            <div class="wechat-title" style="white-space:nowrap;">iMessage 记录</div>
+            <button type="button" onclick="clearAllIMessageHistory()" style="width:72px; border:none; background:none; color:#ff3b30; font-size:13px; text-align:right; padding:0; cursor:pointer;">全部清除</button>
+        </div>
+        <div style="padding:10px 12px; background:#fff; border-top:1px solid #f4f4f4; border-bottom:1px solid #e5e5ea; display:flex; align-items:center; gap:10px; flex:0 0 auto;">
+            <div id="imessage-history-page-summary" style="flex:1; min-width:0; font-size:11px; color:#8e8e93; line-height:1.5;">正在读取记录…</div>
+            <button type="button" onclick="renderIMessageHistoryPage()" style="border:none; border-radius:8px; padding:6px 10px; background:#f2f2f7; color:#555; font-size:12px; cursor:pointer;">刷新</button>
+        </div>
+        <div id="imessage-history-page-body" style="flex:1; min-height:0; overflow-y:auto; padding:18px 12px 28px; display:flex; flex-direction:column; gap:14px;">
+            <div style="margin:auto; color:#aaa; font-size:13px;">暂无 iMessage 聊天记录</div>
         </div>
     </div>
 
@@ -8677,7 +8692,7 @@
     <script src="xianyu.js"></script>
     <!-- 小屋功能 JS（独立文件） -->
     <script src="cabin.js"></script>
-    <script src="script.js?v=7.3" defer></script>
+    <script src="script.js?v=7.6" defer></script>
     
 
 </body>
