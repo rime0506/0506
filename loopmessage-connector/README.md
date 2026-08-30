@@ -2,6 +2,8 @@
 
 这是给网站用户自行部署的 LoopMessage iMessage 连接器。每位用户使用自己的 LoopMessage、GitHub 和 Vercel 账号；网站前端不会接触 LoopMessage Organization API Key。
 
+第一次配置请先阅读仓库根目录的 [LoopMessage iMessage 完整配置教程](../LOOPMESSAGE_IMESSAGE_USER_GUIDE.md)。
+
 ## 一键部署
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Frime0506%2F0506&root-directory=loopmessage-connector&project-name=loopmessage-connector&repository-name=loopmessage-connector&env=LOOPMESSAGE_API_KEY%2CCONNECTOR_ACCESS_KEY%2CALLOWED_ORIGIN%2CUPSTASH_REDIS_REST_URL%2CUPSTASH_REDIS_REST_TOKEN&envDescription=%E5%A1%AB%E5%86%99%20LoopMessage%20API%20Key%E3%80%81%E8%BF%9E%E6%8E%A5%E5%99%A8%E8%AE%BF%E9%97%AE%E5%AF%86%E9%92%A5%E3%80%81%E7%BD%91%E7%AB%99%E6%9D%A5%E6%BA%90%E4%BB%A5%E5%8F%8A%20Upstash%20Redis%20REST%20%E5%9C%B0%E5%9D%80%E5%92%8C%20Token%E3%80%82&envLink=https%3A%2F%2Fgithub.com%2Frime0506%2F0506%2Ftree%2Fmain%2Floopmessage-connector)

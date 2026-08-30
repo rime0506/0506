@@ -1,5 +1,9 @@
 # 0506
 
+## LoopMessage iMessage
+
+需要让网站角色通过真实 iMessage 收发消息时，请阅读 [LoopMessage iMessage 完整配置教程](./LOOPMESSAGE_IMESSAGE_USER_GUIDE.md)。教程包含 Sandbox、Upstash、Vercel 环境变量、Webhook、自动回复、记录管理与常见报错。
+
 ## 最新更新 (2026-02-05)
 
 ### ✨ 新增功能
